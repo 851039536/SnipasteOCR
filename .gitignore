@@ -364,3 +364,7 @@ FodyWeavers.xsd
 # local reference checkout
 _ref/
 
+
+# 运行期临时文件
+.pid.txt
+

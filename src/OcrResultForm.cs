@@ -39,6 +39,8 @@ public sealed class OcrResultForm : Form
     private readonly ToolStripLabel _zoomLabel = new();
     private readonly ToolStripButton _selectAll = new();
     private readonly ToolStripButton _copyAll = new();
+    private readonly ToolStripButton _copyCsv = new();
+    private readonly ToolStripButton _copyCsvComma = new();
     private readonly ToolStripButton _copySelection = new();
     private readonly ToolStripButton _saveImage = new();
     private readonly ToolStripButton _colsebtn = new();
@@ -118,6 +120,14 @@ public sealed class OcrResultForm : Form
         _copyAll.ToolTipText = "复制全部识别文本";
         _copyAll.Click += (_, _) => CopyText(GetAllText());
 
+        _copyCsv.Text = "复制表格";
+        _copyCsv.ToolTipText = "按坐标重建为表格 (制表符分隔), 可直接粘贴到 Excel";
+        _copyCsv.Click += (_, _) => CopyText(OcrText.ToCsv(CurrentLines(), '\t'));
+
+        _copyCsvComma.Text = "复制 CSV";
+        _copyCsvComma.ToolTipText = "导出为逗号分隔 CSV 文本";
+        _copyCsvComma.Click += (_, _) => CopyText(OcrText.ToCsv(CurrentLines(), ','));
+
         _saveImage.Text = "保存图片";
         _saveImage.ToolTipText = "保存截图为 PNG";
         _saveImage.Click += (_, _) => SaveImage();
@@ -135,6 +145,8 @@ public sealed class OcrResultForm : Form
         _toolStrip.Items.Add(_selectAll);
         _toolStrip.Items.Add(_copySelection);
         _toolStrip.Items.Add(_copyAll);
+        _toolStrip.Items.Add(_copyCsv);
+        _toolStrip.Items.Add(_copyCsvComma);
         _toolStrip.Items.Add(new ToolStripSeparator());
         _toolStrip.Items.Add(_saveImage);
         _toolStrip.Items.Add(new ToolStripSeparator());
@@ -703,12 +715,23 @@ public sealed class OcrResultForm : Form
 
     // ===== 文本 =====
 
+    /// <summary>是否按阅读顺序排序 (来自设置)</summary>
+    private bool _wordOrder = true;
+
+    /// <summary>当前结果转成可排序的行集合; 按设置决定是否重排</summary>
+    private IReadOnlyList<OcrText.Line> CurrentLines()
+    {
+        var rows = _lines.Where(l => !string.IsNullOrEmpty(l.Text)).Select(OcrText.ToLine).ToList();
+        return _wordOrder ? OcrText.SortReadingOrder(rows) : rows;
+    }
+
     /// <summary>全部识别文本 (换行拼接, 忽略空行)</summary>
     private string GetAllText()
     {
-        if (_lines.Length == 0)
+        var rows = CurrentLines();
+        if (rows.Count == 0)
             return string.Empty;
-        return string.Join("\n", _lines.Select(l => l.Text).Where(t => !string.IsNullOrWhiteSpace(t)));
+        return string.Join("\n", rows.Select(l => l.Text).Where(t => !string.IsNullOrWhiteSpace(t)));
     }
 
     /// <summary>当前选中的文本: 整行选中按行取, 行内部分选中取 [Start, End) 子串</summary>
@@ -821,6 +844,7 @@ public sealed class OcrResultForm : Form
                     if (token.IsCancellationRequested)
                         return;
                     _lines = result.Lines;
+                    _wordOrder = SettingsStore.Current.SortReadingOrder;
                     _selected.Clear();
                     _partial = null;
                     _lineCumW = BuildCharWeights(_lines);

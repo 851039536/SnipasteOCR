@@ -122,9 +122,17 @@ public static class User32
 
     // ===== 热键 =====
 
+    // RegisterHotKey 修饰符 (winuser.h)
+    public const uint MOD_ALT = 0x0001;
+    public const uint MOD_CONTROL = 0x0002;
+    public const uint MOD_SHIFT = 0x0004;
+    public const uint MOD_WIN = 0x0008;
+    /// <summary>阻止按键继续传递给下层窗口 (避免触发目标程序自身的快捷键)</summary>
+    public const uint MOD_NOREPEAT = 0x4000;
+
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    /// <summary>注册全局热键 (无修饰键, 仅 F1/F2 这类虚拟键)</summary>
+    /// <summary>注册全局热键 (fsModifiers 用 MOD_* 组合, vk 为虚拟键码)</summary>
     public static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
 
     [DllImport("user32.dll", SetLastError = true)]

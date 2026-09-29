@@ -1,4 +1,4 @@
-﻿namespace SnipasteOcr;
+namespace SnipasteOcr;
 
 /// <summary>
 /// 截图流程协调: 启动截图覆盖层, 结束后打开 OCR 窗口或把图片写入剪贴板
@@ -12,14 +12,14 @@ public static class SnipCoordinator
     internal static bool OverlayVisible => _openForms.OfType<SnipOverlayForm>().Any(o => o.IsHandleCreated && o.Visible);
     internal static Form? GetOverlay() => _openForms.OfType<SnipOverlayForm>().FirstOrDefault();
 
-    /// <summary>启动截图; ocr=true 确认后打开 OCR 窗口, 否则图片复制到剪贴板; 已有截图层时忽略</summary>
-    public static void Start(bool ocr)
+    /// <summary>启动截图; 已有截图层在用时忽略</summary>
+    public static void Start(SnipMode mode)
     {
         // 已有截图层在用时忽略
         if (_openForms.OfType<SnipOverlayForm>().Any())
             return;
 
-        var overlay = new SnipOverlayForm(ocr);
+        var overlay = new SnipOverlayForm(mode);
         _openForms.Add(overlay);
         overlay.FormClosed += (_, _) => _openForms.Remove(overlay);
         overlay.Show();

@@ -8,15 +8,15 @@ namespace SnipasteOcr;
 public sealed class SnipOverlayForm : Form
 {
     private readonly Bitmap _screen;
-    private readonly bool _useOcr;
+    private readonly SnipMode _mode;
     private Point _anchor;
     private bool _dragging;
     private Rectangle? _selection; // 客户区坐标
 
-    /// <summary>构造覆盖层并在显示前抓取整屏截图; useOcr 决定确认后走 OCR 还是复制图片</summary>
-    public SnipOverlayForm(bool useOcr)
+    /// <summary>构造覆盖层并在显示前抓取整屏截图; mode 决定确认后走 OCR 还是复制图片</summary>
+    public SnipOverlayForm(SnipMode mode)
     {
-        _useOcr = useOcr;
+        _mode = mode;
 
         // 先抓取屏幕 (必须在本窗体显示之前)
         Rectangle vs = SystemInformation.VirtualScreen;
@@ -73,7 +73,7 @@ public sealed class SnipOverlayForm : Form
         {
             // 未框选时底部提示
             using var font = new Font("Microsoft YaHei UI", 10f);
-            string hint = _useOcr ? "\u62d6\u62fd\u9009\u62e9\u533a\u57df  \u00b7  \u53cc\u51fb/\u56de\u8f66 \u786e\u8ba4  \u00b7  Esc \u53d6\u6d88" : "\u62d6\u62fd\u9009\u62e9\u533a\u57df  \u00b7  \u53cc\u51fb \u786e\u8ba4\u590d\u5236\u56fe\u7247  \u00b7  Esc \u53d6\u6d88";
+            string hint = _mode == SnipMode.Ocr ? "\u62d6\u62fd\u9009\u62e9\u533a\u57df  \u00b7  \u53cc\u51fb/\u56de\u8f66 \u786e\u8ba4  \u00b7  Esc \u53d6\u6d88" : "\u62d6\u62fd\u9009\u62e9\u533a\u57df  \u00b7  \u53cc\u51fb \u786e\u8ba4\u590d\u5236\u56fe\u7247  \u00b7  Esc \u53d6\u6d88";
             Size ts = TextRenderer.MeasureText(hint, font);
             Point pt = new((ClientSize.Width - ts.Width) / 2, ClientSize.Height - ts.Height - 18);
             using var bg = new SolidBrush(Color.FromArgb(190, 30, 30, 30));
@@ -191,7 +191,7 @@ public sealed class SnipOverlayForm : Form
 
         Close();
 
-        if (_useOcr)
+        if (_mode == SnipMode.Ocr)
         {
             var form = new OcrResultForm(crop);
 

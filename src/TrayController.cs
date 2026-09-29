@@ -18,6 +18,7 @@ public sealed class TrayController : IDisposable
     private const int CMD_EXIT = 0x1002;
     private const int CMD_MODEL_MEDIUM = 0x1003;
     private const int CMD_MODEL_TINY = 0x1004;
+    private const int CMD_HOTKEY_SETTINGS = 0x1005;
     private static readonly uint TRAY_CALLBACK = User32.WM_APP + 1;
 
     // 静态持有: 窗口过程委托必须防止被 GC; 单实例引用用于回调
@@ -38,6 +39,8 @@ public sealed class TrayController : IDisposable
     public event Action? ExitRequested;
     /// <summary>用户选择了模型档位 (由 Program 转交 OcrService.SetProfile)</summary>
     public event Action<OcrModelProfile>? ModelProfileRequested;
+    /// <summary>用户要求修改热键设置</summary>
+    public event Action? HotKeyChangeRequested;
 
     /// <summary>注册窗口类与宿主窗口, 创建右键菜单和托盘图标; 任一步失败抛 Win32Exception</summary>
     public TrayController()
@@ -86,6 +89,7 @@ public sealed class TrayController : IDisposable
         User32.AppendMenu(_hMenu, User32.MF_STRING, (IntPtr)CMD_SNIP_IMAGE, "仅截图 (F2)");
         User32.AppendMenu(_hMenu, User32.MF_SEPARATOR, IntPtr.Zero, null);
         User32.AppendMenu(_hMenu, User32.MF_STRING | User32.MF_POPUP, _hModelMenu, "识别模型");
+        User32.AppendMenu(_hMenu, User32.MF_STRING, (IntPtr)CMD_HOTKEY_SETTINGS, "热键设置…");
         User32.AppendMenu(_hMenu, User32.MF_SEPARATOR, IntPtr.Zero, null);
         User32.AppendMenu(_hMenu, User32.MF_STRING, (IntPtr)CMD_EXIT, "退出");
 
@@ -174,6 +178,9 @@ public sealed class TrayController : IDisposable
             case CMD_MODEL_TINY:
                 _instance?.ModelProfileRequested?.Invoke(OcrModelProfile.Tiny);
                 _instance?.SyncModelChecks();
+                break;
+            case CMD_HOTKEY_SETTINGS:
+                _instance?.HotKeyChangeRequested?.Invoke();
                 break;
             case CMD_EXIT: _instance?.ExitRequested?.Invoke(); break;
         }
