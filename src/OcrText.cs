@@ -29,28 +29,26 @@ public static class OcrText
     }
 
     /// <summary>
-    /// 按阅读顺序 (先上→下分行, 再左→右) 重排。
-    /// PaddleOCR 输出的顺序大体是检测顺序, 但多列/多栏时可能交叉, 这里显式排序。
-    /// 分行容差取该行高度的一半, 避免同一行的文字因基线微差被拆成两行。
+    /// 按纵向位置把文本块聚类成行, 行内按左边界排序。
+    ///
+    /// 这是「阅读顺序排序」与「表格/CSV 重建」共用的同一个分词行步骤 —— 两处若各写一份,
+    /// 一旦容差公式漂移, 同一批结果会在列表里是一行、到表格里变成两行。
+    /// 分行容差取该行平均高度的一半 (下限 2px), 避免同一行的文字因基线微差被拆开。
     /// </summary>
-    public static List<Line> SortReadingOrder(IReadOnlyList<Line> lines)
+    private static List<List<Line>> ClusterRows(IReadOnlyList<Line> lines)
     {
-        var valid = lines.Where(l => !string.IsNullOrWhiteSpace(l.Text)).ToList();
-        if (valid.Count <= 1)
-            return valid;
-
-        // 按纵向位置粗排
-        var byTop = valid.OrderBy(l => l.CenterY).ToList();
         var rows = new List<List<Line>>();
 
-        foreach (var line in byTop)
+        foreach (var line in lines.OrderBy(l => l.CenterY))
         {
-            // 找到纵向重叠足够大的已有行
             List<Line>? target = null;
             foreach (var row in rows)
             {
-                float refCenter = row.Average(x => x.CenterY);
-                float refHeight = row.Average(x => x.Height);
+                // 用 Average (double 累加) 而非 Sum/Count: 两者浮点结果并不逐位相同,
+                // 这里保持与重构前完全一致的数值行为, 不夹带未验证的语义变更。
+                // (旧 ToCsv 在比较里重复调用 Average, 现已与 SortReadingOrder 统一为每行算一次。)
+                float refCenter = (float)row.Average(x => x.CenterY);
+                float refHeight = (float)row.Average(x => x.Height);
                 float tolerance = Math.Max(2f, refHeight * 0.5f);
                 if (Math.Abs(line.CenterY - refCenter) <= tolerance)
                 {
@@ -58,16 +56,32 @@ public static class OcrText
                     break;
                 }
             }
+
             if (target is null)
                 rows.Add([line]);
             else
                 target.Add(line);
         }
 
-        // 行内按横坐标排序
-        var result = new List<Line>(valid.Count);
         foreach (var row in rows)
-            result.AddRange(row.OrderBy(l => l.Left));
+            row.Sort((a, b) => a.Left.CompareTo(b.Left));
+
+        return rows;
+    }
+
+    /// <summary>
+    /// 按阅读顺序 (先上→下分行, 再左→右) 重排。
+    /// PaddleOCR 输出的顺序大体是检测顺序, 但多列/多栏时可能交叉, 这里显式排序。
+    /// </summary>
+    public static List<Line> SortReadingOrder(IReadOnlyList<Line> lines)
+    {
+        var valid = lines.Where(l => !string.IsNullOrWhiteSpace(l.Text)).ToList();
+        if (valid.Count <= 1)
+            return valid;
+
+        var result = new List<Line>(valid.Count);
+        foreach (var row in ClusterRows(valid))
+            result.AddRange(row);
         return result;
     }
 
@@ -82,25 +96,8 @@ public static class OcrText
         if (valid.Count == 0)
             return string.Empty;
 
-        // 1) 纵向分行
-        var sortedRows = new List<List<Line>>();
-        foreach (var line in valid.OrderBy(l => l.CenterY).ToList())
-        {
-            List<Line>? target = null;
-            foreach (var row in sortedRows)
-            {
-                float tolerance = Math.Max(2f, row.Average(x => x.Height) * 0.5f);
-                if (Math.Abs(line.CenterY - row.Average(x => x.CenterY)) <= tolerance)
-                {
-                    target = row;
-                    break;
-                }
-            }
-            if (target is null) sortedRows.Add([line]);
-            else target.Add(line);
-        }
-        foreach (var row in sortedRows)
-            row.Sort((a, b) => a.Left.CompareTo(b.Left));
+        // 1) 纵向分行 (与阅读顺序排序共用同一实现)
+        var sortedRows = ClusterRows(valid);
 
         // 2) 横向分列: 收集所有"文本块左边界"作为列锚点 (容差取中位块高)
         float avgHeight = valid.Average(l => l.Height);

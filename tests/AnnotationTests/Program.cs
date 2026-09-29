@@ -185,5 +185,15 @@ foreach (var f in teFailures)
 Console.WriteLine($"编辑框检查: {tePassed} 通过, {teFailures.Count} 失败");
 
 Console.WriteLine();
+Console.WriteLine("--- OCR 后处理校验 ---");
+var (otPassed, otFailures) = OcrTextChecks.Run();
+foreach (var f in otFailures)
+{
+    Console.WriteLine("FAIL  " + f);
+    failures++;
+}
+Console.WriteLine($"OCR 后处理检查: {otPassed} 通过, {otFailures.Count} 失败");
+
+Console.WriteLine();
 Console.WriteLine(failures == 0 ? "全部通过" : $"{failures} 项失败");
 return failures == 0 ? 0 : 1;

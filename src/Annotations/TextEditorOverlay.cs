@@ -131,8 +131,8 @@ public sealed class TextEditorOverlay : Control
         var flags = TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix;
         var pt = new Point(PadX, PadY);
 
-        // 与 AnnotationEngine 一致: 深色描边保证可读
-        Color outline = Luminance(TextColor) > 140 ? Color.FromArgb(200, 0, 0, 0) : Color.FromArgb(200, 255, 255, 255);
+        // 与 AnnotationEngine 一致: 描边色由引擎统一决定, 保证编辑预览与最终烧录结果相同
+        Color outline = AnnotationEngine.OutlineColorFor(TextColor);
         for (int dx = -1; dx <= 1; dx++)
             for (int dy = -1; dy <= 1; dy++)
             {
@@ -247,9 +247,6 @@ public sealed class TextEditorOverlay : Control
         else
             Committed?.Invoke(text);
     }
-
-    /// <summary>颜色亮度 (0~255), 用于选择描边色</summary>
-    private static int Luminance(Color c) => (c.R * 299 + c.G * 587 + c.B * 114) / 1000;
 
     /// <summary>释放字体资源</summary>
     protected override void Dispose(bool disposing)

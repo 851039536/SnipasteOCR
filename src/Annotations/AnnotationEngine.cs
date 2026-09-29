@@ -385,7 +385,7 @@ public static class AnnotationEngine
         var flags = TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix;
 
         // TextRenderer 不支持描边, 用 8 方向偏移绘制深色来伪造描边
-        Color outline = GetOutlineColor(a.Color);
+        Color outline = OutlineColorFor(a.Color);
         for (int dx = -1; dx <= 1; dx++)
         {
             for (int dy = -1; dy <= 1; dy++)
@@ -400,12 +400,25 @@ public static class AnnotationEngine
         TextRenderer.DrawText(g, a.Text, font, new Point((int)pt.X, (int)pt.Y), a.Color, flags);
     }
 
-    /// <summary>按颜色亮度选择描边色 (深色文字配白边, 浅色文字配黑边)</summary>
-    private static Color GetOutlineColor(Color fill)
+    /// <summary>
+    /// 按填充色亮度选择文字描边色 (深色文字配白边, 浅色文字配黑边)。
+    ///
+    /// 公开给 <see cref="TextEditorOverlay"/> 使用: 编辑中的预览描边与最终烧录进图片的描边
+    /// 必须由同一处决定, 否则改了一边就会出现「编辑时看到的样子 ≠ 确认后的样子」。
+    /// </summary>
+    public static Color OutlineColorFor(Color fill)
     {
-        int lum = (fill.R * 299 + fill.G * 587 + fill.B * 114) / 1000;
-        return lum > 140 ? Color.FromArgb(200, 0, 0, 0) : Color.FromArgb(200, 255, 255, 255);
+        int lum = Luminance(fill);
+        return lum > OutlineLuminanceThreshold
+            ? Color.FromArgb(200, 0, 0, 0)
+            : Color.FromArgb(200, 255, 255, 255);
     }
+
+    /// <summary>亮度阈值: 高于该值视为浅色底, 描边改用黑色</summary>
+    private const int OutlineLuminanceThreshold = 140;
+
+    /// <summary>感知亮度 (0~255), ITU-R BT.601 权重</summary>
+    private static int Luminance(Color c) => (c.R * 299 + c.G * 587 + c.B * 114) / 1000;
 
     /// <summary>把起止点归一化为正矩形</summary>
     private static RectangleF Normalize(Annotation a) => RectangleF.FromLTRB(

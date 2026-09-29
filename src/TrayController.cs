@@ -82,8 +82,11 @@ public sealed class TrayController : IDisposable
         _hModelMenu = User32.CreatePopupMenu();
         if (_hModelMenu == IntPtr.Zero)
             throw new Win32Exception(Marshal.GetLastWin32Error(), "CreatePopupMenu(模型) 失败");
-        User32.AppendMenu(_hModelMenu, User32.MF_STRING, (IntPtr)CMD_MODEL_MEDIUM, "高精度 (Medium)");
-        User32.AppendMenu(_hModelMenu, User32.MF_STRING, (IntPtr)CMD_MODEL_TINY, "快速 (Tiny)");
+        // 显示名统一由 OcrService.DisplayName 提供 (与状态栏文案同源, 避免两处各写一份)
+        User32.AppendMenu(_hModelMenu, User32.MF_STRING, (IntPtr)CMD_MODEL_MEDIUM,
+            OcrService.DisplayName(OcrModelProfile.Medium));
+        User32.AppendMenu(_hModelMenu, User32.MF_STRING, (IntPtr)CMD_MODEL_TINY,
+            OcrService.DisplayName(OcrModelProfile.Tiny));
 
         User32.AppendMenu(_hMenu, User32.MF_STRING, (IntPtr)CMD_SNIP_OCR, "截图并识别 (F1)");
         User32.AppendMenu(_hMenu, User32.MF_STRING, (IntPtr)CMD_SNIP_IMAGE, "截图并标注 (F2)");
