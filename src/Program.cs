@@ -1,4 +1,4 @@
-﻿using System.Runtime.InteropServices;
+using System.Runtime.InteropServices;
 using SnipasteOcr.Native;
 
 namespace SnipasteOcr;
@@ -34,6 +34,8 @@ internal static class Program
             // 托盘图标 + 不可见宿主窗口; 全局热键也注册在该窗口上
             tray.SnipOcrRequested += () => SnipCoordinator.Start(ocr: true);
             tray.SnipImageRequested += () => SnipCoordinator.Start(ocr: false);
+            // 模型档位切换: 只登记请求, 真正的加载发生在下一次识别时 (后台线程)
+            tray.ModelProfileRequested += p => OcrService.Instance.SetProfile(p);
 
             IntPtr hwnd = tray.WindowHandle;
 

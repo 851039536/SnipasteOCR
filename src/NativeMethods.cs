@@ -45,6 +45,20 @@ public static class User32
     // ===== 菜单常量 =====
     public const uint MF_STRING = 0;
     public const uint MF_SEPARATOR = 0x800;
+    /// <summary>菜单项被选中 (配合 MF_RADIOCHECK 显示单选圆点)</summary>
+    public const uint MF_CHECKED = 0x00000008;
+    /// <summary>菜单项未选中</summary>
+    public const uint MF_UNCHECKED = 0x00000000;
+    /// <summary>显示单选圆点而非勾号</summary>
+    public const uint MF_RADIOCHECK = 0x00000200;
+    /// <summary>该项是子菜单: uIdNewItem 位置传子菜单句柄</summary>
+    public const uint MF_POPUP = 0x00000010;
+    /// <summary>禁用菜单项 (变灰不可点)</summary>
+    public const uint MF_GRAYED = 0x00000001;
+    /// <summary>按位置查找菜单项</summary>
+    public const uint MF_BYPOSITION = 0x00000400;
+    /// <summary>按命令 ID 查找菜单项</summary>
+    public const uint MF_BYCOMMAND = 0x00000000;
 
     // ===== 结构体 =====
 
@@ -168,6 +182,21 @@ public static class User32
     [return: MarshalAs(UnmanagedType.Bool)]
     /// <summary>销毁菜单</summary>
     public static extern bool DestroyMenu(IntPtr hMenu);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    /// <summary>
+    /// 在 [first..last] 位置区间内做单选互斥: 把 check 项标为圆点选中, 其余清空。
+    /// 用于托盘菜单的模型档位切换 (Medium / Tiny 二选一)。
+    /// </summary>
+    public static extern bool CheckMenuRadioItem(
+        IntPtr hMenu, uint idFirst, uint idLast, uint idCheck, uint uFlags);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    /// <summary>修改已存在菜单项的文本 (档位切换后用新名称刷新, 如追加当前档位)</summary>
+    public static extern bool ModifyMenu(
+        IntPtr hMenu, uint uPosition, uint uFlags, IntPtr uIDNewItem, string? lpNewItem);
 
     [DllImport("user32.dll", SetLastError = true)]
     /// <summary>在指定屏幕坐标弹出菜单并阻塞等待选择; TPM_RETURNCMD 时返回可见项位置(0基)</summary>

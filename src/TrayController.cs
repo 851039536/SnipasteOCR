@@ -1,4 +1,4 @@
-﻿using System.Runtime.InteropServices;
+using System.Runtime.InteropServices;
 using System.Diagnostics;
 using System.ComponentModel;
 using SnipasteOcr.Native;
@@ -16,6 +16,8 @@ public sealed class TrayController : IDisposable
     private const int CMD_SNIP_OCR = 0x1000;
     private const int CMD_SNIP_IMAGE = 0x1001;
     private const int CMD_EXIT = 0x1002;
+    private const int CMD_MODEL_MEDIUM = 0x1003;
+    private const int CMD_MODEL_TINY = 0x1004;
     private static readonly uint TRAY_CALLBACK = User32.WM_APP + 1;
 
     // 静态持有: 窗口过程委托必须防止被 GC; 单实例引用用于回调
@@ -25,6 +27,7 @@ public sealed class TrayController : IDisposable
     private readonly IntPtr _hwnd;
     private readonly IntPtr _hIcon;
     private readonly IntPtr _hMenu;
+    private readonly IntPtr _hModelMenu;
     private Icon? _icon;
 
     /// <summary>宿主窗口句柄 (热键也注册在这里)</summary>
@@ -33,6 +36,8 @@ public sealed class TrayController : IDisposable
     public event Action? SnipOcrRequested;
     public event Action? SnipImageRequested;
     public event Action? ExitRequested;
+    /// <summary>用户选择了模型档位 (由 Program 转交 OcrService.SetProfile)</summary>
+    public event Action<OcrModelProfile>? ModelProfileRequested;
 
     /// <summary>注册窗口类与宿主窗口, 创建右键菜单和托盘图标; 任一步失败抛 Win32Exception</summary>
     public TrayController()
@@ -70,10 +75,21 @@ public sealed class TrayController : IDisposable
                 Marshal.GetLastWin32Error(),
                 "CreatePopupMenu 失败");
         }
+        // 模型档位子菜单 (单选: Medium / Tiny)
+        _hModelMenu = User32.CreatePopupMenu();
+        if (_hModelMenu == IntPtr.Zero)
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "CreatePopupMenu(模型) 失败");
+        User32.AppendMenu(_hModelMenu, User32.MF_STRING, (IntPtr)CMD_MODEL_MEDIUM, "高精度 (Medium)");
+        User32.AppendMenu(_hModelMenu, User32.MF_STRING, (IntPtr)CMD_MODEL_TINY, "快速 (Tiny)");
+
         User32.AppendMenu(_hMenu, User32.MF_STRING, (IntPtr)CMD_SNIP_OCR, "截图并识别 (F1)");
         User32.AppendMenu(_hMenu, User32.MF_STRING, (IntPtr)CMD_SNIP_IMAGE, "仅截图 (F2)");
         User32.AppendMenu(_hMenu, User32.MF_SEPARATOR, IntPtr.Zero, null);
+        User32.AppendMenu(_hMenu, User32.MF_STRING | User32.MF_POPUP, _hModelMenu, "识别模型");
+        User32.AppendMenu(_hMenu, User32.MF_SEPARATOR, IntPtr.Zero, null);
         User32.AppendMenu(_hMenu, User32.MF_STRING, (IntPtr)CMD_EXIT, "退出");
+
+        SyncModelChecks();
 
         // 3. 托盘图标
         var nid = new Shell32.NOTIFYICONDATA
@@ -151,8 +167,36 @@ public sealed class TrayController : IDisposable
         {
             case CMD_SNIP_OCR: _instance?.SnipOcrRequested?.Invoke(); break;
             case CMD_SNIP_IMAGE: _instance?.SnipImageRequested?.Invoke(); break;
+            case CMD_MODEL_MEDIUM:
+                _instance?.ModelProfileRequested?.Invoke(OcrModelProfile.Medium);
+                _instance?.SyncModelChecks();
+                break;
+            case CMD_MODEL_TINY:
+                _instance?.ModelProfileRequested?.Invoke(OcrModelProfile.Tiny);
+                _instance?.SyncModelChecks();
+                break;
             case CMD_EXIT: _instance?.ExitRequested?.Invoke(); break;
         }
+    }
+
+    /// <summary>
+    /// 按当前档位刷新子菜单的单选圆点。
+    /// CheckMenuRadioItem 需要「命令 ID 连续」的区间, 这里两个 ID 是连续的。
+    /// </summary>
+    private void SyncModelChecks()
+    {
+        if (_hModelMenu == IntPtr.Zero)
+            return;
+
+        var current = OcrService.Instance.Profile;
+        uint checkId = (uint)(current == OcrModelProfile.Tiny ? CMD_MODEL_TINY : CMD_MODEL_MEDIUM);
+
+        User32.CheckMenuRadioItem(
+            _hModelMenu,
+            (uint)CMD_MODEL_MEDIUM,
+            (uint)CMD_MODEL_TINY,
+            checkId,
+            User32.MF_BYCOMMAND);
     }
 
     /// <summary>从嵌入 PNG 资源生成 32x32 托盘图标; 资源缺失时用蓝色方块占位</summary>
@@ -184,6 +228,7 @@ public sealed class TrayController : IDisposable
             uID = 1,
         };
         Shell32.Shell_NotifyIcon(Shell32.NIM_DELETE, ref nid);
+        // 子菜单句柄由 DestroyMenu(主菜单) 递归销毁, 无需单独调用
         User32.DestroyMenu(_hMenu);
         if (_hwnd != IntPtr.Zero)
             User32.DestroyWindow(_hwnd);
