@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    标注引擎的离线自检工程 (非产品代码)。
+    直接链接产品源码中的标注相关文件, 避免复制粘贴导致验证对象与实际代码不一致。
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWindowsForms>true</UseWindowsForms>
+    <RootNamespace>SnipasteOcr.Tests</RootNamespace>
+    <AssemblyName>AnnotationTests</AssemblyName>
+    <_SuppressWinFormsTrimError>true</_SuppressWinFormsTrimError>
+    <!-- 该工程只用于本地验证, 不参与 AOT 发布 -->
+    <PublishAot>false</PublishAot>
+    <IsAotCompatible>false</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\..\src\Annotations\Annotation.cs" Link="Engine\Annotation.cs" />
+    <Compile Include="..\..\src\Annotations\AnnotationTool.cs" Link="Engine\AnnotationTool.cs" />
+    <Compile Include="..\..\src\Annotations\AnnotationEngine.cs" Link="Engine\AnnotationEngine.cs" />
+    <Compile Include="..\..\src\Annotations\AnnotationHistory.cs" Link="Engine\AnnotationHistory.cs" />
+    <Compile Include="..\..\src\Annotations\AnnotationToolbar.cs" Link="Engine\AnnotationToolbar.cs" />
+    <Compile Include="..\..\src\Annotations\TextEditorOverlay.cs" Link="Engine\TextEditorOverlay.cs" />
+  </ItemGroup>
+
+</Project>

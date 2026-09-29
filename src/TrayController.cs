@@ -86,7 +86,7 @@ public sealed class TrayController : IDisposable
         User32.AppendMenu(_hModelMenu, User32.MF_STRING, (IntPtr)CMD_MODEL_TINY, "快速 (Tiny)");
 
         User32.AppendMenu(_hMenu, User32.MF_STRING, (IntPtr)CMD_SNIP_OCR, "截图并识别 (F1)");
-        User32.AppendMenu(_hMenu, User32.MF_STRING, (IntPtr)CMD_SNIP_IMAGE, "仅截图 (F2)");
+        User32.AppendMenu(_hMenu, User32.MF_STRING, (IntPtr)CMD_SNIP_IMAGE, "截图并标注 (F2)");
         User32.AppendMenu(_hMenu, User32.MF_SEPARATOR, IntPtr.Zero, null);
         User32.AppendMenu(_hMenu, User32.MF_STRING | User32.MF_POPUP, _hModelMenu, "识别模型");
         User32.AppendMenu(_hMenu, User32.MF_STRING, (IntPtr)CMD_HOTKEY_SETTINGS, "热键设置…");
@@ -104,7 +104,7 @@ public sealed class TrayController : IDisposable
             uFlags = Shell32.NIF_MESSAGE | Shell32.NIF_ICON | Shell32.NIF_TIP | Shell32.NIF_VERSION | Shell32.NIF_SHOWTIP,
             uCallbackMessage = TRAY_CALLBACK,
             hIcon = _hIcon,
-            szTip = "SnipasteOCR - F1 截图识别 / F2 截图",
+            szTip = "SnipasteOCR - F1 截图识别 / F2 截图标注",
             uVersion = 4,
         };
         Shell32.Shell_NotifyIcon(Shell32.NIM_SETVERSION, ref nid);

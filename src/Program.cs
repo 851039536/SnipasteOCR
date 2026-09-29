@@ -86,7 +86,7 @@ internal static class Program
 
                 MessageBox.Show(
                     $"热键已更新:\n  截图识别 = {HotKeyManager.Describe((uint)dlg.Modifiers, (uint)dlg.OcrKey)}\n" +
-                    $"  仅截图   = {HotKeyManager.Describe((uint)dlg.Modifiers, (uint)dlg.ImageKey)}",
+                    $"  截图标注 = {HotKeyManager.Describe((uint)dlg.Modifiers, (uint)dlg.ImageKey)}",
                     "SnipasteOCR", MessageBoxButtons.OK, MessageBoxIcon.Information);
             };
 

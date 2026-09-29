@@ -35,7 +35,7 @@ public sealed class HotKeyManager : IDisposable
         if (!TryRegister(Action.SnipOcr, (uint)modifiers, (uint)ocrVk, out string e1))
             failures.Add($"截图识别热键 ({Describe((uint)modifiers, (uint)ocrVk)}) 注册失败: {e1}");
         if (!TryRegister(Action.SnipImage, (uint)modifiers, (uint)imageVk, out string e2))
-            failures.Add($"仅截图热键 ({Describe((uint)modifiers, (uint)imageVk)}) 注册失败: {e2}");
+            failures.Add($"截图标注热键 ({Describe((uint)modifiers, (uint)imageVk)}) 注册失败: {e2}");
         return failures;
     }
 
