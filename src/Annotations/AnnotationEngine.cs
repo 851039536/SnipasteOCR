@@ -177,11 +177,8 @@ public static class AnnotationEngine
         headLen = MathF.Min(headLen, len * 0.5f); // 极短箭头时不至于整条线都是头
         float headWidth = headLen * 0.62f;
 
-        float ux = dx / len, uy = dy / len;      // 单位方向
-        float px = -uy, py = ux;                 // 法线
-
-        // 线段终点退到箭头底部, 避免线尖从三角里戳出来
-        var basePt = new PointF(a.End.X - ux * headLen, a.End.Y - uy * headLen);
+        if (ArrowGeometry.TryCreate(a.Start, a.End, headLen, headWidth) is not { } arrow)
+            return;
 
         // 先画白色外衬 (线 + 略大的三角), 再画本色
         using (var haloPen = new Pen(Color.FromArgb(150, 255, 255, 255), a.StrokeWidth + 2f)
@@ -191,7 +188,7 @@ public static class AnnotationEngine
         })
         using (var haloBrush = new SolidBrush(Color.FromArgb(150, 255, 255, 255)))
         {
-            DrawArrowBody(g, a.Start, basePt, a.End, px, py, headWidth, haloPen, haloBrush);
+            DrawArrowBody(g, a.Start, arrow, haloPen, haloBrush);
         }
 
         using (var pen = new Pen(a.Color, a.StrokeWidth)
@@ -201,29 +198,70 @@ public static class AnnotationEngine
         })
         using (var brush = new SolidBrush(a.Color))
         {
-            DrawArrowBody(g, a.Start, basePt, a.End, px, py, headWidth, pen, brush);
+            DrawArrowBody(g, a.Start, arrow, pen, brush);
         }
     }
 
     /// <summary>箭头线体 + 三角头 (抽出以便白色外衬与本色复用)</summary>
-    /// <param name="px">箭头方向法线的 X 分量 (单位向量)</param>
-    /// <param name="py">箭头方向法线的 Y 分量 (单位向量)</param>
     private static void DrawArrowBody(
-        Graphics g, PointF start, PointF basePt, PointF tip,
-        float px, float py, float headWidth,
+        Graphics g, PointF start, ArrowGeometry arrow,
         Pen pen, Brush brush)
     {
         // 线段只画到箭头底部, 避免线尖从三角里戳出来
-        g.DrawLine(pen, start, basePt);
+        g.DrawLine(pen, start, arrow.Base);
+        g.FillPolygon(brush, arrow.Triangle());
+    }
 
-        var tri = new[]
+    /// <summary>
+    /// 箭头几何: 由起点/终点与箭头长度推出三角头与线体所需的全部量。
+    ///
+    /// <see cref="AnnotationEngine"/> 画标注箭头、<see cref="AnnotationToolbar"/> 画工具图标箭头
+    /// 共用这一份推导, 避免"单位向量 → 法线 → 底点 → 三角"这段几何各写一遍导致走样。
+    /// </summary>
+    internal readonly struct ArrowGeometry
+    {
+        /// <summary>箭头所指的终点</summary>
+        public PointF Tip { get; init; }
+
+        /// <summary>三角头底边中点 (线体画到这里为止, 避免线尖从三角里戳出来)</summary>
+        public PointF Base { get; init; }
+
+        /// <summary>方向法线 (单位向量), 用于把底边向两侧张开</summary>
+        public PointF Normal { get; init; }
+
+        /// <summary>三角头底边半宽</summary>
+        public float HalfWidth { get; init; }
+
+        /// <summary>
+        /// 起止点重合 (或极近) 时返回 null。调用方必须判空 ——
+        /// 否则除以零长度会得到 NaN 坐标, GDI+ 绘制时静默画出垃圾或抛异常。
+        /// </summary>
+        public static ArrowGeometry? TryCreate(PointF start, PointF end, float headLength, float headWidth)
         {
-            tip,
-            new PointF(basePt.X + px * headWidth / 2f, basePt.Y + py * headWidth / 2f),
-            new PointF(basePt.X - px * headWidth / 2f, basePt.Y - py * headWidth / 2f),
-        };
+            float dx = end.X - start.X;
+            float dy = end.Y - start.Y;
+            float len = MathF.Sqrt(dx * dx + dy * dy);
+            if (len < 1f || float.IsNaN(len))
+                return null;
 
-        g.FillPolygon(brush, tri);
+            float ux = dx / len, uy = dy / len;
+
+            return new ArrowGeometry
+            {
+                Tip = end,
+                Base = new PointF(end.X - ux * headLength, end.Y - uy * headLength),
+                Normal = new PointF(-uy, ux),   // 法线 = 方向逆时针转 90 度
+                HalfWidth = headWidth / 2f,
+            };
+        }
+
+        /// <summary>三角头的三个顶点 (尖点 + 底边两侧)</summary>
+        public PointF[] Triangle() =>
+        [
+            Tip,
+            new PointF(Base.X + Normal.X * HalfWidth, Base.Y + Normal.Y * HalfWidth),
+            new PointF(Base.X - Normal.X * HalfWidth, Base.Y - Normal.Y * HalfWidth),
+        ];
     }
 
     /// <summary>画笔: 平滑折线 (带白色外衬)</summary>

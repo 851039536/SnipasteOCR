@@ -20,11 +20,7 @@ public static class OcrText
     /// <summary>把检测框转成轴对齐包围盒 (检测框是四边形, 可能带旋转)</summary>
     public static Line ToLine(PaddleOcrLine src)
     {
-        var b = src.Box;
-        float left = Math.Min(Math.Min(b.X1, b.X2), Math.Min(b.X3, b.X4));
-        float right = Math.Max(Math.Max(b.X1, b.X2), Math.Max(b.X3, b.X4));
-        float top = Math.Min(Math.Min(b.Y1, b.Y2), Math.Min(b.Y3, b.Y4));
-        float bottom = Math.Max(Math.Max(b.Y1, b.Y2), Math.Max(b.Y3, b.Y4));
+        var (left, top, right, bottom) = OcrBox.AxisAligned(src.Box);
         return new Line(src.Text ?? string.Empty, left, top, right, bottom);
     }
 

@@ -13,10 +13,22 @@ if (args.Contains("sample"))
 
 int failures = 0;
 
-void Check(bool cond, string name)
+// 顶层脚本的断言: 即时回显便于观察
+var runner = new CheckRunner(echo: true);
+void Check(bool cond, string name) => runner.Check(cond, name);
+
+// 跑一个子分组并把结果并进总数 (各分组输出格式统一, 避免重复的打印/累加样板)
+void RunGroup(string title, Func<(int Passed, List<string> Failures)> group)
 {
-    Console.WriteLine((cond ? "PASS  " : "FAIL  ") + name);
-    if (!cond) failures++;
+    Console.WriteLine();
+    Console.WriteLine($"--- {title} ---");
+    var (passed, fails) = group();
+    foreach (string f in fails)
+    {
+        Console.WriteLine("FAIL  " + f);
+        failures++;
+    }
+    Console.WriteLine($"{title}: {passed} 通过, {fails.Count} 失败");
 }
 
 // ===== 1. 几何: Bounds 归一化 (反向拖拽也应得到正矩形) =====
@@ -153,46 +165,11 @@ Check(s1.Width > 0 && s1.Height > 0, "文字度量返回正尺寸");
 var s2 = AnnotationEngine.MeasureText("", 18);
 Check(s2.Width == 0 && s2.Height == 0, "空文字度量返回 0");
 
-// ===== 11. 渲染结果的像素级校验 =====
-Console.WriteLine();
-Console.WriteLine("--- 渲染校验 ---");
-var (renderPassed, renderFailures) = RenderChecks.Run();
-foreach (var f in renderFailures)
-{
-    Console.WriteLine("FAIL  " + f);
-    failures++;
-}
-Console.WriteLine($"渲染检查: {renderPassed} 通过, {renderFailures.Count} 失败");
-
-Console.WriteLine();
-Console.WriteLine("--- 工具栏校验 ---");
-var (tbPassed, tbFailures) = ToolbarCheck.Run();
-foreach (var f in tbFailures)
-{
-    Console.WriteLine("FAIL  " + f);
-    failures++;
-}
-Console.WriteLine($"工具栏检查: {tbPassed} 通过, {tbFailures.Count} 失败");
-
-Console.WriteLine();
-Console.WriteLine("--- 文字编辑框校验 ---");
-var (tePassed, teFailures) = TextEditorChecks.Run();
-foreach (var f in teFailures)
-{
-    Console.WriteLine("FAIL  " + f);
-    failures++;
-}
-Console.WriteLine($"编辑框检查: {tePassed} 通过, {teFailures.Count} 失败");
-
-Console.WriteLine();
-Console.WriteLine("--- OCR 后处理校验 ---");
-var (otPassed, otFailures) = OcrTextChecks.Run();
-foreach (var f in otFailures)
-{
-    Console.WriteLine("FAIL  " + f);
-    failures++;
-}
-Console.WriteLine($"OCR 后处理检查: {otPassed} 通过, {otFailures.Count} 失败");
+// ===== 11. 分组校验 =====
+RunGroup("渲染校验", RenderChecks.Run);
+RunGroup("工具栏校验", ToolbarCheck.Run);
+RunGroup("文字编辑框校验", TextEditorChecks.Run);
+RunGroup("OCR 后处理校验", OcrTextChecks.Run);
 
 Console.WriteLine();
 Console.WriteLine(failures == 0 ? "全部通过" : $"{failures} 项失败");

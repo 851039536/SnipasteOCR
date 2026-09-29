@@ -12,14 +12,8 @@ internal static class OcrTextChecks
 {
     public static (int Passed, List<string> Failures) Run()
     {
-        int passed = 0;
-        var failures = new List<string>();
-
-        void Check(bool cond, string name)
-        {
-            if (cond) passed++;
-            else failures.Add(name);
-        }
+        var runner = new CheckRunner();
+        void Check(bool cond, string name) => runner.Check(cond, name);
 
         // ===== 1. ToLine: 四边形 -> 轴对齐包围盒 =====
         {
@@ -137,7 +131,59 @@ internal static class OcrTextChecks
             Check(got == "L1,R1,L2,R2", $"同高并列块按左到右 (实得 {got})");
         }
 
-        return (passed, failures);
+        // ===== 9. OcrBox: 四角展开与包围盒 (5 处调用点共用的基础) =====
+        {
+            // 带旋转的框: 左上(30,10) 右上(110,20) 右下(120,50) 左下(40,40)
+            var box = new PaddleOcrDetectionBox(30, 10, 110, 20, 120, 50, 40, 40, 1f);
+
+            var c = OcrBox.Corners(box);
+            Check(c.Length == 4, "Corners 返回 4 个顶点");
+            Check(Near(c[0].X, 30) && Near(c[0].Y, 10), "角点0 = (X1,Y1)");
+            Check(Near(c[1].X, 110) && Near(c[1].Y, 20), "角点1 = (X2,Y2)");
+            Check(Near(c[2].X, 120) && Near(c[2].Y, 50), "角点2 = (X3,Y3)");
+            Check(Near(c[3].X, 40) && Near(c[3].Y, 40), "角点3 = (X4,Y4)");
+
+            var (left, top, right, bottom) = OcrBox.AxisAligned(box);
+            Check(Near(left, 30) && Near(right, 120), $"AxisAligned 横向取极值 ({left}~{right})");
+            Check(Near(top, 10) && Near(bottom, 50), $"AxisAligned 纵向取极值 ({top}~{bottom})");
+
+            // 顶边/底边顺序必须"同向", 否则按同一参数 u 插值出来的高亮四边形会自交
+            var (t0, t1) = OcrBox.TopEdge(box);
+            var (b0, b1) = OcrBox.BottomEdge(box);
+            Check(Near(t0.X, 30) && Near(t1.X, 110), "TopEdge 顺序为 X1->X2");
+            Check(Near(b0.X, 40) && Near(b1.X, 120), "BottomEdge 顺序为 X4->X3 (与顶边同向)");
+            // 同向性: 顶边与底边向量应大致平行且不反向
+            bool sameDir = (t1.X - t0.X) * (b1.X - b0.X) + (t1.Y - t0.Y) * (b1.Y - b0.Y) > 0;
+            Check(sameDir, "顶边与底边同向 (u 插值不会自交)");
+        }
+
+        // ===== 10. OcrBox.Contains: 四边形内外判定 =====
+        {
+            // 轴对齐方框, 便于人工判断
+            var box = new PaddleOcrDetectionBox(10, 10, 90, 10, 90, 50, 10, 50, 1f);
+            Check(OcrBox.Contains(box, 50, 30), "中心点在框内");
+            Check(!OcrBox.Contains(box, 5, 30), "左侧框外点不在框内");
+            Check(!OcrBox.Contains(box, 95, 30), "右侧框外点不在框内");
+            Check(!OcrBox.Contains(box, 50, 5), "上方框外点不在框内");
+            Check(!OcrBox.Contains(box, 50, 55), "下方框外点不在框内");
+
+            // 旋转菱形: 包围盒内但菱形外的点必须判为不在框内 (与轴对齐判定区分开)
+            var diamond = new PaddleOcrDetectionBox(50, 0, 100, 50, 50, 100, 0, 50, 1f);
+            Check(OcrBox.Contains(diamond, 50, 50), "菱形中心在框内");
+            Check(!OcrBox.Contains(diamond, 12, 12), "菱形包围盒死角判定为不在框内");
+            Check(!OcrBox.Contains(diamond, 88, 88), "菱形另一侧死角判定为不在框内");
+        }
+
+        // ===== 11. ToLine 与 OcrBox.AxisAligned 一致 (两处不再各算一遍) =====
+        {
+            var rot = Det("r", 30, 10, 110, 20, 120, 50, 40, 40);
+            var line = OcrText.ToLine(rot);
+            var (l, t, r, b2) = OcrBox.AxisAligned(rot.Box);
+            Check(Near(line.Left, l) && Near(line.Top, t) && Near(line.Right, r) && Near(line.Bottom, b2),
+                "ToLine 与 AxisAligned 结果一致");
+        }
+
+        return runner.ToResult();
     }
 
     private static bool Near(float a, float b) => Math.Abs(a - b) < 0.01f;

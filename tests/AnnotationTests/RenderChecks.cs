@@ -12,14 +12,8 @@ internal static class RenderChecks
     /// <summary>执行全部渲染检查, 返回 (通过数, 失败项说明)</summary>
     public static (int Passed, List<string> Failures) Run()
     {
-        int passed = 0;
-        var failures = new List<string>();
-
-        void Check(bool cond, string name)
-        {
-            if (cond) passed++;
-            else failures.Add(name);
-        }
+        var runner = new CheckRunner();
+        void Check(bool cond, string name) => runner.Check(cond, name);
 
         // ===== 矩形: 四条边上都该有该颜色的像素, 内部不该有 =====
         {
@@ -207,6 +201,49 @@ internal static class RenderChecks
             Check(IsBlank(bmp, 100, 100), "退化标注不产生绘制");
         }
 
+        // ===== 箭头几何: 起点==终点必须返回 null, 绝不放行 NaN =====
+        // 回归: 工具栏图标原先自己算箭头几何且没有除零保护, 起止点重合会得到 NaN 坐标。
+        {
+            Check(AnnotationEngine.ArrowGeometry.TryCreate(new PointF(50, 50), new PointF(50, 50), 6f, 8f) is null,
+                "箭头起止点重合 -> 判为退化 (返回 null)");
+
+            // 极近但不完全相等: len < 1f 也应判退化
+            Check(AnnotationEngine.ArrowGeometry.TryCreate(new PointF(0, 0), new PointF(0.4f, 0.4f), 6f, 8f) is null,
+                "箭头长度 < 1px -> 判为退化");
+
+            // 正常箭头: 各分量必须是有限数 (无 NaN/Infinity)
+            var ok = AnnotationEngine.ArrowGeometry.TryCreate(new PointF(10, 10), new PointF(90, 60), 14f, 8.68f);
+            Check(ok is not null, "正常箭头可构造");
+            if (ok is { } geo)
+            {
+                bool finite = IsFinite(geo.Tip) && IsFinite(geo.Base) && IsFinite(geo.Normal);
+                foreach (var p in geo.Triangle()) finite &= IsFinite(p);
+                Check(finite, "箭头各顶点均为有限数 (无 NaN/Infinity)");
+
+                // 法线必须是单位向量
+                float nlen = MathF.Sqrt(geo.Normal.X * geo.Normal.X + geo.Normal.Y * geo.Normal.Y);
+                Check(Math.Abs(nlen - 1f) < 0.001f, $"法线是单位向量 (实得长度 {nlen:F4})");
+
+                // 三角头必须有 3 个顶点且包含尖点
+                var tri = geo.Triangle();
+                Check(tri.Length == 3 && tri[0] == geo.Tip, "三角头 3 个顶点且首点为尖点");
+            }
+        }
+
+        // ===== 退化箭头不产生 NaN 绘制 (整张图不该出现异常像素) =====
+        {
+            var bmp = Blank(120, 120);
+            Draw(bmp, new Annotation
+            {
+                Tool = AnnotationTool.Arrow,
+                Start = new PointF(60, 60),
+                End = new PointF(60, 60),
+                Color = Color.Red,
+                StrokeWidth = 3,
+            });
+            Check(IsBlank(bmp, 60, 60), "退化 (零长) 箭头不绘制任何像素");
+        }
+
         // ===== 空列表不抛异常 =====
         {
             var bmp = Blank(50, 50);
@@ -222,10 +259,13 @@ internal static class RenderChecks
             }
         }
 
-        return (passed, failures);
+        return runner.ToResult();
     }
 
     // ===== 辅助 =====
+
+    /// <summary>坐标是否为有限数 (排除 NaN / Infinity)</summary>
+    private static bool IsFinite(PointF p) => float.IsFinite(p.X) && float.IsFinite(p.Y);
 
     private static Bitmap Blank(int w, int h)
     {

@@ -30,6 +30,8 @@
     <!-- 本工程的测试代码 -->
     <Compile Include="InteractiveMain.cs" />
     <Compile Include="InteractiveCheck.cs" />
+    <!-- 与离线自检工程共用同一个断言收集器 (链接而非复制) -->
+    <Compile Include="..\AnnotationTests\CheckRunner.cs" Link="CheckRunner.cs" />
   </ItemGroup>
 
   <ItemGroup>

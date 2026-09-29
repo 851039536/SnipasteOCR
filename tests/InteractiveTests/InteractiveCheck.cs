@@ -14,14 +14,8 @@ internal static class InteractiveCheck
 
     public static (int Passed, List<string> Failures) Run()
     {
-        int passed = 0;
-        var failures = new List<string>();
-
-        void Check(bool cond, string name)
-        {
-            if (cond) passed++;
-            else failures.Add(name);
-        }
+        var runner = new CheckRunner();
+        void Check(bool cond, string name) => runner.Check(cond, name);
 
         Application.EnableVisualStyles();
 
@@ -33,8 +27,8 @@ internal static class InteractiveCheck
         }
         catch (Exception ex)
         {
-            failures.Add("构造 SnipOverlayForm 失败: " + ex.Message);
-            return (passed, failures);
+            runner.Check(false, "构造 SnipOverlayForm 失败: " + ex.Message);
+            return runner.ToResult();
         }
 
         using (form)
@@ -74,7 +68,7 @@ internal static class InteractiveCheck
 
             if (editor is null)
             {
-                return (passed, failures);
+                return runner.ToResult();
             }
 
             Check(editor.Parent is not null, "编辑框已挂到覆盖层上 (用于接收键盘输入)");
@@ -156,7 +150,7 @@ internal static class InteractiveCheck
             Check(toolbar.Tool == AnnotationTool.None, "选区外按下会退出标注工具 (恢复可重新框选)");
         }
 
-        return (passed, failures);
+        return runner.ToResult();
     }
 
     /// <summary>

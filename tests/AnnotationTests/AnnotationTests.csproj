@@ -28,6 +28,7 @@
     <Compile Include="..\..\src\Annotations\UiFont.cs" Link="Engine\UiFont.cs" />
     <!-- OCR 结果后处理 (纯函数): OcrText.cs 依赖 SDK 的检测框类型, 故需引用该包 -->
     <Compile Include="..\..\src\OcrText.cs" Link="Engine\OcrText.cs" />
+    <Compile Include="..\..\src\OcrBox.cs" Link="Engine\OcrBox.cs" />
   </ItemGroup>
 
   <ItemGroup>

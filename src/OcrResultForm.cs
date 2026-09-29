@@ -259,13 +259,8 @@ public sealed class OcrResultForm : Form
     {
         var ir = ImageRect();
         float dpi = DpiFactor();
-        return new[]
-        {
-            new PointF(((float)box.X1 * _scale + ir.X) / dpi, ((float)box.Y1 * _scale + ir.Y) / dpi),
-            new PointF(((float)box.X2 * _scale + ir.X) / dpi, ((float)box.Y2 * _scale + ir.Y) / dpi),
-            new PointF(((float)box.X3 * _scale + ir.X) / dpi, ((float)box.Y3 * _scale + ir.Y) / dpi),
-            new PointF(((float)box.X4 * _scale + ir.X) / dpi, ((float)box.Y4 * _scale + ir.Y) / dpi),
-        };
+        return [.. OcrBox.Corners(box).Select(p =>
+            new PointF((p.X * _scale + ir.X) / dpi, (p.Y * _scale + ir.Y) / dpi))];
     }
 
     // ===== 绘制 =====
@@ -388,24 +383,9 @@ public sealed class OcrResultForm : Form
         return -1;
     }
 
-    // 点在 4 边形内 (射线法)
+    // 点在 4 边形内 (射线法; 实现见 OcrBox.Contains)
     private static bool IsInBox(PaddleOcrDetectionBox box, float x, float y)
-    {
-        float[] xs = { box.X1, box.X2, box.X3, box.X4 };
-        float[] ys = { box.Y1, box.Y2, box.Y3, box.Y4 };
-        bool inside = false;
-        for (int i = 0, j = 3; i < 4; j = i++)
-        {
-            if ((ys[i] > y) != (ys[j] > y))
-            {
-                float t = (y - ys[j]) / (ys[i] - ys[j]);
-                float xi = xs[j] + t * (xs[i] - xs[j]);
-                if (x < xi)
-                    inside = !inside;
-            }
-        }
-        return inside;
-    }
+        => OcrBox.Contains(box, x, y);
 
     // ===== 字符定位: 检测框是 4 边形, 按字符宽度权重把字符投影到行内位置 =====
 
@@ -470,11 +450,16 @@ public sealed class OcrResultForm : Form
         }
         float uA = Math.Min(t0, t1), uB = Math.Max(t0, t1);
         // 插值点先算原图坐标再整体乘 _scale (与 BoxToClientPoints 一致); 旧写法只对偏移乘 scale, 非 1:1 时错位
-        PointF Top(float u) => new((((float)b.X1 + ((float)b.X2 - (float)b.X1) * u) * _scale + ir.X) / dpi,
-                                   (((float)b.Y1 + ((float)b.Y2 - (float)b.Y1) * u) * _scale + ir.Y) / dpi);
-        PointF Bot(float u) => new((((float)b.X4 + ((float)b.X3 - (float)b.X4) * u) * _scale + ir.X) / dpi,
-                                   (((float)b.Y4 + ((float)b.Y3 - (float)b.Y4) * u) * _scale + ir.Y) / dpi);
-        return new[] { Top(uA), Top(uB), Bot(uB), Bot(uA) };
+        var (topA, topB) = OcrBox.TopEdge(b);
+        var (botA, botB) = OcrBox.BottomEdge(b);
+        PointF Map(PointF p) => new((p.X * _scale + ir.X) / dpi, (p.Y * _scale + ir.Y) / dpi);
+        PointF Lerp(PointF a, PointF c, float u) =>
+            new(a.X + (c.X - a.X) * u, a.Y + (c.Y - a.Y) * u);
+        return
+        [
+            Map(Lerp(topA, topB, uA)), Map(Lerp(topA, topB, uB)),
+            Map(Lerp(botA, botB, uB)), Map(Lerp(botA, botB, uA)),
+        ];
     }
 
     /// <summary>左键按下: 空白处=清除选中/拖动窗口, 文本块上=Shift 多选 或 进入字符级拖选</summary>

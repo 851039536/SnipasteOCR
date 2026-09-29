@@ -11,14 +11,8 @@ internal static class TextEditorChecks
 {
     public static (int Passed, List<string> Failures) Run()
     {
-        int passed = 0;
-        var failures = new List<string>();
-
-        void Check(bool cond, string name)
-        {
-            if (cond) passed++;
-            else failures.Add(name);
-        }
+        var runner = new CheckRunner();
+        void Check(bool cond, string name) => runner.Check(cond, name);
 
         // 1. 构造后必须可见 (非 0 尺寸)
         var ed = new TextEditorOverlay(18f);
@@ -101,7 +95,7 @@ internal static class TextEditorChecks
         ed4.Dispose();
         ed5.Dispose();
 
-        return (passed, failures);
+        return runner.ToResult();
     }
 
     /// <summary>逐字符模拟键入</summary>

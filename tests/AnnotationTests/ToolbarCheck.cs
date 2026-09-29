@@ -10,14 +10,8 @@ internal static class ToolbarCheck
 {
     public static (int Passed, List<string> Failures) Run()
     {
-        int passed = 0;
-        var failures = new List<string>();
-
-        void Check(bool cond, string name)
-        {
-            if (cond) passed++;
-            else failures.Add(name);
-        }
+        var runner = new CheckRunner();
+        void Check(bool cond, string name) => runner.Check(cond, name);
 
         var tb = new AnnotationToolbar();
 
@@ -152,6 +146,6 @@ internal static class ToolbarCheck
 
         tb.Dispose();
         bmp.Dispose();
-        return (passed, failures);
+        return runner.ToResult();
     }
 }

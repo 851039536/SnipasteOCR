@@ -145,13 +145,14 @@ public sealed class AnnotationToolbar : Control
         g.SmoothingMode = SmoothingMode.AntiAlias;
         g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
 
-        // 背景 + 圆角
+        // 背景 + 圆角 (同一个路径对象同时用于填充与描边, 避免重复构造)
         using (var path = RoundedRect(ClientRectangle, 6))
-        using (var bg = new SolidBrush(BackColor))
-            g.FillPath(bg, path);
-        using (var border = new Pen(Color.FromArgb(70, 255, 255, 255), 1f))
-        using (var path = RoundedRect(ClientRectangle, 6))
+        {
+            using (var bg = new SolidBrush(BackColor))
+                g.FillPath(bg, path);
+            using var border = new Pen(Color.FromArgb(70, 255, 255, 255), 1f);
             g.DrawPath(border, path);
+        }
 
         _toolRects.Clear();
         _colorRects.Clear();
@@ -170,18 +171,7 @@ public sealed class AnnotationToolbar : Control
             bool active = Tool == tool;
             bool hover = _hoverTool == i;
 
-            if (active)
-            {
-                using var ab = new SolidBrush(Color.FromArgb(255, 33, 150, 243));
-                using var ap = RoundedRect(rect, 5);
-                g.FillPath(ab, ap);
-            }
-            else if (hover)
-            {
-                using var hb = new SolidBrush(Color.FromArgb(60, 255, 255, 255));
-                using var hp = RoundedRect(rect, 5);
-                g.FillPath(hb, hp);
-            }
+            DrawButtonBackdrop(g, rect, active, hover);
 
             DrawToolIcon(g, tool, rect, active ? Color.White : Color.FromArgb(230, 230, 230));
 
@@ -235,18 +225,7 @@ public sealed class AnnotationToolbar : Control
             _widthRects.Add((rect, Widths[i]));
 
             bool active = Math.Abs(CurrentWidth - Widths[i]) < 0.01f;
-            if (active)
-            {
-                using var ab = new SolidBrush(Color.FromArgb(255, 33, 150, 243));
-                using var ap = RoundedRect(rect, 5);
-                g.FillPath(ab, ap);
-            }
-            else if (_hoverWidth == i)
-            {
-                using var hb = new SolidBrush(Color.FromArgb(60, 255, 255, 255));
-                using var hp = RoundedRect(rect, 5);
-                g.FillPath(hb, hp);
-            }
+            DrawButtonBackdrop(g, rect, active, _hoverWidth == i);
 
             using (var pen = new Pen(active ? Color.White : Color.FromArgb(225, 225, 225), Widths[i]))
                 g.DrawLine(pen, rect.Left + 6, cy, rect.Right - 6, cy);
@@ -299,12 +278,8 @@ public sealed class AnnotationToolbar : Control
     /// </summary>
     private static void DrawIconButton(Graphics g, Rectangle rect, ToolbarIcon icon, bool enabled, bool hover)
     {
-        if (enabled && hover)
-        {
-            using var hb = new SolidBrush(Color.FromArgb(60, 255, 255, 255));
-            using var hp = RoundedRect(rect, 5);
-            g.FillPath(hb, hp);
-        }
+        // 图标按钮没有"选中"态, 只有可用时的高亮
+        DrawButtonBackdrop(g, rect, active: false, hover: enabled && hover);
 
         Color fg = enabled ? Color.FromArgb(235, 235, 235) : Color.FromArgb(100, 100, 100);
 
@@ -394,21 +369,15 @@ public sealed class AnnotationToolbar : Control
                 break;
 
             case AnnotationTool.Arrow:
-                // 从左上到右下的箭头
+                // 从左上到右下的箭头 (几何推导与标注箭头共用 ArrowGeometry)
                 var a = new PointF(cx - s, cy + s - 1);
                 var b = new PointF(cx + s - 1, cy - s + 1);
-                g.DrawLine(pen, a, b);
-                float dx = b.X - a.X, dy = b.Y - a.Y;
-                float len = MathF.Sqrt(dx * dx + dy * dy);
-                float ux = dx / len, uy = dy / len, px = -uy, py = ux;
-                float hl = 6f, hw = 4f;
-                var bp = new PointF(b.X - ux * hl, b.Y - uy * hl);
-                g.FillPolygon(brush,
-                [
-                    b,
-                    new PointF(bp.X + px * hw, bp.Y + py * hw),
-                    new PointF(bp.X - px * hw, bp.Y - py * hw),
-                ]);
+                // 图标起止点为常量, 正常不会退化; 仍判空以避免将来改动引入除零 NaN
+                if (AnnotationEngine.ArrowGeometry.TryCreate(a, b, headLength: 6f, headWidth: 8f) is { } ico)
+                {
+                    g.DrawLine(pen, a, ico.Base);   // 线体画到三角底部, 避免线尖从三角里戳出来
+                    g.FillPolygon(brush, ico.Triangle());
+                }
                 break;
 
             case AnnotationTool.Pen:
@@ -575,6 +544,24 @@ public sealed class AnnotationToolbar : Control
         CurrentColor = Palette[idx];
         ToolChanged?.Invoke();
         Invalidate();
+    }
+
+    /// <summary>
+    /// 绘制按钮底衬: 选中 = 蓝色圆角块, 悬停 = 半透明白圆角块, 其余不画。
+    /// 工具按钮/线宽按钮/图标按钮共用, 保证三类按钮的高亮观感一致。
+    /// </summary>
+    /// <param name="active">是否为当前选中项 (优先于悬停)</param>
+    private static void DrawButtonBackdrop(Graphics g, Rectangle rect, bool active, bool hover)
+    {
+        Color? fill = active
+            ? Color.FromArgb(255, 33, 150, 243)
+            : hover ? Color.FromArgb(60, 255, 255, 255) : null;
+        if (fill is not { } color)
+            return;
+
+        using var brush = new SolidBrush(color);
+        using var path = RoundedRect(rect, 5);
+        g.FillPath(brush, path);
     }
 
     /// <summary>圆角矩形路径</summary>
