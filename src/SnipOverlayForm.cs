@@ -1,5 +1,6 @@
 using System.Drawing.Drawing2D;
 using SnipasteOcr.Annotations;
+using SnipasteOcr.Native;
 
 namespace SnipasteOcr;
 
@@ -36,6 +37,12 @@ public sealed class SnipOverlayForm : Form
     private TextEditorOverlay? _editor;
     private PointF _textAnchorPhysical;
 
+    /// <summary>正在输入的文字内容 (由编辑控件同步, 绘制由本窗体负责)</summary>
+    private string? _editingText;
+
+    /// <summary>正在输入的文字颜色 (开始编辑时锁定, 避免中途换色导致重影)</summary>
+    private Color _editingColor = Color.FromArgb(255, 235, 59, 36);
+
     /// <summary>构造覆盖层并在显示前抓取整屏截图; mode 决定确认后走 OCR 还是复制图片</summary>
     public SnipOverlayForm(SnipMode mode)
     {
@@ -70,6 +77,56 @@ public sealed class SnipOverlayForm : Form
         Controls.Add(_toolbar);
 
         SyncToolbarState();
+    }
+
+    /// <summary>
+    /// 显示后强制抢到前台并取焦点。
+    ///
+    /// 这是本窗体的关键一步: <see cref="Form.Show"/> 只负责显示, 不会激活窗口。
+    /// 若不做这一步, 覆盖层虽然在最上层可见、鼠标也能操作, 但 <b>键盘焦点仍留在原程序</b>,
+    /// 表现为"能框选、能点工具栏, 但打字没反应"(文字全输进了别的窗口)。
+    ///
+    /// 后台进程直接调用 SetForegroundWindow 常被系统拒绝 (前台锁定), 因此这里用
+    /// AttachThreadInput 挂到当前前台线程, 借它的输入队列完成激活。
+    /// </summary>
+    protected override void OnShown(EventArgs e)
+    {
+        base.OnShown(e);
+        ForceActivate();
+    }
+
+    /// <summary>把本窗口强行置为前台并取得键盘焦点</summary>
+    private void ForceActivate()
+    {
+        if (!IsHandleCreated)
+            return;
+
+        Activate();
+        BringToFront();
+
+        IntPtr hwnd = Handle;
+        IntPtr fg = Foreground.GetForegroundWindow();
+        uint curThread = Kernel32.GetCurrentThreadId();
+        uint fgThread = fg == IntPtr.Zero ? 0 : Foreground.GetWindowThreadProcessId(fg, IntPtr.Zero);
+
+        bool attached = false;
+        if (fgThread != 0 && fgThread != curThread)
+            attached = Foreground.AttachThreadInput(curThread, fgThread, true);
+
+        try
+        {
+            User32.SetForegroundWindow(hwnd);
+            Foreground.SetFocus(hwnd);
+        }
+        finally
+        {
+            if (attached)
+                Foreground.AttachThreadInput(curThread, fgThread, false);
+        }
+
+        // 再走一遍 WinForms 的激活流程, 让 ActiveControl 正确建立
+        Activate();
+        Select();
     }
 
     /// <summary>物理像素/逻辑像素比例 (处理多显示器 DPI 缩放)</summary>
@@ -150,7 +207,7 @@ public sealed class SnipOverlayForm : Form
         else
         {
             // 未框选时底部提示
-            using var font = new Font("Microsoft YaHei UI", 10f);
+            using var font = UiFont.Create(14f);
             string hint = _mode == SnipMode.Ocr
                 ? "拖拽选择区域  ·  双击/回车 确认  ·  Esc 取消"
                 : "拖拽选择区域  ·  双击 确认复制图片  ·  Esc 取消";
@@ -182,6 +239,9 @@ public sealed class SnipOverlayForm : Form
 
             if (_pending is { } pending && !pending.IsDegenerate())
                 AnnotationEngine.Draw(g, [pending], _screen, physSel);
+
+            // 正在输入的文字: 直接画在窗体上, 不用子控件 (见 DrawEditingText 的说明)
+            DrawEditingText(g, physSel);
         }
         finally
         {
@@ -189,11 +249,51 @@ public sealed class SnipOverlayForm : Form
         }
     }
 
+    /// <summary>
+    /// 绘制"正在输入中"的文字。
+    ///
+    /// 为什么不把 <see cref="TextEditorOverlay"/> 当子控件显示:
+    /// 本窗体在 OnPaint 里整屏绘制底图, 而子控件透明背景依赖父窗口先画好背景再让子控件叠加。
+    /// 该协作在本窗体上不成立 —— 实测子控件被父窗口的整屏绘制覆盖, 屏幕上完全看不到输入内容
+    /// (全屏逐像素对比: 打字前后 0 像素差异)。
+    /// 因此这里改为: 编辑状态由 <see cref="_editingText"/> 保存, 文字由本窗体亲自绘制,
+    /// 输入仍由 TextEditorOverlay 接收键盘消息 (它作为不可见控件仅承担输入法/键盘角色)。
+    /// </summary>
+    private void DrawEditingText(Graphics g, RectangleF physSel)
+    {
+        if (_editingText is null || _editingText.Length == 0)
+            return;
+
+        var ann = new Annotation
+        {
+            Tool = AnnotationTool.Text,
+            Color = _editingColor,
+            FontSize = AnnotationEngine.DefaultFontSize * ScaleFactor,
+            Start = _textAnchorPhysical,
+            Text = _editingText,
+        };
+
+        // 只画在当前选区内 (与最终导出一致)
+        AnnotationEngine.Draw(g, [ann], _screen, physSel);
+
+        // 光标: 按最后一行文字宽度定位
+        using var font = UiFont.Create(AnnotationEngine.DefaultFontSize);
+        Size size = TextRenderer.MeasureText(_editingText, font,
+            new Size(int.MaxValue, int.MaxValue), TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
+
+        float caretX = _textAnchorPhysical.X + size.Width;
+        float caretTop = _textAnchorPhysical.Y;
+        float caretBottom = caretTop + MathF.Max(size.Height, font.Height);
+
+        using var pen = new Pen(Color.FromArgb(230, 255, 255, 255), MathF.Max(1f, ScaleFactor));
+        g.DrawLine(pen, caretX, caretTop, caretX, caretBottom);
+    }
+
     /// <summary>选区右上角的尺寸标签 (显示物理像素尺寸)</summary>
     private void DrawSizeLabel(Graphics g, Rectangle sel, float sf)
     {
         string label = $"{(int)Math.Round(sel.Width * sf)} \u00d7 {(int)Math.Round(sel.Height * sf)}";
-        using var font = new Font("Microsoft YaHei UI", 9f);
+        using var font = UiFont.Create(12f);
         Size ts = TextRenderer.MeasureText(label, font);
         float ly = sel.Top - ts.Height - 8;
         if (ly < 0) ly = sel.Top + 4;
@@ -259,11 +359,10 @@ public sealed class SnipOverlayForm : Form
         if (SelectionPhysical is { } sel && !sel.Contains(phys))
             return;
 
-        // 文字工具: 点击即创建编辑框, 不做拖拽
+        // 文字工具: 点击即开始输入, 不做拖拽
         if (_toolbar.Tool == AnnotationTool.Text)
         {
             CommitEditorIfOpen();
-            _textAnchorPhysical = phys;
             ShowTextEditor(phys);
             return;
         }
@@ -565,22 +664,34 @@ public sealed class SnipOverlayForm : Form
     // ===== 文字编辑 =====
 
     /// <summary>
-    /// 在指定物理位置弹出就地文字编辑框。
-    /// 编辑框是 WinForms 控件, 坐标为逻辑像素, 因此需要换算。
+    /// 在指定物理位置开始输入文字标注。
+    ///
+    /// 设计要点: 文字<b>显示</b>由本窗体的 OnPaint 负责 (<see cref="DrawEditingText"/>),
+    /// <see cref="TextEditorOverlay"/> 只作为"接收键盘输入"的载体存在 —— 因为本窗体
+    /// 整屏自绘背景, 透明子控件会被覆盖而完全看不见。
     /// </summary>
     private void ShowTextEditor(PointF phys)
     {
-        var logical = ToLogical(phys);
+        _textAnchorPhysical = phys;
+        _editingText = string.Empty;
+        _editingColor = _toolbar.CurrentColor;
 
         var editor = new TextEditorOverlay(AnnotationEngine.DefaultFontSize)
         {
             TextColor = _toolbar.CurrentColor,
-            Location = new Point((int)logical.X, (int)logical.Y),
         };
 
+        // 内容变化: 同步到 _editingText 并重绘窗体 (真正显示文字的地方)
         editor.ContentChanged += () =>
         {
-            // 编辑框长宽变化: 只需重绘父容器以刷新底衬
+            _editingText = editor.Value;
+            Invalidate();
+        };
+
+        // 编辑框自身的文本变化也可能不经过 ContentChanged (例如 Value 直接赋值), 这里再兜一层
+        editor.TextChanged += (_, _) =>
+        {
+            _editingText = editor.Value;
             Invalidate();
         };
 
@@ -589,12 +700,14 @@ public sealed class SnipOverlayForm : Form
             var ann = new Annotation
             {
                 Tool = AnnotationTool.Text,
-                Color = _toolbar.CurrentColor,
+                Color = _editingColor,
                 StrokeWidth = _toolbar.CurrentWidth,
                 Start = _textAnchorPhysical,
                 FontSize = AnnotationEngine.DefaultFontSize * ScaleFactor,
                 Text = text,
             };
+
+            _editingText = null;   // 先结束预览态, 避免与正式标注重影
 
             if (!ann.IsDegenerate())
             {
@@ -609,10 +722,19 @@ public sealed class SnipOverlayForm : Form
         editor.Cancelled += CloseEditor;
 
         _editor = editor;
+
+        // 不加入 Controls 树: 一旦作为可见子控件存在, 它就会被本窗体的整屏绘制覆盖。
+        // 用 AddOwnedForm/隐藏窗口的方式无法可靠收键盘, 因此这里把它放到屏幕外、尺寸最小,
+        // 只要它能拿到焦点即可 (焦点与可见性无关)。
+        editor.Location = new Point(-32000, -32000);
+        editor.Size = new Size(120, 30);
         Controls.Add(editor);
-        editor.BringToFront();
-        editor.ResizeToContent();
-        editor.Focus();
+
+        // 取焦点链: 覆盖层已是前台窗口 (见 ForceActivate), 这里把焦点交给编辑控件
+        editor.Select();
+        if (!editor.Focused)
+            editor.Focus();
+
         Invalidate();
     }
 
@@ -624,7 +746,7 @@ public sealed class SnipOverlayForm : Form
 
         // 先置空引用: Commit 回调里会调用 CloseEditor, 避免递归
         _editor = null;
-        ed.CommitNow();   // 触发 Committed/Cancelled → 内部走 CloseEditor
+        ed.CommitNow();   // 触发 Committed/Cancelled
         if (!ed.IsDisposed)
             CloseEditorCore(ed);
     }
@@ -633,7 +755,11 @@ public sealed class SnipOverlayForm : Form
     private void CloseEditor()
     {
         if (_editor is not { } ed)
+        {
+            _editingText = null;
+            Invalidate();
             return;
+        }
         _editor = null;   // 先清空引用, 避免 LostFocus 递归回调
         CloseEditorCore(ed);
     }
@@ -641,6 +767,7 @@ public sealed class SnipOverlayForm : Form
     /// <summary>移除并释放编辑框控件, 把焦点还给覆盖层</summary>
     private void CloseEditorCore(TextEditorOverlay ed)
     {
+        _editingText = null;
         Controls.Remove(ed);
         ed.Dispose();
         Focus();

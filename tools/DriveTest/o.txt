@@ -1,0 +1,23 @@
+启动 E:\programDevelopment\desktop\SnipasteOCR\src\bin\Debug\net10.0-windows\win-x64\SnipasteOcr.exe
+进程 PID=7060, HasExited=False
+[1] 发送 F2 触发热键...
+[2] 枚举覆盖层窗口...
+  候选窗口 hwnd=0x8C0870 class=WindowsForms10.Window.8.app.0.25df523_r3_ad1 size=3840x1080 rect=(-1920,0)-(1920,1080)
+    覆盖层 hwnd=0x8C0870
+[3] 拖拽框选 (-1720,200) -> (-1220,550)
+[4] 点击文字工具按钮 @(-1505,579)
+[5] 在选区内点击 @(-1570,320)
+[6] 前台窗口=0x8C0870 (pid=7060, overlay=0x8C0870 pid=7060)
+    焦点控件=0x150F6E class=WindowsForms10.Window.8.app.0.25df523_r3_ad1
+    *** 前台是否为覆盖层: True ***
+    *** 焦点是否属于本进程: True ***
+    已保存 before_type.png
+[7] 输入文字 '测试ABC'
+    已保存 after_type.png
+[7b] 用 PrintWindow 抓取覆盖层内容...
+    PrintWindow 成功=True -> E:\programDevelopment\desktop\SnipasteOCR\tools\DriveTest\bin\Debug\net10.0-windows\overlay_content.png
+[8] 回车提交
+    提交后覆盖层是否仍可见: True
+    已保存 after_enter.png
+    已保存 final.png
+完成

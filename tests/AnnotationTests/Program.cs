@@ -11,12 +11,6 @@ if (args.Contains("sample"))
     return 0;
 }
 
-if (args.Contains("text"))
-{
-    TextEditorDiag.Run();
-    return 0;
-}
-
 int failures = 0;
 
 void Check(bool cond, string name)
@@ -179,6 +173,16 @@ foreach (var f in tbFailures)
     failures++;
 }
 Console.WriteLine($"工具栏检查: {tbPassed} 通过, {tbFailures.Count} 失败");
+
+Console.WriteLine();
+Console.WriteLine("--- 文字编辑框校验 ---");
+var (tePassed, teFailures) = TextEditorChecks.Run();
+foreach (var f in teFailures)
+{
+    Console.WriteLine("FAIL  " + f);
+    failures++;
+}
+Console.WriteLine($"编辑框检查: {tePassed} 通过, {teFailures.Count} 失败");
 
 Console.WriteLine();
 Console.WriteLine(failures == 0 ? "全部通过" : $"{failures} 项失败");

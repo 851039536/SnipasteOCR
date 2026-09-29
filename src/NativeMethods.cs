@@ -322,6 +322,10 @@ public static class Foreground
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    /// <summary>把键盘焦点设到指定窗口 (须与 SetForegroundWindow 配合; 只对同线程窗口或已挂接线程有效)</summary>
+    public static extern IntPtr SetFocus(IntPtr hWnd);
 }
 
 public static class CursorPos

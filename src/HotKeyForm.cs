@@ -1,3 +1,4 @@
+using SnipasteOcr.Annotations;
 using SnipasteOcr.Native;
 
 namespace SnipasteOcr;
@@ -29,7 +30,7 @@ public sealed class HotKeyForm : Form
         MinimizeBox = false;
         ShowInTaskbar = true;
         ClientSize = new Size(430, 224);
-        Font = new Font("Microsoft YaHei UI", 9f);
+        Font = UiFont.Create(12f);
 
         var tip = new Label
         {

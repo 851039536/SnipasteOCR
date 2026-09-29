@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    交互式验证工程 (非产品代码): 构造真实的 SnipOverlayForm 等窗体,
+    覆盖"焦点链 / 键盘分发 / 标注提交 / 文字可见性"这类纯离屏测试碰不到的路径。
+    需要可用的桌面会话 (会真正创建窗口并抓屏)。
+
+    链接产品源码全量编译, 保证验证对象就是实际出货代码。
+    注意: 排除产品入口 Program.cs, 否则会与本工程自己的 Main 冲突。
+  -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWindowsForms>true</UseWindowsForms>
+    <RootNamespace>SnipasteOcr.InteractiveTests</RootNamespace>
+    <AssemblyName>InteractiveTests</AssemblyName>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <!-- 该工程只用于本地验证, 不参与 AOT 发布 -->
+    <PublishAot>false</PublishAot>
+    <IsAotCompatible>false</IsAotCompatible>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 产品全部源码 (排除入口, 由本工程提供 Main) -->
+    <Compile Include="..\..\src\**\*.cs" Exclude="..\..\src\Program.cs;..\..\src\obj\**;..\..\src\bin\**" />
+    <!-- 本工程的测试代码 -->
+    <Compile Include="InteractiveMain.cs" />
+    <Compile Include="InteractiveCheck.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Sdcb.SimdPaddleOCR" Version="1.4.2" />
+    <PackageReference Include="Sdcb.SimdPaddleOCR.Models.ChineseV6Medium" Version="1.0.0" />
+    <PackageReference Include="Sdcb.SimdPaddleOCR.Models.ChineseV6Tiny" Version="1.0.0" />
+    <PackageReference Include="Sdcb.SimdPaddleOCR.Models.TextLineOrientation" Version="1.0.0" />
+  </ItemGroup>
+
+</Project>

@@ -21,9 +21,6 @@ public static class AnnotationEngine
     /// <summary>文字默认字号 (物理像素)</summary>
     public const float DefaultFontSize = 18f;
 
-    /// <summary>用于文字度量的字体族 (与绘制保持一致)</summary>
-    private const string FontFamilyName = "Microsoft YaHei UI";
-
     // ===== 文字度量 =====
 
     /// <summary>
@@ -51,12 +48,8 @@ public static class AnnotationEngine
         return new SizeF(width, lineHeight * lines.Length);
     }
 
-    /// <summary>创建标注用字体 (带缓存以复用 GDI 字体句柄)</summary>
-    private static Font CreateFont(float size)
-    {
-        // Font 本身很轻 (GDI+ 有内部缓存), 这里不再自建缓存以免管理句柄生命周期
-        return new Font(FontFamilyName, size, FontStyle.Regular, GraphicsUnit.Pixel);
-    }
+    /// <summary>创建标注用字体 (统一走 UiFont 解析, 避免字体缺失时静默回退)</summary>
+    private static Font CreateFont(float size) => UiFont.Create(size);
 
     // ===== 绘制入口 =====
 

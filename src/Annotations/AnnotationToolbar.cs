@@ -259,11 +259,11 @@ public sealed class AnnotationToolbar : Control
 
         // ---- 撤销 / 重做 ----
         _undoRect = new Rectangle(x, (Height - ButtonSize) / 2, ButtonSize, ButtonSize);
-        DrawActionButton(g, _undoRect, "\u21b6", CanUndo, _hoverActionKey == "undo");
+        DrawIconButton(g, _undoRect, ToolbarIcon.Undo, CanUndo, _hoverActionKey == "undo");
         x += ButtonSize + Gap;
 
         _redoRect = new Rectangle(x, (Height - ButtonSize) / 2, ButtonSize, ButtonSize);
-        DrawActionButton(g, _redoRect, "\u21b7", CanRedo, _hoverActionKey == "redo");
+        DrawIconButton(g, _redoRect, ToolbarIcon.Redo, CanRedo, _hoverActionKey == "redo");
         x += ButtonSize + Gap;
 
         x += SepWidth - Gap;
@@ -282,8 +282,22 @@ public sealed class AnnotationToolbar : Control
         DrawTextButton(g, _cancelRect, "取消", Color.FromArgb(70, 72, 78), _hoverActionKey == "cancel");
     }
 
-    /// <summary>绘制一个操作型圆角按钮 (图标或文字)</summary>
-    private static void DrawActionButton(Graphics g, Rectangle rect, string glyph, bool enabled, bool hover)
+    /// <summary>工具栏上用矢量绘制的图标类型</summary>
+    private enum ToolbarIcon
+    {
+        Undo,
+        Redo,
+    }
+
+    /// <summary>
+    /// 绘制图标按钮。
+    ///
+    /// 图标<b>全部矢量绘制, 不使用字体</b>: 原先用 "<c>↶</c>"/"<c>↷</c>"(U+21B6/U+21B7) 配合
+    /// "Segoe UI Symbol", 但实测该字体在本机不存在(回退到 Microsoft Sans Serif), 且
+    /// 这两个码位在本机所有字体中都<b>没有字形</b> —— 渲染结果为 0 像素, 按钮一片空白。
+    /// 改为矢量绘制后既不受字体缺失影响, 任意 DPI 下也保持清晰。
+    /// </summary>
+    private static void DrawIconButton(Graphics g, Rectangle rect, ToolbarIcon icon, bool enabled, bool hover)
     {
         if (enabled && hover)
         {
@@ -293,10 +307,40 @@ public sealed class AnnotationToolbar : Control
         }
 
         Color fg = enabled ? Color.FromArgb(235, 235, 235) : Color.FromArgb(100, 100, 100);
-        using var font = new Font("Segoe UI Symbol", 13f, FontStyle.Regular, GraphicsUnit.Pixel);
-        Size ts = TextRenderer.MeasureText(glyph, font);
-        TextRenderer.DrawText(g, glyph, font,
-            new Point(rect.X + (rect.Width - ts.Width) / 2, rect.Y + (rect.Height - ts.Height) / 2), fg);
+
+        int cx = rect.X + rect.Width / 2;
+        int cy = rect.Y + rect.Height / 2;
+        const float r = 8f;   // 圆弧半径
+        const float stroke = 2f;
+
+        using var pen = new Pen(fg, stroke)
+        {
+            StartCap = LineCap.Round,
+            EndCap = LineCap.Round,
+        };
+
+        // 撤销: 逆时针圆弧 + 左向箭头; 重做: 顺时针圆弧 + 右向箭头
+        bool redo = icon == ToolbarIcon.Redo;
+        var arcRect = new RectangleF(cx - r, cy - r + 2, r * 2, r * 2);
+
+        // 圆弧: 从左端点绕到右上 (撤销取 180°->340°, 重做取 200°->0° 的镜像)
+        float startAngle = redo ? 200f : 160f;
+        float sweep = redo ? 160f : -160f;
+        g.DrawArc(pen, arcRect, startAngle, sweep);
+
+        // 箭头: 圆弧起点处画一个三角, 指向左(撤销)/右(重做)
+        float rad = startAngle * MathF.PI / 180f;
+        float ax = cx + r * MathF.Cos(rad);
+        float ay = cy + 2 + r * MathF.Sin(rad);
+        float dir = redo ? 1f : -1f;
+
+        using var brush = new SolidBrush(fg);
+        g.FillPolygon(brush,
+        [
+            new PointF(ax + dir * 4f, ay),
+            new PointF(ax - dir * 3f, ay - 4.5f),
+            new PointF(ax - dir * 3f, ay + 4.5f),
+        ]);
     }
 
     /// <summary>绘制文字按钮 (带底色)</summary>
@@ -307,7 +351,7 @@ public sealed class AnnotationToolbar : Control
         using (var p = RoundedRect(rect, 5))
             g.FillPath(b, p);
 
-        using var font = new Font("Microsoft YaHei UI", 12f, FontStyle.Regular, GraphicsUnit.Pixel);
+        using var font = UiFont.Create(12f);
         Size ts = TextRenderer.MeasureText(text, font);
         TextRenderer.DrawText(g, text, font,
             new Point(rect.X + (rect.Width - ts.Width) / 2, rect.Y + (rect.Height - ts.Height) / 2), Color.White);

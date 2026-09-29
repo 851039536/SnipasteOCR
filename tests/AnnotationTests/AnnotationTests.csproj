@@ -25,6 +25,7 @@
     <Compile Include="..\..\src\Annotations\AnnotationHistory.cs" Link="Engine\AnnotationHistory.cs" />
     <Compile Include="..\..\src\Annotations\AnnotationToolbar.cs" Link="Engine\AnnotationToolbar.cs" />
     <Compile Include="..\..\src\Annotations\TextEditorOverlay.cs" Link="Engine\TextEditorOverlay.cs" />
+    <Compile Include="..\..\src\Annotations\UiFont.cs" Link="Engine\UiFont.cs" />
   </ItemGroup>
 
 </Project>

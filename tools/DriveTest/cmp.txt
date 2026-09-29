@@ -1,0 +1,9 @@
+启动 E:\programDevelopment\desktop\SnipasteOCR\src\bin\Debug\net10.0-windows\win-x64\SnipasteOcr.exe
+before_type: 3840x1080
+after_type : 3840x1080
+全屏逐像素比较 (LockBits)...
+差异像素数: 0
+!! 打字前后全屏完全相同 -> 打字没有任何可见效果
+
+红色文字色像素: before=665, after=665
+after_enter 尺寸: 3840x1080

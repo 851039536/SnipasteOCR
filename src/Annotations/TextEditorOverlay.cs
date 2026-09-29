@@ -42,12 +42,19 @@ public sealed class TextEditorOverlay : Control
     private const int PadX = 4;
     private const int PadY = 3;
 
+    /// <summary>光标占位宽度 (留出竖线空间, 输入时框体不会贴住最后一个字)</summary>
+    private const int CaretSlack = 4;
+
+    /// <summary>最小可见尺寸: 空编辑器也必须 > 0, 否则 WinForms 视其为不可见</summary>
+    private const int MinWidth = 40;
+    private const int MinHeight = 24;
+
     public TextEditorOverlay(float fontSizeLogical)
     {
         FontSize = fontSizeLogical;
 
         // 用固定字号创建字体; 缩放通过 FontSize 在构造时确定
-        _font = new Font("Microsoft YaHei UI", fontSizeLogical, FontStyle.Regular, GraphicsUnit.Pixel);
+        _font = UiFont.Create(fontSizeLogical);
 
         SetStyle(
             ControlStyles.AllPaintingInWmPaint |
@@ -59,6 +66,10 @@ public sealed class TextEditorOverlay : Control
 
         // 获得焦点以接收键盘输入
         TabStop = true;
+
+        // 关键: 构造时就给出可见尺寸。否则控件为 0x0, WinForms 不会绘制它,
+        // 用户点完文字工具后看不到任何反馈。
+        ResizeToContent();
     }
 
     /// <summary>当前文本</summary>
@@ -76,19 +87,28 @@ public sealed class TextEditorOverlay : Control
     }
 
     /// <summary>
-    /// 按当前文本重新计算控件尺寸 (随输入增长, 上限为父容器宽度)
+    /// 按当前文本重新计算控件尺寸 (随输入增长)。
+    ///
+    /// 注意: 必须保证结果 <b>永不为 0</b> —— WinForms 视 0 尺寸控件为不可见,
+    /// 空文本时会呈现"点了没反应"的效果。
+    /// 度量统一用 <see cref="TextRenderer"/> (GDI), 与 <see cref="OnPaint"/> 的绘制方式一致;
+    /// 若这里用 Graphics.MeasureString (GDI+), 会带额外内边距导致光标位置偏移。
     /// </summary>
     public void ResizeToContent()
     {
-        using var g = CreateGraphics();
         string measure = _text.Length == 0 ? " " : _text;
-        SizeF size = g.MeasureString(measure, _font);
+        Size size = TextRenderer.MeasureText(measure, _font,
+            new Size(int.MaxValue, int.MaxValue), TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
 
-        int w = (int)Math.Ceiling(size.Width) + PadX * 2 + 4;  // +4 留给光标
-        int h = (int)Math.Ceiling(size.Height) + PadY * 2;
+        int w = size.Width + PadX * 2 + CaretSlack;
+        int h = Math.Max(size.Height, _font.Height) + PadY * 2;
 
-        Size = new Size(Math.Max(w, 30), Math.Max(h, _font.Height + PadY * 2));
+        // 下限保证空编辑器也可见可点
+        Size = new Size(Math.Max(w, MinWidth), Math.Max(h, MinHeight));
+
+        // 这里是所有文本变更的唯一必经之路 (输入/退格/赋值), 因此统一在此通知宿主
         ContentChanged?.Invoke();
+        OnTextChanged(EventArgs.Empty);
     }
 
     /// <summary>编辑器当前的逻辑矩形 (供宿主更新 _textAnchor)</summary>
@@ -121,10 +141,15 @@ public sealed class TextEditorOverlay : Control
             }
         TextRenderer.DrawText(g, _text, _font, pt, TextColor, flags);
 
-        // 光标: 文本末尾的竖线 (用 MeasureString 定位以匹配比例字体)
-        SizeF measured = g.MeasureString(_text, _font);
-        int caretX = PadX + (int)measured.Width;
+        // 光标: 文本末尾的竖线。
+        // 必须用 TextRenderer 度量 (与上面的绘制同一套 GDI 度量),
+        // 若改用 Graphics.MeasureString 会带 GDI+ 额外内边距, 导致光标偏离字尾。
+        Size textSize = TextRenderer.MeasureText(
+            _text.Length == 0 ? " " : _text, _font,
+            new Size(int.MaxValue, int.MaxValue), flags);
+        int caretX = PadX + textSize.Width;
         if (caretX < PadX) caretX = PadX;
+        if (caretX > Width - 2) caretX = Math.Max(PadX, Width - 2);
 
         using var caret = new Pen(Color.White, 1.5f);
         g.DrawLine(caret, caretX, PadY, caretX, Height - PadY);

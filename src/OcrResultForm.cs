@@ -1,5 +1,6 @@
 using System.Drawing.Drawing2D;
 using System.Numerics;
+using SnipasteOcr.Annotations;
 using SnipasteOcr.Native;
 using Sdcb.SimdPaddleOCR;
 
@@ -342,7 +343,7 @@ public sealed class OcrResultForm : Form
     {
         if (string.IsNullOrEmpty(_statusText))
             return;
-        using var font = new Font("Microsoft YaHei UI", 9f);
+        using var font = UiFont.Create(12f);
         Size ts = TextRenderer.MeasureText(_statusText, font);
         int padX = 10, padY = 4;
         int bw = ts.Width + padX * 2, bh = ts.Height + padY * 2;
