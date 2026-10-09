@@ -24,4 +24,40 @@ public static class SnipCoordinator
         overlay.FormClosed += (_, _) => _openForms.Remove(overlay);
         overlay.Show();
     }
+
+    /// <summary>
+    /// 识别剪贴板中的图片 (不经过截图层)。
+    /// 复用 <see cref="OcrResultForm"/>, 因此结果窗口的选词/复制/导出行为与截图路径完全一致 ——
+    /// 这正是"同一逻辑只写一份"的体现: 这里只负责取图, 识别与展示都交给既有组件。
+    /// </summary>
+    /// <returns>是否成功取到图片并打开了结果窗口; false 表示剪贴板里没有图片</returns>
+    public static bool StartFromClipboard()
+    {
+        // 剪贴板可能被其它进程独占, GetImage 会抛 ExternalException, 必须兜住
+        Image? img = null;
+        try
+        {
+            if (Clipboard.ContainsImage())
+                img = Clipboard.GetImage();
+        }
+        catch
+        {
+            img = null;
+        }
+
+        if (img is null)
+            return false;
+
+        // OcrResultForm 会持有并使用该位图, 因此不在这里 Dispose;
+        // 转成 Bitmap 以统一类型 (GetImage 可能返回其它 Image 派生类)
+        Bitmap bmp = img as Bitmap ?? new Bitmap(img);
+        if (!ReferenceEquals(bmp, img))
+            img.Dispose();
+
+        var form = new OcrResultForm(bmp);
+        _openForms.Add(form);
+        form.FormClosed += (_, _) => _openForms.Remove(form);
+        form.Show();
+        return true;
+    }
 }

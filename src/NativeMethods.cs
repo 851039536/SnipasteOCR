@@ -200,6 +200,14 @@ public static class User32
     public static extern bool CheckMenuRadioItem(
         IntPtr hMenu, uint idFirst, uint idLast, uint idCheck, uint uFlags);
 
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    /// <summary>
+    /// 设置/清除单个菜单项的勾选 (复选项用, 配合 MF_BYCOMMAND + MF_CHECKED/MF_UNCHECKED)。
+    /// 与 <see cref="CheckMenuRadioItem"/> 的区别: 前者是区间内单选, 本方法是单项独立复选。
+    /// </summary>
+    public static extern bool CheckMenuItem(IntPtr hMenu, uint uIDCheckItem, uint uCheck);
+
     [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     [return: MarshalAs(UnmanagedType.Bool)]
     /// <summary>

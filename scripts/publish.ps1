@@ -31,7 +31,7 @@
     但 LNK1104 会原样复现。
 
 .PARAMETER SelfTest
-    发布后运行离线自检 (tests/AnnotationTests, 142 项, 无需桌面会话)。
+    发布后运行离线自检 (tests/AnnotationTests, 136 项, 无需桌面会话)。
     产物能不能跑不等于逻辑没坏, 建议正式出包时开启。
 
 .PARAMETER IncludePdb
@@ -209,7 +209,7 @@ if ($exeItem.Length -lt 100MB) {
 # 4. 自检 (可选)
 # ---------------------------------------------------------------------------
 if ($SelfTest) {
-    Write-Step '离线自检 (142 项)'
+    Write-Step '离线自检 (136 项)'
     & dotnet run --project (Join-Path $RepoRoot 'tests\AnnotationTests') -c $Configuration
     if ($LASTEXITCODE -ne 0) { throw "自检未通过 (exit $LASTEXITCODE)" }
     Write-Ok '自检通过'

@@ -1,4 +1,4 @@
-# AGENTS.md — SnipasteOCR
+﻿# AGENTS.md — SnipasteOCR
 
 仿 Snipaste 的截图 OCR / 标注小工具。.NET 10 WinForms + **NativeAOT**,发布为单个原生 exe(约 159 MB),
 OCR 引擎与中文模型全部内嵌,**完全离线**。
@@ -24,8 +24,9 @@ src/                       产品代码 (唯一的出货工程, 也是唯一的 
   HotKeyManager.cs         全局热键注册/重注册 (支持运行期换键)
   HotKeyForm.cs            热键设置对话框 (按键录制)
   TrayController.cs        Win32 托盘图标 + 菜单
+  StartupRegistration.cs   开机自启 (写 HKCU 的 Run 键, 无管理员权限)
   NativeMethods.cs         Win32 P/Invoke (消息/热键/窗口/菜单/托盘/输入模拟)
-tests/AnnotationTests/     离线自检, 142 项 (几何/命中/历史/渲染/工具栏/编辑框/OCR 后处理)
+tests/AnnotationTests/     离线自检, 136 项 (几何/命中/历史/渲染/工具栏/编辑框/OCR 后处理)
 tests/InteractiveTests/    交互自检, 22 项 (真实窗口 + 真实按键, 需要桌面会话)
 tools/DriveTest/           端到端驱动实际 exe (真实鼠标键盘事件 + 抓屏取证)
 ```
@@ -60,7 +61,7 @@ dotnet publish src/SnipasteOcr.csproj -c Release -r win-x64 --self-contained -p:
 ```
 
 ```powershell
-# 离线自检 (142 项), 无需桌面会话 —— 改完必跑
+# 离线自检 (136 项), 无需桌面会话 —— 改完必跑
 dotnet run --project tests/AnnotationTests              # 期望输出「全部通过」, 退出码 0
 dotnet run --project tests/AnnotationTests -- sample    # 额外输出六种标注样例图
 # 交互自检 (22 项) —— 需要可用的桌面会话
@@ -106,16 +107,24 @@ dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
 
 | 唯一来源 | 覆盖的调用点 |
 | --- | --- |
-| `OcrText.ClusterRows`(私有,内部共用) | 阅读顺序排序 **和** 表格/CSV 重建的分行 |
+| `OcrText.ClusterRows`(私有,内部共用) | 阅读顺序排序 **和** 表格/CSV 重建 **和** 段落/Markdown 导出的分行 |
+| `OcrText.BuildParagraphs`(私有,内部共用) | `ToPlainText` **和** `ToMarkdown` 的段落构造与行内接续 |
 | `OcrBox`(`Corners`/`TopEdge`/`BottomEdge`/`AxisAligned`/`Contains`) | 画框、命中测试、字符范围高亮、包围盒、轴对齐 |
 | `AnnotationEngine.ArrowGeometry.TryCreate` | 标注箭头 **和** 工具栏箭头图标 |
 | `AnnotationEngine.OutlineColorFor` | 文字标注描边 **和** 正在输入的编辑框描边 |
 | `AnnotationEngine.Draw` | 覆盖层实时预览 **和** 最终合成导出 |
+| `AnnotationToolbar.ComputeLayout`(私有,内部共用) | 工具栏绘制 **和** 宽度测量(`MeasurePreferredWidth`) |
 
 - `OcrBox.TopEdge` 与 `BottomEdge` 的取点顺序必须**同向**(`X1→X2` 与 `X4→X3`),
   否则按同一参数 `u` 插值出的高亮四边形会自交。
 - `ArrowGeometry.TryCreate` 在起止点重合(`len < 1px`)时**返回 null 而非放行 NaN**,
   调用方必须判空 —— 否则 GDI+ 会静默画出垃圾或抛异常。
+- **工具栏布局只有 `ComputeLayout` 一份**:`OnPaint` 与 `MeasurePreferredWidth` 都从它取坐标。
+  踩过的坑:两边曾各写一套 `x += ...` 累加公式,结果宽度与实际布局不符 ——
+  尾部凭空多出 27px 空白,收紧公式后又反过来溢出 2px。**新增按钮必须同时改 `ComputeLayout`**,
+  且 `ToolbarCheck` 有断言守着"尾部留白 == 7px"与"宽度 ≥ 取消按钮右边界"。
+- 结果窗口的导出按钮(`复制段落`/`复制 MD`)必须走 `OcrText.ToPlainText`/`ToMarkdown`,
+  二者共用 `BuildParagraphs`;若各写一份行内接续规则,同一屏文字用两种格式导出会得到不同断句。
 
 ### 坐标系与 DPI
 
@@ -152,6 +161,18 @@ dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
 设置落盘到 `%LOCALAPPDATA%\SnipasteOCR\settings.json`。所有异常一律吞掉并回退默认值 ——
 **设置读写失败绝不能让程序崩溃或无法启动**。新增字段走 `AppSettings` + `SettingsStore.Update`。
 
+### 开机自启 (`StartupRegistration`)
+
+- 写 **HKCU** 的 `Software\Microsoft\Windows\CurrentVersion\Run`,不用 HKLM(HKLM 需要管理员权限,
+  会触发 UAC,与"单文件绿色工具"的定位冲突)。
+- 用 `Environment.ProcessPath` 取自身路径,**不要用 `Assembly.Location`** ——
+  单文件/AOT 下它返回空串(见 ILC 的 IL3000 告警),写进注册表就成了无效项。
+- 写入时路径**必须用引号包裹**,否则含空格的路径会被系统按第一个空格截断。
+- 与 `SettingsStore` 同一约定:**任何异常一律吞掉并返回 false**,注册表被策略锁定时只是自启不生效,
+  绝不能影响程序其它功能。
+- **勾选状态以注册表为准,不以设置文件为准**:用户可能在任务管理器里手工禁用它,
+  这时若还显示"已勾选"就是在骗人。启动时以设置文件为准去**修注册表**(单向),不要反向覆盖设置。
+
 ---
 
 ## 代码风格
@@ -170,6 +191,18 @@ dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
 - 测试断言用具名 `CheckRunner`,不要各写一份 `int passed` + `Check(...)` 样板。
 - 断言应先断言行数/长度再做逐项索引,否则实现漂移时会抛 `IndexOutOfRange` 让整个自检崩掉,
   而不是报一条 FAIL。
+- **测试辅助函数本身也要写对**:`SplitLines` 曾把 `Split('\n', RemoveEmptyEntries)` 写在
+  `TrimEnd('\r')` **之前**,于是 CRLF 文本里的空行被切成 `"\r"`、在去空时存活下来,
+  凭空多出一行 —— 断言失败指向的是辅助函数而非产品代码。判空与去尾字符的顺序要对。
+
+### OCR 素材来源
+
+`OcrService.Recognize(Bitmap, CancellationToken)` 接受**任意位图**,不限于截图。
+因此"识别剪贴板图片"这类扩展**不需要改 `OcrService`**,只需新增取图路径并复用 `OcrResultForm`
+(见 `SnipCoordinator.StartFromClipboard`) —— 这样结果窗口的选词/复制/导出行为与截图路径天然一致。
+
+- `Clipboard.GetImage()` 可能因剪贴板被其它进程独占而抛异常,必须兜住并返回 false,
+  由调用方给出提示(否则用户点了菜单没反应,不知道原因)。
 
 ---
 

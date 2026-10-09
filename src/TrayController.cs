@@ -19,6 +19,8 @@ public sealed class TrayController : IDisposable
     private const int CMD_MODEL_MEDIUM = 0x1003;
     private const int CMD_MODEL_TINY = 0x1004;
     private const int CMD_HOTKEY_SETTINGS = 0x1005;
+    private const int CMD_STARTUP = 0x1006;
+    private const int CMD_OCR_CLIPBOARD = 0x1007;
     private static readonly uint TRAY_CALLBACK = User32.WM_APP + 1;
 
     // 静态持有: 窗口过程委托必须防止被 GC; 单实例引用用于回调
@@ -41,6 +43,14 @@ public sealed class TrayController : IDisposable
     public event Action<OcrModelProfile>? ModelProfileRequested;
     /// <summary>用户要求修改热键设置</summary>
     public event Action? HotKeyChangeRequested;
+    /// <summary>用户要求识别剪贴板中的图片</summary>
+    public event Action? OcrClipboardRequested;
+    /// <summary>
+    /// 用户切换"开机自动启动" (参数为期望的新状态)。
+    /// 实际写注册表由 Program 处理, 并回读真实结果后回调 <see cref="SyncStartupCheck"/> 纠正勾选,
+    /// 因为注册表写入可能失败 (策略锁定/无权限) —— 不能让勾选状态骗人。
+    /// </summary>
+    public event Action<bool>? StartupToggleRequested;
 
     /// <summary>注册窗口类与宿主窗口, 创建右键菜单和托盘图标; 任一步失败抛 Win32Exception</summary>
     public TrayController()
@@ -90,13 +100,16 @@ public sealed class TrayController : IDisposable
 
         User32.AppendMenu(_hMenu, User32.MF_STRING, (IntPtr)CMD_SNIP_OCR, "截图并识别 (F1)");
         User32.AppendMenu(_hMenu, User32.MF_STRING, (IntPtr)CMD_SNIP_IMAGE, "截图并标注 (F2)");
+        User32.AppendMenu(_hMenu, User32.MF_STRING, (IntPtr)CMD_OCR_CLIPBOARD, "识别剪贴板图片");
         User32.AppendMenu(_hMenu, User32.MF_SEPARATOR, IntPtr.Zero, null);
         User32.AppendMenu(_hMenu, User32.MF_STRING | User32.MF_POPUP, _hModelMenu, "识别模型");
         User32.AppendMenu(_hMenu, User32.MF_STRING, (IntPtr)CMD_HOTKEY_SETTINGS, "热键设置…");
+        User32.AppendMenu(_hMenu, User32.MF_STRING, (IntPtr)CMD_STARTUP, "开机自动启动");
         User32.AppendMenu(_hMenu, User32.MF_SEPARATOR, IntPtr.Zero, null);
         User32.AppendMenu(_hMenu, User32.MF_STRING, (IntPtr)CMD_EXIT, "退出");
 
         SyncModelChecks();
+        SyncStartupCheck();
 
         // 3. 托盘图标
         var nid = new Shell32.NOTIFYICONDATA
@@ -185,6 +198,14 @@ public sealed class TrayController : IDisposable
             case CMD_HOTKEY_SETTINGS:
                 _instance?.HotKeyChangeRequested?.Invoke();
                 break;
+            case CMD_OCR_CLIPBOARD:
+                _instance?.OcrClipboardRequested?.Invoke();
+                break;
+            case CMD_STARTUP:
+                // 传"取反后的当前真实状态": 勾选状态以注册表为准, 不靠菜单自己的勾号推断
+                _instance?.StartupToggleRequested?.Invoke(!StartupRegistration.IsEnabled());
+                _instance?.SyncStartupCheck();
+                break;
             case CMD_EXIT: _instance?.ExitRequested?.Invoke(); break;
         }
     }
@@ -207,6 +228,19 @@ public sealed class TrayController : IDisposable
             (uint)CMD_MODEL_TINY,
             checkId,
             User32.MF_BYCOMMAND);
+    }
+
+    /// <summary>
+    /// 按注册表真实状态刷新"开机自动启动"的勾选。
+    /// 以注册表为准而非以设置文件为准 —— 二者不一致时(如用户手工删了注册表项),
+    /// 显示的应是"实际会不会自启"。
+    /// </summary>
+    private void SyncStartupCheck()
+    {
+        User32.CheckMenuItem(
+            _hMenu,
+            (uint)CMD_STARTUP,
+            User32.MF_BYCOMMAND | (StartupRegistration.IsEnabled() ? User32.MF_CHECKED : User32.MF_UNCHECKED));
     }
 
     /// <summary>从嵌入 PNG 资源生成 32x32 托盘图标; 资源缺失时用蓝色方块占位</summary>

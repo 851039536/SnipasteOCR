@@ -42,6 +42,8 @@ public sealed class OcrResultForm : Form
     private readonly ToolStripButton _copyAll = new();
     private readonly ToolStripButton _copyCsv = new();
     private readonly ToolStripButton _copyCsvComma = new();
+    private readonly ToolStripButton _copyPlain = new();
+    private readonly ToolStripButton _copyMarkdown = new();
     private readonly ToolStripButton _copySelection = new();
     private readonly ToolStripButton _saveImage = new();
     private readonly ToolStripButton _colsebtn = new();
@@ -129,6 +131,15 @@ public sealed class OcrResultForm : Form
         _copyCsvComma.ToolTipText = "导出为逗号分隔 CSV 文本";
         _copyCsvComma.Click += (_, _) => CopyText(OcrText.ToCsv(CurrentLines(), ','));
 
+        // 去硬换行的连贯文本: 屏幕上换行多是排版, 粘进文档/聊天时不想要这些断行
+        _copyPlain.Text = "复制段落";
+        _copyPlain.ToolTipText = "合并为连贯段落 (去掉排版造成的硬换行)";
+        _copyPlain.Click += (_, _) => CopyText(OcrText.ToPlainText(CurrentLines()));
+
+        _copyMarkdown.Text = "复制 MD";
+        _copyMarkdown.ToolTipText = "导出为 Markdown (段落间空行分隔)";
+        _copyMarkdown.Click += (_, _) => CopyText(OcrText.ToMarkdown(CurrentLines()));
+
         _saveImage.Text = "保存图片";
         _saveImage.ToolTipText = "保存截图为 PNG";
         _saveImage.Click += (_, _) => SaveImage();
@@ -148,6 +159,8 @@ public sealed class OcrResultForm : Form
         _toolStrip.Items.Add(_copyAll);
         _toolStrip.Items.Add(_copyCsv);
         _toolStrip.Items.Add(_copyCsvComma);
+        _toolStrip.Items.Add(_copyPlain);
+        _toolStrip.Items.Add(_copyMarkdown);
         _toolStrip.Items.Add(new ToolStripSeparator());
         _toolStrip.Items.Add(_saveImage);
         _toolStrip.Items.Add(new ToolStripSeparator());

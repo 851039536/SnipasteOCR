@@ -183,15 +183,86 @@ internal static class OcrTextChecks
                 "ToLine 与 AxisAligned 结果一致");
         }
 
+        // ===== 12. ToPlainText: 去硬换行 + 中英之间补空格 =====
+        {
+            // 同一行的两块 (同一 y, 不同 x) 应接成一行, 且中文之间不插空格
+            var sameRow = new[]
+            {
+                Ln("识别", 10, 20),
+                Ln("引擎", 200, 20),
+            };
+            string merged = OcrText.ToPlainText(sameRow);
+            Check(merged == "识别引擎", $"同行中文块直接相接, 不加空格 (实得 \"{merged}\")");
+
+            // 中英/数字混排之间需要空格, 否则 "OCR识别" 会粘在一起
+            var mixed = new[]
+            {
+                Ln("OCR", 10, 20),
+                Ln("识别", 200, 20),
+            };
+            string mixedText = OcrText.ToPlainText(mixed);
+            Check(mixedText == "OCR 识别", $"中英之间补一个空格 (实得 \"{mixedText}\")");
+
+            // 不同行 -> 换行; joinAll=true 时并成一段
+            var twoRows = new[]
+            {
+                Ln("第一行", 10, 20),
+                Ln("第二行", 10, 120),
+            };
+            string multi = OcrText.ToPlainText(twoRows);
+            Check(SplitLines(multi).Length == 2, $"不同行保留为两行 (实得 {SplitLines(multi).Length})");
+            string joined = OcrText.ToPlainText(twoRows, joinAll: true);
+            Check(!joined.Contains('\n'), $"joinAll 时合并为一段 (实得 \"{joined}\")");
+
+            // 闭口标点前不该多出空格
+            var punct = new[]
+            {
+                Ln("你好", 10, 20),
+                Ln("。", 200, 20),
+            };
+            Check(OcrText.ToPlainText(punct) == "你好。", $"句号前不插空格 (实得 \"{OcrText.ToPlainText(punct)}\")");
+        }
+
+        // ===== 13. ToMarkdown: 段落之间空行 =====
+        {
+            var twoRows = new[]
+            {
+                Ln("段落一", 10, 20),
+                Ln("段落二", 10, 120),
+            };
+            string md = OcrText.ToMarkdown(twoRows);
+            // Markdown 里单换行会渲染成空格, 必须用空行才能真正分段
+            Check(md.Contains("\n\n") || md.Contains("\r\n\r\n"), $"Markdown 段落之间有空行 (实得 {md.Replace("\r", "\\r").Replace("\n", "\\n")})");
+            Check(SplitLines(md).Length == 2, $"Markdown 仍只有两段内容 (实得 {SplitLines(md).Length})");
+
+            // 与纯文本导出的断句必须一致 (两者共用 BuildParagraphs)
+            var plainRows = SplitLines(OcrText.ToPlainText(twoRows));
+            var mdRows = SplitLines(md);
+            Check(plainRows.SequenceEqual(mdRows), "Markdown 与纯文本的断句一致 (同源)");
+        }
+
+        // ===== 14. 新导出函数的空输入安全 =====
+        {
+            Check(OcrText.ToPlainText([]) == string.Empty, "ToPlainText 空列表返回空串");
+            Check(OcrText.ToMarkdown([]) == string.Empty, "ToMarkdown 空列表返回空串");
+            Check(OcrText.ToPlainText([Ln("   ", 10, 10)]).Length == 0, "ToPlainText 全空白返回空串");
+            Check(OcrText.ToMarkdown([Ln("   ", 10, 10)]).Length == 0, "ToMarkdown 全空白返回空串");
+        }
+
         return runner.ToResult();
     }
 
     private static bool Near(float a, float b) => Math.Abs(a - b) < 0.01f;
 
-    /// <summary>按行拆分导出的文本 (兼容 CRLF, 忽略空行)</summary>
+    /// <summary>
+    /// 按行拆分导出的文本 (兼容 CRLF, 忽略空行)。
+    /// 必须先 TrimEnd('\r') 再去空 —— 顺序反过来时, "\r\n\r\n" 里的空行会被切成 "\r",
+    /// 它在 RemoveEmptyEntries 眼里非空, 于是空白行被当成一行内容 (实测踩过)。
+    /// </summary>
     private static string[] SplitLines(string text)
-        => text.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+        => text.Split('\n')
                .Select(r => r.TrimEnd('\r'))
+               .Where(r => r.Length > 0)
                .ToArray();
 
     /// <summary>构造一行 (左/上给定, 固定 80x20 大小)</summary>

@@ -33,6 +33,12 @@ internal static class Program
             // 恢复上次选择的模型档位 (设置读取失败时自动回退默认值, 不影响启动)
             OcrService.Instance.SetProfile(SettingsStore.Current.ModelProfile);
 
+            // 让注册表与设置文件一致: 只有明确开启过才写自启项。
+            // 注意方向 —— 这里是"以设置文件为准去修注册表", 不是反过来,
+            // 否则用户手工删掉注册表项后设置文件仍写着 true, 两边长期不一致。
+            if (StartupRegistration.IsEnabled() != SettingsStore.Current.RunAtStartup)
+                StartupRegistration.SetEnabled(SettingsStore.Current.RunAtStartup);
+
             using var tray = new TrayController();
             // 托盘图标 + 不可见宿主窗口; 全局热键也注册在该窗口上
             tray.SnipOcrRequested += () => SnipCoordinator.Start(SnipMode.Ocr);
@@ -42,6 +48,32 @@ internal static class Program
             {
                 OcrService.Instance.SetProfile(p);
                 SettingsStore.Update(s => s.ModelProfile = p);   // 记住选择
+            };
+
+            // 识别剪贴板图片: 剪贴板里没有图片时给出提示 (否则点了没反应, 用户不知道原因)
+            tray.OcrClipboardRequested += () =>
+            {
+                if (!SnipCoordinator.StartFromClipboard())
+                {
+                    MessageBox.Show(
+                        "剪贴板里没有图片。\n\n请先复制一张图片 (或用 F2 截图), 再试。",
+                        "SnipasteOCR", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+            };
+
+            // 开机自启: 写注册表可能失败 (策略锁定/无权限), 失败要如实告知而不是假装成功
+            tray.StartupToggleRequested += want =>
+            {
+                if (!StartupRegistration.SetEnabled(want))
+                {
+                    MessageBox.Show(
+                        "无法修改开机自启设置 (注册表可能被安全策略锁定)。",
+                        "SnipasteOCR", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                // 回读真实状态落盘, 保证设置文件与注册表一致
+                SettingsStore.Update(s => s.RunAtStartup = StartupRegistration.IsEnabled());
             };
 
             IntPtr hwnd = tray.WindowHandle;
