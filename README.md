@@ -109,12 +109,31 @@ SnipasteOcr.exe      # 启动后驻留系统托盘
 以下命令均在**仓库根目录**执行(产品代码在 `src/`,不在仓库根):
 
 ```powershell
-# 调试运行
-dotnet build src/SnipasteOcr.csproj -c Debug
+# 推荐: 一键发布脚本 (自动清理残留/占用, 可选自检与打包)
+.\scripts\publish.ps1 -SelfTest                    # 发布 + 离线自检
+.\scripts\publish.ps1 -OutputDir dist -SelfTest    # 再打包出 zip 到 dist\
 
-# AOT 发布 (win-x64 单文件原生 exe)
+# 手工发布
+dotnet build src/SnipasteOcr.csproj -c Debug
 dotnet publish src/SnipasteOcr.csproj -c Release -r win-x64 --self-contained -p:PublishAot=true
 ```
+
+### 发布脚本
+
+`scripts/publish.ps1` 把上面的手工步骤固化成一步,并处理实测踩过的坑(残留文件导致的 `LNK1104`、
+旧实例占用产物、单实例互斥等):
+
+| 参数 | 作用 |
+| --- | --- |
+| `-SelfTest` | 发布后跑离线自检(142 项,无需桌面会话)。**正式出包建议带上** |
+| `-OutputDir <目录>` | 把 exe 复制到 `<目录>\SnipasteOCR-<日期>\` 并生成 zip |
+| `-IncludePdb` | 打包时附带 46MB 调试符号(默认不带,分发不需要) |
+| `-NoZip` | 只输出目录,不压缩 |
+| `-SkipClean` | 跳过清理。省几十秒,但 `LNK1104` 会原样复现 |
+| `-Configuration <配置>` | 构建配置,默认 `Release` |
+
+> 脚本不受调用目录限制(以自身位置推导仓库根),但需 **PowerShell 5.1+**。
+> 它**不会**覆盖 `IlcInstructionSet=avx2`,也**不会**使用 `-p:PublishSingleFile=true` —— 这两点都会破坏产物品质。
 
 产物位于 `src/bin/Release/net10.0-windows/win-x64/publish/`,该目录下只有 `SnipasteOcr.exe`(约 162 MB)与 `SnipasteOcr.pdb`,
 前者单文件即可分发,`.pdb` 是调试符号,**不必随包发布**。
