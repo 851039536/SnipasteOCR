@@ -68,7 +68,7 @@
 
 ## 快速开始(发布产物)
 
-发布后的 `SnipasteOcr.exe` 单文件即可运行(约 159 MB,内含高精度 + 快速两套模型):
+发布后的 `SnipasteOcr.exe` 单文件即可运行(约 162 MB,内含高精度 + 快速两套模型):
 
 ```
 SnipasteOcr.exe      # 启动后驻留系统托盘
@@ -97,7 +97,7 @@ SnipasteOcr.exe      # 启动后驻留系统托盘
 | **平均** | **99.0%** | **95.8%** |
 
 > 结论:屏幕截图通常很清晰,Tiny 在正常字号下完全够用;但**小字和模糊场景** Medium 明显更准。
-> 因为两者都打包进 exe,体积为两者之和(约 159 MB),换来的是随时切换、无需重新发布。
+> 因为两者都打包进 exe,体积为两者之和(约 162 MB),换来的是随时切换、无需重新发布。
 
 切换只需登记请求,真正的模型加载发生在其后的第一次识别(后台线程),不会卡住界面。
 
@@ -106,15 +106,24 @@ SnipasteOcr.exe      # 启动后驻留系统托盘
 
 需要 [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)。
 
+以下命令均在**仓库根目录**执行(产品代码在 `src/`,不在仓库根):
+
 ```powershell
 # 调试运行
-dotnet build SnipasteOcr -c Debug
+dotnet build src/SnipasteOcr.csproj -c Debug
 
 # AOT 发布 (win-x64 单文件原生 exe)
-dotnet publish SnipasteOcr -c Release -r win-x64 --self-contained -p:PublishAot=true
+dotnet publish src/SnipasteOcr.csproj -c Release -r win-x64 --self-contained -p:PublishAot=true
 ```
 
-产物位于 `SnipasteOcr/bin/Release/net10.0-windows/win-x64/publish/`,其中的语言资源目录(`cs`、`de`、`zh-Hans` 等)可删除,不影响运行。
+产物位于 `src/bin/Release/net10.0-windows/win-x64/publish/`,该目录下只有 `SnipasteOcr.exe`(约 162 MB)与 `SnipasteOcr.pdb`,
+前者单文件即可分发,`.pdb` 是调试符号,**不必随包发布**。
+
+> 发布踩坑:若报 `LNK1104: 无法打开文件 "…\native\SnipasteOcr.exe"`,通常是上一次构建在
+> `src/bin/Release/net10.0-windows/win-x64/native/` 里留了残留文件(或 exe 仍在运行占用文件)。
+> 先结束所有 `SnipasteOcr` 进程,再 `Remove-Item src/bin/Release -Recurse -Force` 后重试即可。
+> 构建失败时请**不要**改用 `-p:PublishSingleFile=true`:单文件是由 AOT 产出的,模型靠**嵌入资源**加载,
+> 换用其它单文件开关会破坏模型加载。
 
 ### 标注引擎自检
 
@@ -122,18 +131,18 @@ dotnet publish SnipasteOcr -c Release -r win-x64 --self-contained -p:PublishAot=
 
 ```powershell
 # 1) 离线自检 (142 项): 几何 / 命中 / 历史 / 像素级渲染 / 工具栏布局 / 文字编辑框 / OCR 后处理
-cd tests/AnnotationTests
-dotnet run                  # 无需桌面会话
-dotnet run -- sample        # 额外输出一张六种标注的样例图, 便于目视确认
+dotnet run --project tests/AnnotationTests                  # 无需桌面会话
+dotnet run --project tests/AnnotationTests -- sample        # 额外输出一张六种标注的样例图, 便于目视确认
 
 # 2) 交互自检 (22 项): 真实创建窗口, 驱动「选文字工具 → 点击 → 打字 → 回车」全流程
-cd tests/InteractiveTests
-dotnet run                  # 需要可用的桌面会话 (会真正创建窗口并抓屏)
+dotnet run --project tests/InteractiveTests                 # 需要可用的桌面会话 (会真正创建窗口并抓屏)
 
 # 3) 端到端驱动 (可选): 用真实鼠标/键盘事件操作实际出货的 exe, 并抓屏取证
-cd tools/DriveTest
-dotnet run -- <SnipasteOcr.exe 的完整路径>
+dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 的完整路径>
 ```
+
+> 以上统一用 `--project` 而不是 `cd <目录>; dotnet run` —— 直接在工程目录里 `dotnet run` 在
+> `tests/`、`tools/` 下都会因目录内存在多个工程而无法确定要运行哪一个。
 
 覆盖点包括反向拖拽的矩形归一化、椭圆包围盒死角的精确排除、箭头的头宽大于线体、马赛克的 block 级量化且不引入偏色、`clip`/`skip` 参数生效、退化标注不绘制、撤销栈快照与原对象隔离、**编辑框非零初始尺寸**、**编辑期间窗体的 `ProcessCmdKey` 让行**、**编辑框确实获得键盘焦点**,以及**输入文字确实被绘制到窗体上**(回归检查: 历史上因透明子控件被父窗口覆盖而完全不可见)。
 
@@ -149,7 +158,7 @@ dotnet run -- <SnipasteOcr.exe 的完整路径>
 ## 项目结构
 
 ```
-SnipasteOcr/
+src/                      # 产品代码 (唯一的出货工程)
 ├── Program.cs            # 入口: 手动消息循环 + 热键注册 + 配置恢复
 ├── SnipCoordinator.cs    # 截图流程调度
 ├── SnipMode.cs           # 截图模式枚举 (OCR / 仅截图)
