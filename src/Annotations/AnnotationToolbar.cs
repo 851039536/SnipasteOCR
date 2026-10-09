@@ -13,12 +13,27 @@ namespace SnipasteOcr.Annotations;
 public sealed class AnnotationToolbar : Control
 {
     // ===== 布局常量 (逻辑像素) =====
+    // 尺寸原则: 紧凑优先。工具栏是浮在截图上的辅助控件, 越窄越好。
+    // 历史: 一度加到 38px 按钮 / 58px 高 + 按钮下方中文名称, 整条达 730px 且需两行,
+    // 视觉松散。现在移除全部文字, 退回单行纯图标布局。
     private const int ButtonSize = 34;
     private const int IconPad = 8;
-    private const int Gap = 4;
-    private const int SepWidth = 9;
+    private const int Gap = 3;
+    private const int SepWidth = 8;
+    // 单行布局: 控件垂直居中于工具栏高度。
     private const int ToolbarHeight = 42;
-    private const int PadLeft = 8;
+    private const int PadLeft = 7;
+    private const int PadRight = 7;
+
+    /// <summary>颜色色块边长 (与 OnPaint 中的 swatch 保持一致)</summary>
+    private const int ColorBlockWidth = 22;
+
+    // 右侧文字按钮 (保存/确认/取消): 统一宽度与字号, 让三者等宽对齐 ——
+    // 原先 58/64/64 三种宽度混排, 视觉上参差不齐。
+    // 宽度以"两字中文 + 左右各 8px 内边距"为准 (11pt 下约 30px 文字), 46px 足够且不显空。
+    private const int TextButtonWidth = 46;
+    private const int TextButtonHeight = 26;
+    private const float TextButtonFontSize = 11f;
 
     /// <summary>可选颜色 (与截图工具常见配色一致)</summary>
     private static readonly Color[] Palette =
@@ -115,25 +130,83 @@ public sealed class AnnotationToolbar : Control
         Cursor = Cursors.Hand;
     }
 
-    /// <summary>工具栏首选宽度 (由各按钮加总得出)</summary>
-    private static int MeasurePreferredWidth()
+    /// <summary>
+    /// 计算工具栏各元素的位置 (唯一布局来源)。
+    /// <see cref="OnPaint"/> 与 <see cref="MeasurePreferredWidth"/> 都调用本方法 ——
+    /// 早先两边各写一份累加公式, 结果宽度与实际布局对不上 (实测尾部留 27px 空白,
+    /// 收紧后又变成按钮溢出 2px)。这类"同一逻辑写两遍"正是本项目的核心不变量所禁止的。
+    /// </summary>
+    /// <param name="width">工具栏宽度; 传 0 表示"只算所需宽度", 各元素 X 依次排布</param>
+    private static ToolbarLayout ComputeLayout(int width)
     {
-        int w = PadLeft;
-        w += ButtonSize * AnnotationToolInfo.AllTools.Length;   // 工具按钮
-        w += Gap * (AnnotationToolInfo.AllTools.Length - 1);
-        w += SepWidth;                                          // 分隔
-        w += ButtonSize + 26;                                   // 颜色 (一个色块 + 展开提示)
-        w += SepWidth;
-        w += (int)(ButtonSize * 0.7f) * Widths.Length + Gap * (Widths.Length - 1); // 线宽
-        w += SepWidth;
-        w += ButtonSize * 2 + Gap;                              // 撤销/重做
-        w += SepWidth;
-        w += 58 + Gap;                                          // 保存
-        w += 64 + Gap;                                          // 确认
-        w += 64;                                                // 取消
-        w += PadLeft;
-        return w;
+        int x = PadLeft;
+
+        var tools = new Rectangle[AnnotationToolInfo.AllTools.Length];
+        for (int i = 0; i < tools.Length; i++)
+        {
+            tools[i] = new Rectangle(x, 0, ButtonSize, ButtonSize);
+            x += ButtonSize + Gap;
+        }
+
+        x += SepWidth - Gap;
+        int sep1 = x - SepWidth / 2 - 1;
+
+        var color = new Rectangle(x, 0, ColorBlockWidth, ButtonSize);
+        x += ColorBlockWidth + 12;
+
+        x += SepWidth;
+        int sep2 = x - SepWidth / 2 - 1;
+
+        int wb = (int)(ButtonSize * 0.8f);
+        var widths = new Rectangle[Widths.Length];
+        for (int i = 0; i < widths.Length; i++)
+        {
+            widths[i] = new Rectangle(x, 0, wb, wb);
+            x += wb + Gap;
+        }
+
+        x += SepWidth - Gap;
+        int sep3 = x - SepWidth / 2 - 1;
+
+        var undo = new Rectangle(x, 0, ButtonSize, ButtonSize);
+        x += ButtonSize + Gap;
+        var redo = new Rectangle(x, 0, ButtonSize, ButtonSize);
+        x += ButtonSize + Gap;
+
+        x += SepWidth - Gap;
+        int sep4 = x - SepWidth / 2 - 1;
+
+        var save = new Rectangle(x, 0, TextButtonWidth, TextButtonHeight);
+        x += TextButtonWidth + Gap;
+        var confirm = new Rectangle(x, 0, TextButtonWidth, TextButtonHeight);
+        x += TextButtonWidth + Gap;
+        var cancel = new Rectangle(x, 0, TextButtonWidth, TextButtonHeight);
+        x += TextButtonWidth;
+
+        // width<=0: 返回"内容右边界 + 右留白"; 否则用给定宽度 (仅用于排版, 结果一致)
+        int total = x + PadRight;
+        return new ToolbarLayout(tools, color, widths, undo, redo, save, confirm, cancel,
+            sep1, sep2, sep3, sep4, total);
     }
+
+    /// <summary>布局计算结果 (各元素 X 已确定, Y 在绘制时按高度居中填充)</summary>
+    private sealed record ToolbarLayout(
+        Rectangle[] Tools,
+        Rectangle Color,
+        Rectangle[] WidthButtons,
+        Rectangle Undo,
+        Rectangle Redo,
+        Rectangle Save,
+        Rectangle Confirm,
+        Rectangle Cancel,
+        int Sep1,
+        int Sep2,
+        int Sep3,
+        int Sep4,
+        int TotalWidth);
+
+    /// <summary>工具栏所需宽度 (与 OnPaint 同源, 不再各写一份)</summary>
+    private static int MeasurePreferredWidth() => ComputeLayout(0).TotalWidth;
 
     /// <summary>
     /// 绘制工具栏: 深色圆角底 + 工具图标 + 颜色/线宽选择 + 操作按钮。
@@ -158,14 +231,16 @@ public sealed class AnnotationToolbar : Control
         _colorRects.Clear();
         _widthRects.Clear();
 
-        int x = PadLeft;
+        // 位置统一由 ComputeLayout 给出 (与 MeasurePreferredWidth 同源),
+        // 这里只负责按工具栏高度做垂直居中并绘制。
+        var L = ComputeLayout(Width);
         int cy = Height / 2;
 
-        // ---- 工具按钮 ----
-        for (int i = 0; i < AnnotationToolInfo.AllTools.Length; i++)
+        // ---- 工具按钮 (纯图标, 等宽) ----
+        for (int i = 0; i < L.Tools.Length; i++)
         {
             var tool = AnnotationToolInfo.AllTools[i];
-            var rect = new Rectangle(x, (Height - ButtonSize) / 2, ButtonSize, ButtonSize);
+            var rect = CenterY(L.Tools[i], ButtonSize, cy);
             _toolRects.Add((rect, tool));
 
             bool active = Tool == tool;
@@ -174,18 +249,14 @@ public sealed class AnnotationToolbar : Control
             DrawButtonBackdrop(g, rect, active, hover);
 
             DrawToolIcon(g, tool, rect, active ? Color.White : Color.FromArgb(230, 230, 230));
-
-            x += ButtonSize + Gap;
         }
 
-        x += SepWidth - Gap;
-        DrawSeparator(g, x - SepWidth / 2 - 1, cy);
-        _ = x;
+        DrawSeparator(g, L.Sep1, cy);
 
         // ---- 当前颜色 (点击循环切换) ----
         {
-            int swatch = 26;
-            var rect = new Rectangle(x, (Height - ButtonSize) / 2, swatch, ButtonSize);
+            int swatch = ColorBlockWidth;
+            var rect = CenterY(L.Color, ButtonSize, cy);
             _colorRects.Add((rect, CurrentColor));
 
             // 色块
@@ -204,62 +275,57 @@ public sealed class AnnotationToolbar : Control
             // 下拉小三角提示「可切换」
             var tri = new[]
             {
-                new Point(sr.Right + 4, cy - 3),
-                new Point(sr.Right + 12, cy - 3),
-                new Point(sr.Right + 8, cy + 3),
+                new Point(sr.Right + 3, cy - 2),
+                new Point(sr.Right + 9, cy - 2),
+                new Point(sr.Right + 6, cy + 3),
             };
             using var tb = new SolidBrush(Color.FromArgb(200, 230, 230, 230));
             g.FillPolygon(tb, tri);
-
-            x += 26 + 16;
         }
 
-        x += SepWidth;
-        DrawSeparator(g, x - SepWidth / 2 - 1, cy);
+        DrawSeparator(g, L.Sep2, cy);
 
         // ---- 线宽 ----
-        for (int i = 0; i < Widths.Length; i++)
+        int wb = (int)(ButtonSize * 0.8f);
+        for (int i = 0; i < L.WidthButtons.Length; i++)
         {
-            int bw = (int)(ButtonSize * 0.7f);
-            var rect = new Rectangle(x, (Height - bw) / 2, bw, bw);
+            var rect = CenterY(L.WidthButtons[i], wb, cy);
             _widthRects.Add((rect, Widths[i]));
 
             bool active = Math.Abs(CurrentWidth - Widths[i]) < 0.01f;
             DrawButtonBackdrop(g, rect, active, _hoverWidth == i);
 
-            using (var pen = new Pen(active ? Color.White : Color.FromArgb(225, 225, 225), Widths[i]))
-                g.DrawLine(pen, rect.Left + 6, cy, rect.Right - 6, cy);
-
-            x += bw + Gap;
+            // 预览用当前颜色而非固定白色: 所选颜色就是将要画出的颜色, 预览应如实反映,
+            // 否则选"黄色细线"时预览仍是白色细线, 无从判断实际效果。
+            using (var pen = new Pen(CurrentColor, Widths[i]))
+                g.DrawLine(pen, rect.Left + 5, cy, rect.Right - 5, cy);
         }
 
-        x += SepWidth - Gap;
-        DrawSeparator(g, x - SepWidth / 2 - 1, cy);
+        DrawSeparator(g, L.Sep3, cy);
 
         // ---- 撤销 / 重做 ----
-        _undoRect = new Rectangle(x, (Height - ButtonSize) / 2, ButtonSize, ButtonSize);
+        _undoRect = CenterY(L.Undo, ButtonSize, cy);
         DrawIconButton(g, _undoRect, ToolbarIcon.Undo, CanUndo, _hoverActionKey == "undo");
-        x += ButtonSize + Gap;
 
-        _redoRect = new Rectangle(x, (Height - ButtonSize) / 2, ButtonSize, ButtonSize);
+        _redoRect = CenterY(L.Redo, ButtonSize, cy);
         DrawIconButton(g, _redoRect, ToolbarIcon.Redo, CanRedo, _hoverActionKey == "redo");
-        x += ButtonSize + Gap;
 
-        x += SepWidth - Gap;
-        DrawSeparator(g, x - SepWidth / 2 - 1, cy);
+        DrawSeparator(g, L.Sep4, cy);
 
-        // ---- 保存 / 确认 / 取消 ----
-        _saveRect = new Rectangle(x, (Height - 30) / 2, 58, 30);
+        // ---- 保存 / 确认 / 取消 (等宽等高, 三者对齐) ----
+        _saveRect = CenterY(L.Save, TextButtonHeight, cy);
         DrawTextButton(g, _saveRect, "保存", Color.FromArgb(70, 72, 78), _hoverActionKey == "save");
-        x += 58 + Gap;
 
-        _confirmRect = new Rectangle(x, (Height - 30) / 2, 64, 30);
+        _confirmRect = CenterY(L.Confirm, TextButtonHeight, cy);
         DrawTextButton(g, _confirmRect, "确认", Color.FromArgb(33, 150, 243), _hoverActionKey == "confirm");
-        x += 64 + Gap;
 
-        _cancelRect = new Rectangle(x, (Height - 30) / 2, 64, 30);
+        _cancelRect = CenterY(L.Cancel, TextButtonHeight, cy);
         DrawTextButton(g, _cancelRect, "取消", Color.FromArgb(70, 72, 78), _hoverActionKey == "cancel");
     }
+
+    /// <summary>把布局结果的 Y(占位 0) 换成按工具栏高度居中的实际 Y</summary>
+    private static Rectangle CenterY(Rectangle r, int height, int cy) =>
+        new(r.X, cy - height / 2, r.Width, height);
 
     /// <summary>工具栏上用矢量绘制的图标类型</summary>
     private enum ToolbarIcon
@@ -326,7 +392,7 @@ public sealed class AnnotationToolbar : Control
         using (var p = RoundedRect(rect, 5))
             g.FillPath(b, p);
 
-        using var font = UiFont.Create(12f);
+        using var font = UiFont.Create(TextButtonFontSize);
         Size ts = TextRenderer.MeasureText(text, font);
         TextRenderer.DrawText(g, text, font,
             new Point(rect.X + (rect.Width - ts.Width) / 2, rect.Y + (rect.Height - ts.Height) / 2), Color.White);
@@ -339,15 +405,21 @@ public sealed class AnnotationToolbar : Control
         Math.Min(255, (int)(c.G + (255 - c.G) * amount)),
         Math.Min(255, (int)(c.B + (255 - c.B) * amount)));
 
-    /// <summary>分隔竖线</summary>
-    private static void DrawSeparator(Graphics g, int x, int cy)
+    /// <summary>分隔竖线 (高度随工具栏高度自适应)</summary>
+    private void DrawSeparator(Graphics g, int x, int cy)
     {
         using var pen = new Pen(Color.FromArgb(60, 255, 255, 255), 1f);
-        g.DrawLine(pen, x, cy - 11, x, cy + 11);
+        // 相对图标行中心上下对称延伸, 但不越出上下留白
+        int half = Math.Min(12, Math.Min(cy - 5, Height - cy - 5));
+        if (half < 0) half = 0;
+        g.DrawLine(pen, x, cy - half, x, cy + half);
     }
 
     /// <summary>
     /// 用矢量绘制各工具图标 (不依赖任何图片资源, AOT 友好且任意 DPI 都清晰)。
+    ///
+    /// 图标不再垂直居中于整个按钮: 按钮下半部分留给了名称标签, 因此图标中心上移到
+    /// 按钮的图标区 (高度约 <c>ButtonSize - 3</c>), 否则图标会压在文字上。
     /// </summary>
     private static void DrawToolIcon(Graphics g, AnnotationTool tool, Rectangle rect, Color color)
     {

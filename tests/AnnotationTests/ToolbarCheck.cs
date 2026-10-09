@@ -62,6 +62,85 @@ internal static class ToolbarCheck
             .GetField("_toolRects", flags)!.GetValue(tb)!;
         Check(toolRects.Count == 6, $"六种工具都有按钮 (实得 {toolRects.Count})");
 
+        // 工具按钮为等宽纯图标 (不再带名称标签)
+        {
+            int w0 = RectOf(toolRects[0]!).Width;
+            bool uniform = true;
+            foreach (var item in (System.Collections.IEnumerable)toolRects)
+                if (RectOf(item).Width != w0) uniform = false;
+            Check(uniform, $"六个工具按钮等宽 (实得首宽 {w0})");
+        }
+
+        // ===== 线宽预览必须用当前颜色 =====
+        // 回归: 原先线宽预览固定用白色, 选了黄色也显示白色, 无法预判实际颜色。
+        {
+            var tb4 = new AnnotationToolbar();
+            // 切到蓝色 (调色板第 5 个: 235,59,36 红 -> 循环 4 次到 33,150,243 蓝)
+            for (int i = 0; i < 4; i++) tb4.CycleColor();
+            Check(tb4.CurrentColor == Color.FromArgb(255, 33, 150, 243), "已切到蓝色");
+
+            using var wbmp = new Bitmap(tb4.Width, tb4.Height, PixelFormat.Format32bppArgb);
+            using (var g = Graphics.FromImage(wbmp))
+            using (var pea = new PaintEventArgs(g, new Rectangle(0, 0, tb4.Width, tb4.Height)))
+            {
+                typeof(AnnotationToolbar)
+                    .GetMethod("OnPaint", BindingFlags.NonPublic | BindingFlags.Instance)!
+                    .Invoke(tb4, [pea]);
+            }
+
+            var wrect = RectOf(((System.Collections.IList)typeof(AnnotationToolbar)
+                .GetField("_widthRects", flags)!.GetValue(tb4)!)[0]!);
+
+            // 在预览线所在行统计"偏蓝"像素: B 明显大于 R
+            int bluish = 0;
+            for (int y = wrect.Top; y < wrect.Bottom && y < wbmp.Height; y++)
+                for (int x = wrect.Left + 4; x < wrect.Right - 4 && x < wbmp.Width; x++)
+                {
+                    var c = wbmp.GetPixel(x, y);
+                    if (c.B > 150 && c.B > c.R + 50) bluish++;
+                }
+            Check(bluish > 10, $"线宽预览使用当前颜色而非白色 (蓝色像素={bluish})");
+            tb4.Dispose();
+        }
+
+        // 单行布局: 所有控件必须完整落在工具栏高度内 (不再有第二行标签)
+        Check(tb.Height >= 38, $"工具栏有足够高度容纳单行控件 (实得 {tb.Height})");
+        Check(toolRects.Count > 0 && RectOf(toolRects[0]!).Bottom <= tb.Height,
+            $"工具按钮完整落在工具栏内 (按钮底={RectOf(toolRects[0]!).Bottom}, 高={tb.Height})");
+        {
+            var cancelBtn = (Rectangle)typeof(AnnotationToolbar).GetField("_cancelRect", flags)!.GetValue(tb)!;
+            Check(cancelBtn.Bottom <= tb.Height, $"取消按钮完整落在工具栏内 (底={cancelBtn.Bottom}, 高={tb.Height})");
+        }
+
+        // ===== 整体尺寸: 工具栏是浮在截图上的辅助控件, 必须保持紧凑 =====
+        // 回归: 曾达 730x58 (含两行文字标签), 在小选区里几乎盖住半个画面且观感松散。
+        // 移除全部文字后应回到单行 ~42px 高度。
+        Check(tb.Width <= 620, $"工具栏宽度保持紧凑 (实得 {tb.Width}, 上限 620)");
+        Check(tb.Height <= 46, $"工具栏高度保持紧凑 (实得 {tb.Height}, 上限 46)");
+
+        // ===== 声明宽度必须与实际布局一致 =====
+        // 回归: 早先宽度公式与 OnPaint 各写一份, 实测尾部多出 27px 空白;
+        // 收紧公式后又反过来溢出 2px。两者现共用 ComputeLayout。
+        {
+            var cancelR = (Rectangle)typeof(AnnotationToolbar).GetField("_cancelRect", flags)!.GetValue(tb)!;
+            Check(tb.Width >= cancelR.Right, $"宽度足够容纳全部元素 (宽={tb.Width}, 取消右={cancelR.Right})");
+            Check(tb.Width - cancelR.Right == 7, $"尾部留白等于设计值 7px (实得 {tb.Width - cancelR.Right})");
+        }
+
+        // 保存/确认/取消 必须等宽等高, 否则三个按钮参差不齐
+        {
+            var s = (Rectangle)typeof(AnnotationToolbar).GetField("_saveRect", flags)!.GetValue(tb)!;
+            var c = (Rectangle)typeof(AnnotationToolbar).GetField("_confirmRect", flags)!.GetValue(tb)!;
+            var x = (Rectangle)typeof(AnnotationToolbar).GetField("_cancelRect", flags)!.GetValue(tb)!;
+            Check(s.Width == c.Width && c.Width == x.Width && s.Height == c.Height && c.Height == x.Height,
+                $"保存/确认/取消 等宽等高 ({s.Width}x{s.Height}, {c.Width}x{c.Height}, {x.Width}x{x.Height})");
+
+            // 三者同一水平线且等距排列
+            Check(s.Y == c.Y && c.Y == x.Y, "保存/确认/取消 顶端对齐");
+            int gap1 = c.X - s.Right, gap2 = x.X - c.Right;
+            Check(gap1 == gap2, $"保存/确认/取消 间距一致 ({gap1} vs {gap2})");
+        }
+
         // 按钮不能重叠 (同一行内的命中区域互斥)
         bool overlap = false;
         var all = new List<Rectangle> { cancel };
