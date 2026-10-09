@@ -110,13 +110,20 @@ SnipasteOcr.exe      # 启动后驻留系统托盘
 
 ```powershell
 # 推荐: 一键发布脚本 (自动清理残留/占用, 可选自检与打包)
-.\scripts\publish.ps1 -SelfTest                    # 发布 + 离线自检
-.\scripts\publish.ps1 -OutputDir dist -SelfTest    # 再打包出 zip 到 dist\
+# 直接双击 scripts\publish.cmd 等效于下面第一条(发布 + 打包到 dist\)
+.\scripts\publish.ps1                              # 发布 + 打包出 zip 到 dist\
+.\scripts\publish.ps1 -SelfTest                    # 发布 + 离线自检 + 打包
+.\scripts\publish.ps1 -OutputDir '' -SelfTest      # 只要发布产物, 不打包
 
 # 手工发布
 dotnet build src/SnipasteOcr.csproj -c Debug
 dotnet publish src/SnipasteOcr.csproj -c Release -r win-x64 --self-contained -p:PublishAot=true
 ```
+
+> **想双击就跑,请双击 `scripts\publish.cmd`,不要双击 `publish.ps1`。**
+> Windows 下双击 `.ps1` 默认是用记事本打开、**根本不会执行**;即使已关联到 PowerShell,
+> 窗口也会在结束时立刻关闭,报错一闪而过 —— 表现就是"双击了但没打包成功"。
+> `publish.cmd` 会调用脚本并在结束时停留显示结果与退出码。
 
 ### 发布脚本
 
@@ -125,8 +132,9 @@ dotnet publish src/SnipasteOcr.csproj -c Release -r win-x64 --self-contained -p:
 
 | 参数 | 作用 |
 | --- | --- |
+| *(无参数)* | 发布 + 打包到 `dist\`(`-OutputDir` 默认即 `dist`) |
 | `-SelfTest` | 发布后跑离线自检(142 项,无需桌面会话)。**正式出包建议带上** |
-| `-OutputDir <目录>` | 把 exe 复制到 `<目录>\SnipasteOCR-<日期>\` 并生成 zip |
+| `-OutputDir <目录>` | 打包输出目录,默认 `dist`;传 `''` 则只发布不打包 |
 | `-IncludePdb` | 打包时附带 46MB 调试符号(默认不带,分发不需要) |
 | `-NoZip` | 只输出目录,不压缩 |
 | `-SkipClean` | 跳过清理。省几十秒,但 `LNK1104` 会原样复现 |
@@ -134,6 +142,11 @@ dotnet publish src/SnipasteOcr.csproj -c Release -r win-x64 --self-contained -p:
 
 > 脚本不受调用目录限制(以自身位置推导仓库根),但需 **PowerShell 5.1+**。
 > 它**不会**覆盖 `IlcInstructionSet=avx2`,也**不会**使用 `-p:PublishSingleFile=true` —— 这两点都会破坏产物品质。
+>
+> `.cmd` 与 `.ps1` 的编码/行尾有讲究(踩过坑,别改):`publish.ps1` 含中文,**必须带 UTF-8 BOM**
+> (否则 `powershell.exe -File` 按 ANSI 读取,中文变乱码并触发语法错误);
+> `publish.cmd` 由 `cmd.exe` 解析,**必须是不带 BOM 的 GBK + CRLF 行尾**
+> (LF 行尾会让 cmd.exe 吞掉行首字符)。`.gitattributes` 已用 `*.cmd text eol=crlf` 固定行尾。
 
 产物位于 `src/bin/Release/net10.0-windows/win-x64/publish/`,该目录下只有 `SnipasteOcr.exe`(约 162 MB)与 `SnipasteOcr.pdb`,
 前者单文件即可分发,`.pdb` 是调试符号,**不必随包发布**。

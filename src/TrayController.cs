@@ -198,7 +198,7 @@ public sealed class TrayController : IDisposable
         if (_hModelMenu == IntPtr.Zero)
             return;
 
-        var current = OcrService.Instance.Profile;
+        var current = OcrService.Instance.RequestedProfile;
         uint checkId = (uint)(current == OcrModelProfile.Tiny ? CMD_MODEL_TINY : CMD_MODEL_MEDIUM);
 
         User32.CheckMenuRadioItem(

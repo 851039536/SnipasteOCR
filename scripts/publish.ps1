@@ -22,8 +22,9 @@
     构建配置。默认 Release。AOT 单文件只在 Release 下发布才有意义。
 
 .PARAMETER OutputDir
-    打包输出目录。给出后, 会把 exe(可选附 .pdb)复制到该目录下的 SnipasteOCR-<版本>/
-    子目录中并生成 zip。不给出则只发布, 不做打包。
+    打包输出目录。默认 'dist' —— 即双击/无参数运行时也会真的打出 zip, 避免"以为没打包成功"。
+    产物为该目录下的 SnipasteOCR-<日期>\ 子目录, 并生成同名 zip。
+    只想要 publish 目录里的 exe、不打包时传 -OutputDir '' 显式关闭。
 
 .PARAMETER SkipClean
     跳过清理步骤。仅在你确定没有残留与占用时使用 —— 跳过能省几十秒,
@@ -40,22 +41,30 @@
 .PARAMETER NoZip
     打包时只复制文件到输出目录, 不生成 zip。
 
+.NOTES
+    Windows 下 .ps1 双击默认是用记事本打开, 并不会执行。
+    要"双击就发布", 请双击同目录的 publish.cmd (或在资源管理器里右键
+    publish.ps1 -> 使用 PowerShell 运行)。
+
 .EXAMPLE
-    # 最常用: 发布 + 自检
+    # 最常用: 双击 publish.cmd 等效于下面这条 (发布 + 打包到 dist)
+    .\scripts\publish.ps1
+
+.EXAMPLE
+    # 发布 + 自检 + 打包 (正式出包)
     .\scripts\publish.ps1 -SelfTest
 
 .EXAMPLE
-    # 发布并打包到 dist\
-    .\scripts\publish.ps1 -OutputDir dist -SelfTest
-
-.EXAMPLE
-    # 出正式包(不附调试符号)
-    .\scripts\publish.ps1 -OutputDir dist -SelfTest
+    # 只要发布产物, 不打包
+    .\scripts\publish.ps1 -OutputDir '' -SelfTest
 #>
 [CmdletBinding()]
 param(
     [string]$Configuration = 'Release',
-    [string]$OutputDir,
+    # 默认 dist: 双击运行(不带任何参数)也要真的打包出 zip。
+    # 踩过的坑: 原先默认空值 -> 双击后只发布不打包, 用户以为"没打包成功"。
+    # 只想要发布产物、不打包时传 -OutputDir '' 显式关闭。
+    [string]$OutputDir = 'dist',
     [switch]$SkipClean,
     [switch]$SelfTest,
     [switch]$IncludePdb,

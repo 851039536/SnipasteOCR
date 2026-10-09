@@ -4,6 +4,17 @@
 * text=auto
 
 ###############################################################################
+# cmd/bat 必须保持 CRLF
+#
+# cmd.exe 解析 LF-only 的批处理文件会出错: 实测行首字符被吞, 报
+# "'xx@' is not recognized as an internal or external command"。
+# 而上面的 * text=auto 会把入库内容规范化为 LF, 于是 clone 出来的
+# scripts\publish.cmd 直接不可用 —— 必须在此显式声明为 CRLF。
+###############################################################################
+*.cmd  text eol=crlf
+*.bat  text eol=crlf
+
+###############################################################################
 # Set default behavior for command prompt diff.
 #
 # This is need for earlier builds of msysgit that does not have it on by

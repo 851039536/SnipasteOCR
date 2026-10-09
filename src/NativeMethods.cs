@@ -200,9 +200,13 @@ public static class User32
     public static extern bool CheckMenuRadioItem(
         IntPtr hMenu, uint idFirst, uint idLast, uint idCheck, uint uFlags);
 
-    [DllImport("user32.dll", SetLastError = true)]
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    /// <summary>修改已存在菜单项的文本 (档位切换后用新名称刷新, 如追加当前档位)</summary>
+    /// <summary>
+    /// 修改已存在菜单项的文本 (档位切换后用新名称刷新, 如追加当前档位)。
+    /// 必须显式 CharSet.Unicode: 否则默认按 ANSI 绑定 ModifyMenuA, 中文文本会乱码
+    /// (AppendMenu 同理, 已在上面指定)。
+    /// </summary>
     public static extern bool ModifyMenu(
         IntPtr hMenu, uint uPosition, uint uFlags, IntPtr uIDNewItem, string? lpNewItem);
 

@@ -31,7 +31,7 @@ public sealed class OcrService : IDisposable
     private readonly object _gate = new();
     // 懒加载的 OCR 引擎实例
     private PaddleOcrAll? _ocr;
-    // 当前已加载引擎对应的档位
+    // 当前已加载引擎对应的档位 (仅允许在 _gate 内读写, 故不加 Volatile)
     private OcrModelProfile _loadedProfile;
     // 用户请求的档位 (用 int 存储以便 Volatile 原子读写); 与 _loadedProfile 不一致时下次识别重载
     private int _requestedProfile = (int)OcrModelProfile.Medium;
@@ -39,15 +39,28 @@ public sealed class OcrService : IDisposable
     /// <summary>状态提示 (可能在后台线程触发, 订阅方需自行切回 UI 线程)</summary>
     public event Action<string>? StatusChanged;
 
-    /// <summary>档位变化通知 (切换生效后触发, 供托盘菜单刷新勾选状态)</summary>
-    public event Action<OcrModelProfile>? ProfileChanged;
+    /// <summary>
+    /// 用户请求的档位 (托盘菜单勾选状态以此为准)。
+    /// 注意: 这是"请求值"而非"已加载值" —— SetProfile 只登记请求,
+    /// 真正切换引擎发生在下一次 Recognize。命名刻意区别于 _loadedProfile, 避免调用方
+    /// 误以为返回值代表当前正在运行的引擎。已加载档位见 <see cref="LoadedProfile"/>。
+    /// </summary>
+    public OcrModelProfile RequestedProfile => (OcrModelProfile)Volatile.Read(ref _requestedProfile);
 
-    /// <summary>当前档位</summary>
-    public OcrModelProfile Profile => (OcrModelProfile)Volatile.Read(ref _requestedProfile);
+    /// <summary>当前真正已加载的档位 (尚未加载时为 null; 仅诊断/测试用)</summary>
+    public OcrModelProfile? LoadedProfile
+    {
+        get
+        {
+            lock (_gate)
+                return _ocr is null ? null : _loadedProfile;
+        }
+    }
 
     /// <summary>
     /// 切换识别模型档位。仅记录请求并置脏, 不立即加载 (加载耗时数百毫秒,
     /// 且应发生在后台推理线程上); 下一次 Recognize 时生效。
+    /// 勾选状态由调用方查询 <see cref="RequestedProfile"/>, 不再单独抛事件。
     /// </summary>
     public void SetProfile(OcrModelProfile profile)
     {
@@ -55,8 +68,6 @@ public sealed class OcrService : IDisposable
             return;
 
         Volatile.Write(ref _requestedProfile, (int)profile);
-        // 通知订阅方 (托盘勾选) —— 可能在任意线程, 订阅方需自行 marshal
-        ProfileChanged?.Invoke(profile);
     }
 
     /// <summary>档位显示名 (菜单/状态栏用)</summary>
