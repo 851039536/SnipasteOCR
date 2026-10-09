@@ -229,7 +229,7 @@ SnipasteOcr/
 
 ## 依赖
 
-- [Sdcb.SimdPaddleOCR](https://github.com/Sdcb/SimdPaddleOCR) 1.4.2 — 纯 C# 的 PaddleOCR 推理引擎
+- [Sdcb.SimdPaddleOCR](https://github.com/Sdcb/SimdPaddleOCR) 2.0.0 — 纯 C# 的 PaddleOCR 推理引擎 (Apache-2.0)
 - [Sdcb.SimdPaddleOCR.Models.ChineseV6Medium](https://www.nuget.org/packages/Sdcb.SimdPaddleOCR.Models.ChineseV6Medium) 1.0.0 — 中文 det+rec+字典(嵌入资源,132 MB)
 - [Sdcb.SimdPaddleOCR.Models.ChineseV6Tiny](https://www.nuget.org/packages/Sdcb.SimdPaddleOCR.Models.ChineseV6Tiny) 1.0.0 — 轻量中文 det+rec+字典(嵌入资源,6 MB)
 - [Sdcb.SimdPaddleOCR.Models.TextLineOrientation](https://www.nuget.org/packages/Sdcb.SimdPaddleOCR.Models.TextLineOrientation) 1.0.0 — 方向分类 (CLS) 模型,两套 bundle 共用

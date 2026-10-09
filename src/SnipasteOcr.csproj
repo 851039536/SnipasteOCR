@@ -32,7 +32,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Sdcb.SimdPaddleOCR" Version="1.4.2" />
+    <PackageReference Include="Sdcb.SimdPaddleOCR" Version="2.0.0" />
     <!-- 高精度模型 (132MB): 小字/模糊/形近字场景明显更准, 默认使用 -->
     <PackageReference Include="Sdcb.SimdPaddleOCR.Models.ChineseV6Medium" Version="1.0.0" />
     <!-- 轻量快速模型 (6MB): 可经托盘菜单切换, 推理快约 9 倍 -->
