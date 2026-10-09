@@ -47,6 +47,20 @@ public sealed class OcrResultForm : Form
     private readonly ToolStripButton _copySelection = new();
     private readonly ToolStripButton _saveImage = new();
     private readonly ToolStripButton _colsebtn = new();
+
+    /// <summary>
+    /// 工具栏字号 (逻辑像素, 非 pt)。
+    ///
+    /// 注意 GraphicsUnit.Pixel 的实际观感: <c>UiFont.Create(10f)</c> 得到 Height=13px,
+    /// 而 ToolStrip 未设字体时的系统默认是 9pt/16px —— 也就是说不缩小数值反而会**变大**。
+    /// 这里取 10f (13px) 比原默认略小一档, 让按钮更紧凑、文字仍清晰可读。
+    /// 改这个值要连带看工具栏首选宽度 (它直接决定窗口最小宽度)。
+    /// </summary>
+    private const float UiFontSize = 10f;
+
+    /// <summary>「复制」下拉: 把 5 种导出格式收进一个按钮, 避免工具栏被 5 个按钮撑满</summary>
+    private readonly ToolStripDropDownButton _copyMenu = new();
+
     private string _statusText = string.Empty; // 右下角状态提示
 
     /// <summary>
@@ -94,6 +108,22 @@ public sealed class OcrResultForm : Form
         _toolStrip.BackColor = Color.FromArgb(38, 41, 47);
         _toolStrip.ForeColor = Color.FromArgb(226, 230, 236);
 
+        // 字体必须显式指定, 不能用 ToolStrip 的系统默认字体:
+        // 默认字体随系统语言/DPI 漂移, 且直接 new Font(中文字体名) 在字体缺失时
+        // 会静默回退到 Microsoft Sans Serif (中文变方块且不报错)。
+        // 统一走 UiFont (项目约定), 并略微缩小以给按钮留出更多横向空间。
+        _toolStrip.Font = UiFont.Create(UiFontSize);
+
+        // 统一间距: 默认 Padding 在不同 DPI 下观感松散, 收窄后按钮更紧凑整齐
+        _toolStrip.Padding = new Padding(6, 2, 6, 2);
+        _toolStrip.AutoSize = true;
+
+        // 关掉溢出菜单: 工具栏已按"最小宽度 = 工具栏完整宽度"设计 (见构造函数),
+        // 不存在需要折叠的情况; 而溢出按钮即使 Visible=false 也仍会在右端画一条
+        // 1px 竖直分隔线 —— 实测就是右上角那条突兀的"白色竖线"(x=最右列, 贯通全高)。
+        // CanOverflow=false 同时消除了这条线与"按钮被折叠"的可能。
+        _toolStrip.CanOverflow = false;
+
         _zoomOut.Text = "-";
         _zoomOut.ToolTipText = "缩小 ( - )";
         _zoomOut.Click += (_, _) => Zoom(1f / 1.25f);
@@ -123,22 +153,38 @@ public sealed class OcrResultForm : Form
         _copyAll.ToolTipText = "复制全部识别文本";
         _copyAll.Click += (_, _) => CopyText(GetAllText());
 
-        _copyCsv.Text = "复制表格";
-        _copyCsv.ToolTipText = "按坐标重建为表格 (制表符分隔), 可直接粘贴到 Excel";
+        // 5 种导出格式收进下拉: 原先一字排开 5 个按钮, 工具栏宽达 639px,
+        // 小截图时窗口最小宽度被撑到 655px, 观感很挤。收进下拉后只占 1 个按钮位。
+        _copyMenu.Text = "复制";
+        _copyMenu.ToolTipText = "选择复制格式";
+        _copyMenu.DropDownDirection = ToolStripDropDownDirection.BelowRight;
+
+        _copyCsv.Text = "表格 (制表符)";
+        _copyCsv.ToolTipText = "按坐标重建为表格, 可直接粘贴到 Excel";
         _copyCsv.Click += (_, _) => CopyText(OcrText.ToCsv(CurrentLines(), '\t'));
 
-        _copyCsvComma.Text = "复制 CSV";
+        _copyCsvComma.Text = "CSV (逗号)";
         _copyCsvComma.ToolTipText = "导出为逗号分隔 CSV 文本";
         _copyCsvComma.Click += (_, _) => CopyText(OcrText.ToCsv(CurrentLines(), ','));
 
         // 去硬换行的连贯文本: 屏幕上换行多是排版, 粘进文档/聊天时不想要这些断行
-        _copyPlain.Text = "复制段落";
+        _copyPlain.Text = "段落 (去换行)";
         _copyPlain.ToolTipText = "合并为连贯段落 (去掉排版造成的硬换行)";
         _copyPlain.Click += (_, _) => CopyText(OcrText.ToPlainText(CurrentLines()));
 
-        _copyMarkdown.Text = "复制 MD";
+        _copyMarkdown.Text = "Markdown";
         _copyMarkdown.ToolTipText = "导出为 Markdown (段落间空行分隔)";
         _copyMarkdown.Click += (_, _) => CopyText(OcrText.ToMarkdown(CurrentLines()));
+
+        _copyMenu.DropDownItems.AddRange(
+        [
+            _copyAll,
+            new ToolStripSeparator(),
+            _copyCsv,
+            _copyCsvComma,
+            _copyPlain,
+            _copyMarkdown,
+        ]);
 
         _saveImage.Text = "保存图片";
         _saveImage.ToolTipText = "保存截图为 PNG";
@@ -148,6 +194,12 @@ public sealed class OcrResultForm : Form
         _colsebtn.ToolTipText = "关闭当前窗口";
         _colsebtn.Click += (_, _) => this.Close();
 
+        // 「关闭」推到工具栏最右端: ToolStrip 默认是左对齐流式布局,
+        // 把该项(及其前面的分隔线)标记为 Alignment.Right 后, 布局引擎会把它贴到右边缘,
+        // 窗口变宽时它跟着走 —— 比手工塞一个空白弹簧可靠 (弹簧宽度需自己算, 易漂移)。
+        _colsebtn.Alignment = ToolStripItemAlignment.Right;
+
+        var closeSep = new ToolStripSeparator { Alignment = ToolStripItemAlignment.Right };
 
         _toolStrip.Items.Add(_zoomOut);
         _toolStrip.Items.Add(_zoomLabel);
@@ -156,15 +208,13 @@ public sealed class OcrResultForm : Form
         _toolStrip.Items.Add(new ToolStripSeparator());
         _toolStrip.Items.Add(_selectAll);
         _toolStrip.Items.Add(_copySelection);
-        _toolStrip.Items.Add(_copyAll);
-        _toolStrip.Items.Add(_copyCsv);
-        _toolStrip.Items.Add(_copyCsvComma);
-        _toolStrip.Items.Add(_copyPlain);
-        _toolStrip.Items.Add(_copyMarkdown);
+        _toolStrip.Items.Add(_copyMenu);
         _toolStrip.Items.Add(new ToolStripSeparator());
         _toolStrip.Items.Add(_saveImage);
-        _toolStrip.Items.Add(new ToolStripSeparator());
+        // 右侧组: 分隔线在最左, 因此按"右对齐项从右往左依次排布"的顺序加入,
+        // 先加关闭、再加分隔线, 视觉上才是 [保存图片] | [关闭]
         _toolStrip.Items.Add(_colsebtn);
+        _toolStrip.Items.Add(closeSep);
 
     }
 
@@ -892,6 +942,21 @@ internal sealed class DarkToolStripRenderer : ToolStripProfessionalRenderer
         // 统一浅色文字 (含状态标签/缩放比例标签)
         e.TextColor = e.Item.Enabled ? Color.FromArgb(226, 230, 236) : Color.FromArgb(110, 114, 120);
         base.OnRenderItemText(e);
+    }
+
+    /// <summary>
+    /// 不画工具栏外边框。
+    ///
+    /// 踩过的坑: <see cref="ToolStripProfessionalRenderer"/> 的默认实现会在**右边缘**补一条
+    /// 1px 竖线, 颜色不受 <c>ProfessionalColorTable.ToolStripBorder</c> 控制 ——
+    /// 深色主题下它渲染成接近纯白 (实测 (242,242,242)), 表现为右上角一条突兀的"白色竖线"。
+    /// 实测对照: 裸 ToolStrip 用 Professional 有该线, 换成 System 或不调 base 就没有。
+    ///
+    /// 本工具栏嵌在深色窗体顶部, 四边不需要描边, 直接短路掉最干净。
+    /// </summary>
+    protected override void OnRenderToolStripBorder(ToolStripRenderEventArgs e)
+    {
+        // 有意不调用 base: 该边框只会带来右边缘的白线
     }
 }
 
