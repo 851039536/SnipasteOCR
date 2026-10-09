@@ -71,12 +71,54 @@ internal static class ToolbarCheck
             Check(uniform, $"六个工具按钮等宽 (实得首宽 {w0})");
         }
 
+        // ===== 工具栏不得有描边 =====
+        // 回归: 原先在 ClientRectangle 上描 1px 半透明边框, 但 1px 画笔以路径为中心,
+        // 上/左两边的线有一半落在控件外被裁剪, 下/右却完整 —— 同一条边框四边亮度不一致,
+        // 表现为"有些位置正常, 有些不正常"。已整体移除。
+        {
+            var tb5 = new AnnotationToolbar();
+            using var edgeBmp = new Bitmap(tb5.Width, tb5.Height, PixelFormat.Format32bppArgb);
+            using (var g = Graphics.FromImage(edgeBmp))
+            using (var pea = new PaintEventArgs(g, new Rectangle(0, 0, tb5.Width, tb5.Height)))
+            {
+                typeof(AnnotationToolbar)
+                    .GetMethod("OnPaint", BindingFlags.NonPublic | BindingFlags.Instance)!
+                    .Invoke(tb5, [pea]);
+            }
+
+            // 四边中点不得出现"描边的偏白像素"。
+            // 注意: 圆角路径在边缘的抗锯齿会让某个通道差 1 (如 B=43 vs 44),
+            // 那是填充边缘的正常过渡而非边框, 因此这里判断"明显亮于底色"而不是精确相等。
+            var mid = new[]
+            {
+                (X: tb5.Width / 2, Y: 0),
+                (X: tb5.Width / 2, Y: tb5.Height - 1),
+                (X: 0, Y: tb5.Height / 2),
+                (X: tb5.Width - 1, Y: tb5.Height / 2),
+            };
+            bool allBase = true;
+            string detail = string.Empty;
+            foreach (var (X, Y) in mid)
+            {
+                var c = edgeBmp.GetPixel(X, Y);
+                // 描边为 (70,255,255,255) 叠加在底色上, 亮度会明显抬高 (R 远超 38)
+                if (c.R > 60 || c.G > 60 || c.B > 60)
+                {
+                    allBase = false;
+                    detail = $"({X},{Y})=({c.R},{c.G},{c.B})";
+                }
+            }
+            Check(allBase, $"工具栏四边为底色填充, 无描边残留 {detail}");
+            tb5.Dispose();
+        }
+
         // ===== 线宽预览必须用当前颜色 =====
         // 回归: 原先线宽预览固定用白色, 选了黄色也显示白色, 无法预判实际颜色。
         {
             var tb4 = new AnnotationToolbar();
             // 切到蓝色 (调色板第 5 个: 235,59,36 红 -> 循环 4 次到 33,150,243 蓝)
             for (int i = 0; i < 4; i++) tb4.CycleColor();
+
             Check(tb4.CurrentColor == Color.FromArgb(255, 33, 150, 243), "已切到蓝色");
 
             using var wbmp = new Bitmap(tb4.Width, tb4.Height, PixelFormat.Format32bppArgb);

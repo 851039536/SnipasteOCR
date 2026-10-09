@@ -218,14 +218,14 @@ public sealed class AnnotationToolbar : Control
         g.SmoothingMode = SmoothingMode.AntiAlias;
         g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
 
-        // 背景 + 圆角 (同一个路径对象同时用于填充与描边, 避免重复构造)
+        // 只填充圆角底, 不描边。
+        // 原先在 ClientRectangle 上描 1px 半透明边框, 但 1px 画笔以路径为中心,
+        // 上/左两条边的线有一半落在 (0,0) 之外被裁剪, 下/右两条边却完整画在里面 ——
+        // 同一条边框四边粗细与亮度不一致, 看起来"有些地方正常, 有些地方怪"。
+        // 深色底本身与截图已有足够对比, 直接去掉边框最干净。
         using (var path = RoundedRect(ClientRectangle, 6))
-        {
-            using (var bg = new SolidBrush(BackColor))
-                g.FillPath(bg, path);
-            using var border = new Pen(Color.FromArgb(70, 255, 255, 255), 1f);
-            g.DrawPath(border, path);
-        }
+        using (var bg = new SolidBrush(BackColor))
+            g.FillPath(bg, path);
 
         _toolRects.Clear();
         _colorRects.Clear();
