@@ -21,6 +21,7 @@ public sealed class TrayController : IDisposable
     private const int CMD_HOTKEY_SETTINGS = 0x1005;
     private const int CMD_STARTUP = 0x1006;
     private const int CMD_OCR_CLIPBOARD = 0x1007;
+    private const int CMD_PREVENT_SLEEP = 0x1008;
     private static readonly uint TRAY_CALLBACK = User32.WM_APP + 1;
 
     // 静态持有: 窗口过程委托必须防止被 GC; 单实例引用用于回调
@@ -51,6 +52,13 @@ public sealed class TrayController : IDisposable
     /// 因为注册表写入可能失败 (策略锁定/无权限) —— 不能让勾选状态骗人。
     /// </summary>
     public event Action<bool>? StartupToggleRequested;
+
+    /// <summary>
+    /// 用户切换"防止电脑休眠" (参数为期望的新状态)。
+    /// 与 <see cref="StartupToggleRequested"/> 同样由 Program 处理并回读真实结果,
+    /// API 调用失败时勾选会回到未勾选, 不骗人。
+    /// </summary>
+    public event Action<bool>? PreventSleepToggleRequested;
 
     /// <summary>注册窗口类与宿主窗口, 创建右键菜单和托盘图标; 任一步失败抛 Win32Exception</summary>
     public TrayController()
@@ -99,17 +107,21 @@ public sealed class TrayController : IDisposable
             OcrService.DisplayName(OcrModelProfile.Tiny));
 
         User32.AppendMenu(_hMenu, User32.MF_STRING, (IntPtr)CMD_SNIP_OCR, "截图并识别 (F1)");
-        User32.AppendMenu(_hMenu, User32.MF_STRING, (IntPtr)CMD_SNIP_IMAGE, "截图并标注 (F2)");
+        User32.AppendMenu(_hMenu, User32.MF_STRING, (IntPtr)CMD_SNIP_IMAGE, "截图并标注 (F3)");
         User32.AppendMenu(_hMenu, User32.MF_STRING, (IntPtr)CMD_OCR_CLIPBOARD, "识别剪贴板图片");
         User32.AppendMenu(_hMenu, User32.MF_SEPARATOR, IntPtr.Zero, null);
         User32.AppendMenu(_hMenu, User32.MF_STRING | User32.MF_POPUP, _hModelMenu, "识别模型");
         User32.AppendMenu(_hMenu, User32.MF_STRING, (IntPtr)CMD_HOTKEY_SETTINGS, "热键设置…");
         User32.AppendMenu(_hMenu, User32.MF_STRING, (IntPtr)CMD_STARTUP, "开机自动启动");
+        // 文案用"防止电脑休眠"而非"保持屏幕常亮": 本机制阻止的是空闲触发的休眠/息屏,
+        // 合盖、按电源键、屏保锁屏都拦不住, 文案不能给出做不到的承诺。
+        User32.AppendMenu(_hMenu, User32.MF_STRING, (IntPtr)CMD_PREVENT_SLEEP, "防止电脑休眠");
         User32.AppendMenu(_hMenu, User32.MF_SEPARATOR, IntPtr.Zero, null);
         User32.AppendMenu(_hMenu, User32.MF_STRING, (IntPtr)CMD_EXIT, "退出");
 
         SyncModelChecks();
         SyncStartupCheck();
+        SyncPreventSleepCheck();
 
         // 3. 托盘图标
         var nid = new Shell32.NOTIFYICONDATA
@@ -120,7 +132,7 @@ public sealed class TrayController : IDisposable
             uFlags = Shell32.NIF_MESSAGE | Shell32.NIF_ICON | Shell32.NIF_TIP | Shell32.NIF_VERSION | Shell32.NIF_SHOWTIP,
             uCallbackMessage = TRAY_CALLBACK,
             hIcon = _hIcon,
-            szTip = "SnipasteOCR - F1 截图识别 / F2 截图标注",
+            szTip = "SnipasteOCR - F1 截图识别 / F3 截图标注",
             uVersion = 4,
         };
         Shell32.Shell_NotifyIcon(Shell32.NIM_SETVERSION, ref nid);
@@ -206,6 +218,11 @@ public sealed class TrayController : IDisposable
                 _instance?.StartupToggleRequested?.Invoke(!StartupRegistration.IsEnabled());
                 _instance?.SyncStartupCheck();
                 break;
+            case CMD_PREVENT_SLEEP:
+                // 与开机自启同理: 传"取反后的当前真实状态", 不靠菜单自己的勾号推断
+                _instance?.PreventSleepToggleRequested?.Invoke(!SleepPreventer.IsActive);
+                _instance?.SyncPreventSleepCheck();
+                break;
             case CMD_EXIT: _instance?.ExitRequested?.Invoke(); break;
         }
     }
@@ -241,6 +258,14 @@ public sealed class TrayController : IDisposable
             _hMenu,
             (uint)CMD_STARTUP,
             User32.MF_BYCOMMAND | (StartupRegistration.IsEnabled() ? User32.MF_CHECKED : User32.MF_UNCHECKED));
+    }
+
+    public void SyncPreventSleepCheck()
+    {
+        User32.CheckMenuItem(
+            _hMenu,
+            (uint)CMD_PREVENT_SLEEP,
+            User32.MF_BYCOMMAND | (SleepPreventer.IsActive ? User32.MF_CHECKED : User32.MF_UNCHECKED));
     }
 
     /// <summary>从嵌入 PNG 资源生成 32x32 托盘图标; 资源缺失时用蓝色方块占位</summary>

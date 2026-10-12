@@ -164,10 +164,10 @@ internal static class Drive
             return;
         }
 
-        // 1. 用 F2 触发截图 (默认热键)
-        Say("[1] 发送 F2 触发热键...");
+        // 1. 用 F3 触发截图 (默认热键)
+        Say("[1] 发送 F3 触发热键...");
         SetForegroundWindow(GetForegroundWindow());
-        PressKey(0x71); // VK_F2
+        PressKey(0x73); // VK_F3
         Thread.Sleep(1500);
 
         // 2. 找覆盖层窗口
@@ -177,16 +177,16 @@ internal static class Drive
         // 热键可能被别的程序占用 -> 首次未出现时重试几次并放宽判定
         for (int attempt = 0; overlay == IntPtr.Zero && attempt < 3; attempt++)
         {
-            Say($"    第 {attempt + 1} 次重试 F2...");
-            PressKey(0x71);
+            Say($"    第 {attempt + 1} 次重试 F3...");
+            PressKey(0x73);
             Thread.Sleep(1500);
             overlay = FindOverlay((uint)proc.Id);
         }
 
         if (overlay == IntPtr.Zero)
         {
-            Say("!! 未找到覆盖层窗口 — F2 热键可能被其它程序占用");
-            Say("   (浏览器/IDE/其它截图工具常占用 F2)");
+            Say("!! 未找到覆盖层窗口 — F3 热键可能被其它程序占用");
+            Say("   (浏览器/IDE/其它截图工具可能占用功能键)");
             proc.Kill();
             return;
         }

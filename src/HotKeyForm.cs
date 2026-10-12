@@ -93,7 +93,7 @@ public sealed class HotKeyForm : Form
         reset.Click += (_, _) =>
         {
             _ocrBox.SetKey(0x70, 0);    // F1
-            _imageBox.SetKey(0x71, 0);  // F2
+            _imageBox.SetKey(0x73, 0);  // F3
         };
 
         // 两个热键不能相同, 否则一个动作将永远无法触发
@@ -177,7 +177,7 @@ internal sealed class HotKeyBox : TextBox
         restore.Start();
     }
 
-    // 捕获按键: 用 ProcessCmdKey 才能在文本框里拦到 F1/F2/Tab 等功能键
+    // 捕获按键: 用 ProcessCmdKey 才能在文本框里拦到 F1/F3/Tab 等功能键
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
     {
         // 单独按下的纯修饰键不构成热键, 忽略

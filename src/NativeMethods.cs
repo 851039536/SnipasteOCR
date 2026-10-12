@@ -288,6 +288,27 @@ public static class Kernel32
 
     [DllImport("kernel32.dll")]
     public static extern uint GetCurrentThreadId();
+
+    // ===== 电源/休眠控制 =====
+
+    // SetThreadExecutionState 的标志位 (winbase.h)。
+    // 这套 API 是微软为"防止系统休眠/息屏"专门提供的入口, 与"模拟鼠标移动"相比没有任何副作用:
+    // 不产生输入事件、不移动光标、不干扰用户鼠标操作与截图框选。
+    /// <summary>重置空闲计时器 (系统/显示器保持"在用"状态), 与其它标志组合使用</summary>
+    public const uint ES_SYSTEM_REQUIRED = 0x00000001;
+    /// <summary>强制显示器保持开启 (仅 ES_SYSTEM_REQUIRED 不阻止息屏)</summary>
+    public const uint ES_DISPLAY_REQUIRED = 0x00000002;
+    /// <summary>不清除此前设置的状态, 直到显式调用本函数并只传该标志为止</summary>
+    public const uint ES_CONTINUOUS = 0x80000000;
+
+    /// <summary>
+    /// 设置当前线程的执行状态需求。
+    /// 注意语义是"线程级"的: 状态在<strong>调用它的那个线程</strong>上生效, 且该线程退出后自动失效。
+    /// 因此必须由常驻线程 (本程序的主消息循环线程) 调用, 不能在临时线程里调用后指望长期有效。
+    /// 返回 0 表示失败 (老系统不支持 / 被策略拦截)。
+    /// </summary>
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern uint SetThreadExecutionState(uint esFlags);
 }
 
 public static class Input
@@ -312,7 +333,7 @@ public static class Input
     [DllImport("user32.dll", SetLastError = true)]
     public static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
 
-    /// <summary>模拟一次按下+释放 F1/F2</summary>
+    /// <summary>模拟一次按下+释放 F1/F3</summary>
     public static void SendKey(ushort vk)
     {
         var down = new INPUT { type = 0 }; down.ki.wVk = vk;

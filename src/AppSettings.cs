@@ -15,8 +15,8 @@ public sealed class AppSettings
     /// <summary>截图并识别热键的虚拟键码 (默认 F1 = 0x70)</summary>
     public int HotKeyOcr { get; set; } = 0x70;
 
-    /// <summary>仅截图热键的虚拟键码 (默认 F2 = 0x71)</summary>
-    public int HotKeyImage { get; set; } = 0x71;
+    /// <summary>仅截图热键的虚拟键码 (默认 F3 = 0x73)</summary>
+    public int HotKeyImage { get; set; } = 0x73;
 
     /// <summary>热键修饰符 (0 = 无; MOD_ALT=1, MOD_CONTROL=2, MOD_SHIFT=4, MOD_WIN=8)</summary>
     public int HotKeyModifiers { get; set; } = 0;
@@ -26,6 +26,13 @@ public sealed class AppSettings
 
     /// <summary>跟随系统的开机自启</summary>
     public bool RunAtStartup { get; set; }
+
+    /// <summary>
+    /// 防止电脑休眠/息屏 (SetThreadExecutionState)。默认关闭 ——
+    /// 默认值必须是"不改变系统原有电源行为", 不能替用户做主把机器变成永不睡眠。
+    /// 新增字段给了默认值, 旧的 settings.json 反序列化后仍然可用。
+    /// </summary>
+    public bool PreventSleep { get; set; }
 }
 
 /// <summary>

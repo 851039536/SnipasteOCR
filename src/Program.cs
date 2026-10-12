@@ -39,6 +39,12 @@ internal static class Program
             if (StartupRegistration.IsEnabled() != SettingsStore.Current.RunAtStartup)
                 StartupRegistration.SetEnabled(SettingsStore.Current.RunAtStartup);
 
+            // 恢复"防止电脑休眠"。必须在这个常驻线程 (Main) 上调用 ——
+            // SetThreadExecutionState 的状态是线程级的, 换到临时线程里调用会在该线程退出时失效。
+            // 调用可能失败 (老系统/安全策略), 此时把设置改回 false, 保证设置文件与真实状态一致。
+            if (SettingsStore.Current.PreventSleep && !SleepPreventer.Restore(true))
+                SettingsStore.Update(s => s.PreventSleep = false);
+
             using var tray = new TrayController();
             // 托盘图标 + 不可见宿主窗口; 全局热键也注册在该窗口上
             tray.SnipOcrRequested += () => SnipCoordinator.Start(SnipMode.Ocr);
@@ -56,7 +62,7 @@ internal static class Program
                 if (!SnipCoordinator.StartFromClipboard())
                 {
                     MessageBox.Show(
-                        "剪贴板里没有图片。\n\n请先复制一张图片 (或用 F2 截图), 再试。",
+                        "剪贴板里没有图片。\n\n请先复制一张图片 (或用 F3 截图), 再试。",
                         "SnipasteOCR", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
             };
@@ -76,9 +82,24 @@ internal static class Program
                 SettingsStore.Update(s => s.RunAtStartup = StartupRegistration.IsEnabled());
             };
 
+            // 防止电脑休眠: 失败要如实告知并把勾选纠正回去 (与开机自启同一套"不骗人"约定)
+            tray.PreventSleepToggleRequested += want =>
+            {
+                bool actual = SleepPreventer.Set(want);
+                if (want && !actual)
+                {
+                    MessageBox.Show(
+                        "无法开启防休眠 (系统可能不支持该接口或被安全策略拦截)。",
+                        "SnipasteOCR", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+
+                // 落盘的是"实际生效"的状态, 而不是用户点选的意图
+                SettingsStore.Update(s => s.PreventSleep = actual);
+            };
+
             IntPtr hwnd = tray.WindowHandle;
 
-            // 热键来自设置 (默认 F1 / F2), 支持运行期更换
+            // 热键来自设置 (默认 F1 / F3), 支持运行期更换
             var settings = SettingsStore.Current;
             using var hotKeys = new HotKeyManager(hwnd);
             var failures = hotKeys.RegisterAll(settings.HotKeyOcr, settings.HotKeyImage, settings.HotKeyModifiers);
@@ -157,6 +178,11 @@ internal static class Program
         }
         finally
         {
+            // 退出前还原系统正常休眠行为。
+            // 严格来说线程退出后该状态本就自动失效, 但这里显式清除有两个好处:
+            // 一是语义明确 (谁开启谁负责关闭), 二是覆盖"异常路径退出"的情况, 不留隐患。
+            SleepPreventer.Set(false);
+
             // 退出前释放 OCR 引擎 (SIMD 内存缓冲)
             OcrService.Instance.Dispose();
         }
