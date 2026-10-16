@@ -26,8 +26,9 @@ src/                       产品代码 (唯一的出货工程, 也是唯一的 
   TrayController.cs        Win32 托盘图标 + 菜单
   StartupRegistration.cs   开机自启 (写 HKCU 的 Run 键, 无管理员权限)
   SleepPreventer.cs        防休眠 (SetThreadExecutionState; 不移动鼠标)
+  PinnedImageForm.cs       贴图窗口 (钉在屏幕上的置顶小窗, 可拖动/右键关闭)
   NativeMethods.cs         Win32 P/Invoke (消息/热键/窗口/菜单/托盘/输入模拟)
-tests/AnnotationTests/     离线自检, 136 项 (几何/命中/历史/渲染/工具栏/编辑框/OCR 后处理)
+tests/AnnotationTests/     离线自检, 139 项 (几何/命中/历史/渲染/工具栏/编辑框/OCR 后处理)
 tests/InteractiveTests/    交互自检, 22 项 (真实窗口 + 真实按键, 需要桌面会话)
 tools/DriveTest/           端到端驱动实际 exe (真实鼠标键盘事件 + 抓屏取证)
 ```
@@ -133,6 +134,9 @@ dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
   绘制/命中/字符定位三套坐标统一经 DPI 换算(Per-Monitor DPI v2)。
 - 覆盖层预览用 `Graphics.ScaleTransform` 缩放绘制,导出时用 `TranslateTransform` 平移 ——
   同一份数据、同一个渲染引擎,因此预览与导出**像素级一致**。
+- **贴图窗口的尺寸也要换算**:`PinnedImageForm` 收到的是**物理像素**位图,而 `ClientSize` 是
+  **逻辑像素**。必须除以 DPI 因子(与 `OcrResultForm.DpiFactor` 同一套),否则 150% 缩放下贴图被放大
+  1.5 倍且只画出左上角一部分。绘制时同样要按 `ClientSize` 尺寸还原,不能直接 `DrawImageUnscaled`。
 
 ### 窗口 / 焦点(WinForms 的坑)
 
@@ -145,6 +149,13 @@ dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
   依赖的"父窗口先画背景、子控件再叠加"协作在此**不成立**,透明子控件会被父窗口整屏绘制覆盖
   (实测打字前后 **0 像素**差异)。因此文字显示由覆盖层自己的 `DrawEditingText` 完成,
   `TextEditorOverlay` 被放到屏幕外、仅承担接收键盘输入(焦点与可见性无关)。
+- **贴图窗口拖动用 `WM_NCLBUTTONDOWN + HTCAPTION`,不要自己算鼠标偏移**:
+  自己实现要处理"鼠标移出窗口/被遮挡/高 DPI 换算"一堆边界,交给系统的标题栏拖拽逻辑则全部自动正确
+  (它内部用屏幕坐标与鼠标捕获)。调用前必须 `ReleaseCapture()`,否则 WinForms 自己的鼠标捕获
+  会让系统的拖拽循环收不到消息。贴图另设 `WS_EX_NOACTIVATE` 且重写 `ShowWithoutActivation => true`,
+  避免钉住时抢走用户正在输入程序的焦点 —— 注意 `ShowWithoutActivation` 是**只读属性, 只能重写**,
+  直接赋值编译不过。
+- **贴图按钮只加在 F3(图片)模式**:OCR 模式的产物是文字,钉一张原图没有意义。
 
 ### 并发 / OCR
 

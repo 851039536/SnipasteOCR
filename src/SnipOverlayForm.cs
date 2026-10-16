@@ -74,6 +74,7 @@ public sealed class SnipOverlayForm : Form
         _toolbar.ConfirmRequested += Confirm;
         _toolbar.CancelRequested += Close;
         _toolbar.SaveRequested += SaveToFile;
+        _toolbar.PinRequested += PinToScreen;
         Controls.Add(_toolbar);
 
         SyncToolbarState();
@@ -859,6 +860,34 @@ public sealed class SnipOverlayForm : Form
             }
             crop.Dispose();
         }
+    }
+
+    /// <summary>
+    /// 贴图 (钉住): 把选区连同标注钉成屏幕上的置顶小窗, 由用户自行摆放与关闭。
+    ///
+    /// 与 <see cref="Confirm"/> 的区别: Confirm 是把图交出去 (剪贴板 / 识别),
+    /// 本方法则是把图留在屏幕上继续看 —— 典型用途是对照着截图在别处操作。
+    ///
+    /// 仅在图片模式 (F3) 提供; OCR 模式的产物是文字, 钉一张原图没有意义, 且按钮本就只加在 F3 流程里。
+    /// </summary>
+    private void PinToScreen()
+    {
+        if (_mode != SnipMode.Image)
+            return;
+
+        CommitEditorIfOpen();
+
+        var crop = RenderResult();
+
+        // 贴图窗口直接铺在选区原来的位置上 —— 用户框选时就选好了位置,
+        // 钉住后原地出现最符合直觉 (Snipaste 也是这个行为), 之后可自由拖动。
+        Rectangle sel = _selection ?? Rectangle.Empty;
+        Point screenLocation = new(sel.Left + Left, sel.Top + Top);
+
+        Close();
+
+        var pinned = new PinnedImageForm(crop, screenLocation);
+        pinned.Show();
     }
 
     /// <summary>保存为 PNG 文件 (从工具栏触发)</summary>

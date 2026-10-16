@@ -99,12 +99,16 @@ public sealed class AnnotationToolbar : Control
     /// <summary>点击保存到文件</summary>
     public event Action? SaveRequested;
 
+    /// <summary>点击贴图(钉住): 把结果钉在屏幕上</summary>
+    public event Action? PinRequested;
+
     // ===== 命中区域 (在 OnPaint 中重建, 供鼠标命中) =====
     private readonly List<(Rectangle Rect, AnnotationTool Tool)> _toolRects = [];
     private readonly List<(Rectangle Rect, Color Color)> _colorRects = [];
     private readonly List<(Rectangle Rect, float Width)> _widthRects = [];
     private Rectangle _undoRect;
     private Rectangle _redoRect;
+    private Rectangle _pinRect;
     private Rectangle _saveRect;
     private Rectangle _confirmRect;
     private Rectangle _cancelRect;
@@ -173,6 +177,11 @@ public sealed class AnnotationToolbar : Control
         var redo = new Rectangle(x, 0, ButtonSize, ButtonSize);
         x += ButtonSize + Gap;
 
+        // 贴图(钉住): 与撤销/重做同组 —— 都是"对当前结果做点什么"的动作按钮,
+        // 放在这里不必再插一条分隔线, 也避免工具栏继续变宽。
+        var pin = new Rectangle(x, 0, ButtonSize, ButtonSize);
+        x += ButtonSize + Gap;
+
         x += SepWidth - Gap;
         int sep4 = x - SepWidth / 2 - 1;
 
@@ -185,7 +194,7 @@ public sealed class AnnotationToolbar : Control
 
         // width<=0: 返回"内容右边界 + 右留白"; 否则用给定宽度 (仅用于排版, 结果一致)
         int total = x + PadRight;
-        return new ToolbarLayout(tools, color, widths, undo, redo, save, confirm, cancel,
+        return new ToolbarLayout(tools, color, widths, undo, redo, pin, save, confirm, cancel,
             sep1, sep2, sep3, sep4, total);
     }
 
@@ -196,6 +205,7 @@ public sealed class AnnotationToolbar : Control
         Rectangle[] WidthButtons,
         Rectangle Undo,
         Rectangle Redo,
+        Rectangle Pin,
         Rectangle Save,
         Rectangle Confirm,
         Rectangle Cancel,
@@ -310,6 +320,9 @@ public sealed class AnnotationToolbar : Control
         _redoRect = CenterY(L.Redo, ButtonSize, cy);
         DrawIconButton(g, _redoRect, ToolbarIcon.Redo, CanRedo, _hoverActionKey == "redo");
 
+        _pinRect = CenterY(L.Pin, ButtonSize, cy);
+        DrawIconButton(g, _pinRect, ToolbarIcon.Pin, enabled: true, _hoverActionKey == "pin");
+
         DrawSeparator(g, L.Sep4, cy);
 
         // ---- 保存 / 确认 / 取消 (等宽等高, 三者对齐) ----
@@ -332,6 +345,7 @@ public sealed class AnnotationToolbar : Control
     {
         Undo,
         Redo,
+        Pin,
     }
 
     /// <summary>
@@ -351,6 +365,16 @@ public sealed class AnnotationToolbar : Control
 
         int cx = rect.X + rect.Width / 2;
         int cy = rect.Y + rect.Height / 2;
+
+        using var brush = new SolidBrush(fg);
+
+        // 图钉单独画: 形状与撤销/重做的圆弧毫无关系, 塞进同一套角度公式只会两头难懂。
+        if (icon == ToolbarIcon.Pin)
+        {
+            DrawPinGlyph(g, cx, cy, fg, brush);
+            return;
+        }
+
         const float r = 8f;   // 圆弧半径
         const float stroke = 2f;
 
@@ -375,13 +399,45 @@ public sealed class AnnotationToolbar : Control
         float ay = cy + 2 + r * MathF.Sin(rad);
         float dir = redo ? 1f : -1f;
 
-        using var brush = new SolidBrush(fg);
         g.FillPolygon(brush,
         [
             new PointF(ax + dir * 4f, ay),
             new PointF(ax - dir * 3f, ay - 4.5f),
             new PointF(ax - dir * 3f, ay + 4.5f),
         ]);
+    }
+
+    /// <summary>
+    /// 绘制图钉图标 (贴图/钉住)。
+    ///
+    /// 造型: 上方一个梯形的钉帽 + 一根竖直的针。刻意画得简洁对称 ——
+    /// 在 34px 按钮、约 16px 的可视范围内, 细节越多越容易糊成一团黑。
+    /// 与其他图标一样为纯矢量, 不依赖任何字体码位。
+    /// </summary>
+    private static void DrawPinGlyph(Graphics g, int cx, int cy, Color fg, Brush brush)
+    {
+        const float stroke = 2f;
+        using var pen = new Pen(fg, stroke) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+
+        // 钉帽: 上窄下宽的梯形, 居中对齐
+        float halfTop = 3.5f;
+        float halfBottom = 6.5f;
+        float top = cy - 7f;
+        float bottom = cy + 0.5f;
+
+        g.FillPolygon(brush,
+        [
+            new PointF(cx - halfTop, top),
+            new PointF(cx + halfTop, top),
+            new PointF(cx + halfBottom, bottom),
+            new PointF(cx - halfBottom, bottom),
+        ]);
+
+        // 钉帽下沿的横线, 让"帽"与"针"之间有明确分界
+        g.DrawLine(pen, cx - halfBottom, bottom, cx + halfBottom, bottom);
+
+        // 针: 从钉帽底部向下
+        g.DrawLine(pen, cx, bottom, cx, cy + 7.5f);
     }
 
     /// <summary>绘制文字按钮 (带底色)</summary>
@@ -563,6 +619,7 @@ public sealed class AnnotationToolbar : Control
         {
             case "undo": if (CanUndo) UndoRequested?.Invoke(); break;
             case "redo": if (CanRedo) RedoRequested?.Invoke(); break;
+            case "pin": PinRequested?.Invoke(); break;
             case "save": SaveRequested?.Invoke(); break;
             case "confirm": ConfirmRequested?.Invoke(); break;
             case "cancel": CancelRequested?.Invoke(); break;
@@ -592,6 +649,7 @@ public sealed class AnnotationToolbar : Control
     {
         if (_undoRect.Contains(p)) return "undo";
         if (_redoRect.Contains(p)) return "redo";
+        if (_pinRect.Contains(p)) return "pin";
         if (_saveRect.Contains(p)) return "save";
         if (_confirmRect.Contains(p)) return "confirm";
         if (_cancelRect.Contains(p)) return "cancel";

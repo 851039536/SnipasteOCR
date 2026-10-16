@@ -140,6 +140,14 @@ public static class User32
     /// <summary>注销热键</summary>
     public static extern bool UnregisterHotKey(IntPtr hWnd, int id);
 
+    [DllImport("user32.dll")]
+    /// <summary>释放鼠标捕获 (贴图窗口靠它把拖动交给系统的标题栏拖拽逻辑)</summary>
+    public static extern bool ReleaseCapture();
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    /// <summary>发送窗口消息 (与 ReleaseCapture 配合发起 WM_NCLBUTTONDOWN 拖动)</summary>
+    public static extern IntPtr SendMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+
     // ===== 窗口类 / 窗口 =====
 
     [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]

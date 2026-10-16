@@ -157,7 +157,10 @@ internal static class ToolbarCheck
         // ===== 整体尺寸: 工具栏是浮在截图上的辅助控件, 必须保持紧凑 =====
         // 回归: 曾达 730x58 (含两行文字标签), 在小选区里几乎盖住半个画面且观感松散。
         // 移除全部文字后应回到单行 ~42px 高度。
-        Check(tb.Width <= 620, $"工具栏宽度保持紧凑 (实得 {tb.Width}, 上限 620)");
+        // 上限从 620 提到 650: 新增「钉住」图标按钮(34px + 3px 间距)后必然超出原上限。
+        // 这是有意识的取舍 —— 该按钮是功能需求, 而 650px 相对 1920 以上的常见屏宽仍属紧凑;
+        // 若将来还要继续加按钮, 应改为分组/溢出菜单, 而不是一路抬高这个数字。
+        Check(tb.Width <= 650, $"工具栏宽度保持紧凑 (实得 {tb.Width}, 上限 650)");
         Check(tb.Height <= 46, $"工具栏高度保持紧凑 (实得 {tb.Height}, 上限 46)");
 
         // ===== 声明宽度必须与实际布局一致 =====
@@ -186,6 +189,8 @@ internal static class ToolbarCheck
         // 按钮不能重叠 (同一行内的命中区域互斥)
         bool overlap = false;
         var all = new List<Rectangle> { cancel };
+        foreach (var f in new[] { "_undoRect", "_redoRect", "_pinRect", "_saveRect", "_confirmRect" })
+            all.Add((Rectangle)typeof(AnnotationToolbar).GetField(f, flags)!.GetValue(tb)!);
         foreach (var item in (System.Collections.IEnumerable)typeof(AnnotationToolbar)
                      .GetField("_toolRects", flags)!.GetValue(tb)!)
             all.Add(RectOf(item));
@@ -247,6 +252,17 @@ internal static class ToolbarCheck
 
             Check(undoPx > 8, $"撤销图标可见 (非背景像素={undoPx})");
             Check(redoPx > 8, $"重做图标可见 (非背景像素={redoPx})");
+
+            // 图钉(钉住)图标同样必须真的画出像素 —— 它是后来新增的矢量图标,
+            // 与撤销/重做同属"画不出就是空白按钮且不报错"的高危区。
+            var pinRect = (Rectangle)typeof(AnnotationToolbar)
+                .GetField("_pinRect", flags)!.GetValue(tb2)!;
+            int pinPx = CountIconPixels(pinRect, iconBmp);
+            Check(pinPx > 8, $"钉住图标可见 (非背景像素={pinPx})");
+
+            // 图钉必须在横向位于撤销/重做右侧且互不重叠, 否则会盖住彼此
+            Check(pinRect.Left >= redoRect.Right, $"钉住按钮在重做右侧 (pin.Left={pinRect.Left}, redo.Right={redoRect.Right})");
+            Check(!pinRect.IntersectsWith(redoRect), "钉住与重做命中区域不重叠");
 
             // 撤销与重做必须是不同的图形 (镜像)
             bool different = false;
