@@ -66,7 +66,7 @@
 | 字段 | 说明 | 默认 |
 | --- | --- | --- |
 | `modelProfile` | 识别模型档位 (0=高精度, 1=快速) | 0 |
-| `hotKeyOcr` / `hotKeyImage` | 两个热键的虚拟键码 | F1 (0x70) / F3 (0x73) |
+| `hotKeyOcr` / `hotKeyImage` | 两个热键的虚拟键码 | F1 (0x70) / F3 (0x72) |
 | `hotKeyModifiers` | 热键修饰符 (Ctrl=2, Alt=1, Shift=4, Win=8, 可相加) | 0 |
 | `sortReadingOrder` | 结果是否按阅读顺序重排 | true |
 | `runAtStartup` | 是否开机自启 (与注册表实际状态保持一致) | false |

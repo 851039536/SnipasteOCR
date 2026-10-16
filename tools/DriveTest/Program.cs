@@ -167,7 +167,7 @@ internal static class Drive
         // 1. 用 F3 触发截图 (默认热键)
         Say("[1] 发送 F3 触发热键...");
         SetForegroundWindow(GetForegroundWindow());
-        PressKey(0x73); // VK_F3
+        PressKey(0x72); // VK_F3 = 0x72 (注意 0x73 是 F4)
         Thread.Sleep(1500);
 
         // 2. 找覆盖层窗口
@@ -178,7 +178,7 @@ internal static class Drive
         for (int attempt = 0; overlay == IntPtr.Zero && attempt < 3; attempt++)
         {
             Say($"    第 {attempt + 1} 次重试 F3...");
-            PressKey(0x73);
+            PressKey(0x72); // VK_F3
             Thread.Sleep(1500);
             overlay = FindOverlay((uint)proc.Id);
         }

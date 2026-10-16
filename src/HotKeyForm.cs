@@ -93,7 +93,7 @@ public sealed class HotKeyForm : Form
         reset.Click += (_, _) =>
         {
             _ocrBox.SetKey(0x70, 0);    // F1
-            _imageBox.SetKey(0x73, 0);  // F3
+            _imageBox.SetKey(0x72, 0);  // F3 (=0x72; 0x73 是 F4)
         };
 
         // 两个热键不能相同, 否则一个动作将永远无法触发

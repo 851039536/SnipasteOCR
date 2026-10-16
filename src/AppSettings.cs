@@ -15,8 +15,13 @@ public sealed class AppSettings
     /// <summary>截图并识别热键的虚拟键码 (默认 F1 = 0x70)</summary>
     public int HotKeyOcr { get; set; } = 0x70;
 
-    /// <summary>仅截图热键的虚拟键码 (默认 F3 = 0x73)</summary>
-    public int HotKeyImage { get; set; } = 0x73;
+    /// <summary>
+    /// 仅截图热键的虚拟键码 (默认 F3 = 0x72)。
+    /// 注意 VK_F1=0x70 起算, 所以 VK_F3 = 0x72 而不是 0x73 —— 0x73 是 F4。
+    /// 踩过的坑: 早期版本把 0x73 写成 F3, 于是"F3"实际注册成了 F4:
+    /// 用户按 F3 毫无反应, 按 F4 反而触发截图, 且设置界面显示"F3"让人完全摸不着头脑。
+    /// </summary>
+    public int HotKeyImage { get; set; } = 0x72;
 
     /// <summary>热键修饰符 (0 = 无; MOD_ALT=1, MOD_CONTROL=2, MOD_SHIFT=4, MOD_WIN=8)</summary>
     public int HotKeyModifiers { get; set; } = 0;
@@ -84,8 +89,35 @@ public static class SettingsStore
                 return new AppSettings();
 
             string json = File.ReadAllText(FilePath);
-            return JsonSerializer.Deserialize(json, SettingsJsonContext.Default.AppSettings)
-                   ?? new AppSettings();
+            var loaded = JsonSerializer.Deserialize(json, SettingsJsonContext.Default.AppSettings)
+                         ?? new AppSettings();
+
+            // 一次性迁移: 早期版本把"F3"错写成 0x73 (实为 F4), 该错误默认值已经落盘到用户配置里。
+            // 若只改代码里的默认值, 老用户按 F3 仍然没反应 —— 必须把已存盘的错误值也纠正过来。
+            //
+            // 判据刻意收得很窄: 只有"整组值恰好等于旧版默认组合"才迁移。
+            // 用户若主动改过 OCR 热键或加过修饰键, 说明这份配置被手工调过, 此时 0x73 很可能是
+            // 他真的想用 F4, 就应当尊重原意、不动它 (误迁移比不迁移更糟: 会悄悄改掉用户的选择)。
+            if (loaded.HotKeyOcr == 0x70 && loaded.HotKeyImage == 0x73 && loaded.HotKeyModifiers == 0)
+            {
+                loaded.HotKeyImage = 0x72;   // 0x73(F4) -> 0x72(F3)
+
+                // 立即落盘, 让修正在下次启动前就固化下来 (只做一次, 之后不再命中该分支)。
+                // 这里刻意不走 Save(): Save() 依赖 _current, 而此刻 _current 尚未赋值,
+                // 直接写文件才是正确的时机, 也避免在锁内再进锁。
+                try
+                {
+                    File.WriteAllText(FilePath,
+                        JsonSerializer.Serialize(loaded, SettingsJsonContext.Default.AppSettings));
+                }
+                catch
+                {
+                    // 写不进去(只读/占用)也不影响本次运行: 内存里已经是正确值,
+                    // 下次启动会再次尝试迁移, 行为幂等。
+                }
+            }
+
+            return loaded;
         }
         catch
         {
