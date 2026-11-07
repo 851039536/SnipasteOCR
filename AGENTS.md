@@ -15,6 +15,7 @@ src/                       产品代码 (唯一的出货工程, 也是唯一的 
   SnipCoordinator.cs       截图流程调度 (启动覆盖层 / 防止重复启动)
   SnipMode.cs              Ocr | Image
   SnipOverlayForm.cs       全屏覆盖层: 框选、遮罩、标注交互、结果合成
+  SnipGeometry.cs          框选几何唯一来源: 逻辑选区 → 导出物理矩形 / 有效选区判据
   Annotations/             标注引擎 (见下)
   OcrService.cs            OCR 引擎封装 (懒加载 / 档位切换 / 独立线程推理)
   OcrResultForm.cs         结果窗口: 框叠加、字符级拖选、缩放联动
@@ -27,9 +28,10 @@ src/                       产品代码 (唯一的出货工程, 也是唯一的 
   StartupRegistration.cs   开机自启 (写 HKCU 的 Run 键, 无管理员权限)
   SleepPreventer.cs        防休眠 (SetThreadExecutionState; 不移动鼠标)
   PinnedImageForm.cs       贴图窗口 (钉在屏幕上的置顶小窗, 可拖动/右键关闭)
+  SnipSizeBadge.cs         框选实时尺寸徽标 (宽 × 高, 物理像素; 纯函数布局 + 自绘)
   NativeMethods.cs         Win32 P/Invoke (消息/热键/窗口/菜单/托盘/输入模拟)
-tests/AnnotationTests/     离线自检, 139 项 (几何/命中/历史/渲染/工具栏/编辑框/OCR 后处理)
-tests/InteractiveTests/    交互自检, 22 项 (真实窗口 + 真实按键, 需要桌面会话)
+tests/AnnotationTests/     离线自检, 194 项 (几何/命中/历史/渲染/工具栏/尺寸徽标/编辑框/OCR 后处理)
+tests/InteractiveTests/    交互自检, 33 项 (真实窗口 + 真实按键 + 拖拽实时尺寸, 需要桌面会话)
 tools/DriveTest/           端到端驱动实际 exe (真实鼠标键盘事件 + 抓屏取证)
 ```
 
@@ -63,10 +65,10 @@ dotnet publish src/SnipasteOcr.csproj -c Release -r win-x64 --self-contained -p:
 ```
 
 ```powershell
-# 离线自检 (136 项), 无需桌面会话 —— 改完必跑
+# 离线自检 (194 项), 无需桌面会话 —— 改完必跑
 dotnet run --project tests/AnnotationTests              # 期望输出「全部通过」, 退出码 0
 dotnet run --project tests/AnnotationTests -- sample    # 额外输出六种标注样例图
-# 交互自检 (22 项) —— 需要可用的桌面会话
+# 交互自检 (33 项) —— 需要可用的桌面会话
 dotnet run --project tests/InteractiveTests
 # 端到端驱动实际 exe (可选)
 dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
@@ -116,6 +118,9 @@ dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
 | `AnnotationEngine.OutlineColorFor` | 文字标注描边 **和** 正在输入的编辑框描边 |
 | `AnnotationEngine.Draw` | 覆盖层实时预览 **和** 最终合成导出 |
 | `AnnotationToolbar.ComputeLayout`(私有,内部共用) | 工具栏绘制 **和** 宽度测量(`MeasurePreferredWidth`) |
+| `SnipGeometry.ExportRect` | 实时尺寸徽标 **和** `RenderResult` 裁剪导出 **和** 无效选区兜底 |
+| `SnipGeometry.MinDragSide` / `IsValidSelection` | 拖拽/松手判定 **和** 遮罩绘制 **和** 导出判据 |
+| `SnipSizeBadge.Segments`(私有,内部共用) | 徽标文本度量 **和** 分段绘制 |
 
 - `OcrBox.TopEdge` 与 `BottomEdge` 的取点顺序必须**同向**(`X1→X2` 与 `X4→X3`),
   否则按同一参数 `u` 插值出的高亮四边形会自交。
@@ -127,6 +132,10 @@ dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
   且 `ToolbarCheck` 有断言守着"尾部留白 == 7px"与"宽度 ≥ 取消按钮右边界"。
 - 结果窗口的导出按钮(`复制段落`/`复制 MD`)必须走 `OcrText.ToPlainText`/`ToMarkdown`,
   二者共用 `BuildParagraphs`;若各写一份行内接续规则,同一屏文字用两种格式导出会得到不同断句。
+- **尺寸徽标报的数必须来自 `ExportRect`**:早期实现各写一份 `round(宽 × 缩放)`,且只在纵向判断了
+  "上方放不下就塞进选区",横向没夹紧 —— 贴着屏幕右边框选时标签右半截被屏幕裁掉。
+  现在布局统一由 `SnipSizeBadge.ComputeLayout` 夹紧四边(底部不放 —— 那里是工具栏),
+  `SnipSizeCheck` 断言"任何选区位置下徽标都完整落在客户区内"。
 
 ### 坐标系与 DPI
 

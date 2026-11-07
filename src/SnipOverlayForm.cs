@@ -157,7 +157,7 @@ public sealed class SnipOverlayForm : Form
     {
         get
         {
-            if (_selection is not { } sel || sel.Width <= 2 || sel.Height <= 2)
+            if (!SnipGeometry.IsValidSelection(_selection) || _selection is not { } sel)
                 return null;
             float sf = ScaleFactor;
             return new RectangleF(sel.X * sf, sel.Y * sf, sel.Width * sf, sel.Height * sf);
@@ -183,7 +183,7 @@ public sealed class SnipOverlayForm : Form
         var g = e.Graphics;
         g.DrawImage(_screen, 0, 0, ClientSize.Width, ClientSize.Height);
 
-        if (_selection is { } sel && sel.Width > 2 && sel.Height > 2)
+        if (_selection is { } sel && SnipGeometry.IsValidSelection(sel))
         {
             float sf = ScaleFactor;
 
@@ -203,7 +203,8 @@ public sealed class SnipOverlayForm : Form
             using (var pen2 = new Pen(Color.FromArgb(255, 33, 150, 243), 2f))
                 g.DrawRectangle(pen2, new Rectangle(sel.X + 1, sel.Y + 1, Math.Max(0, sel.Width - 2), Math.Max(0, sel.Height - 2)));
 
-            DrawSizeLabel(g, sel, sf);
+            // 实时尺寸: 与导出共用 ExportRect, 保证"标签写的 = 实际裁出来的"
+            SnipSizeBadge.Draw(g, sel, SnipGeometry.ExportRect(sel, sf, _screen.Size).Size, ClientSize);
         }
         else
         {
@@ -288,19 +289,6 @@ public sealed class SnipOverlayForm : Form
 
         using var pen = new Pen(Color.FromArgb(230, 255, 255, 255), MathF.Max(1f, ScaleFactor));
         g.DrawLine(pen, caretX, caretTop, caretX, caretBottom);
-    }
-
-    /// <summary>选区右上角的尺寸标签 (显示物理像素尺寸)</summary>
-    private void DrawSizeLabel(Graphics g, Rectangle sel, float sf)
-    {
-        string label = $"{(int)Math.Round(sel.Width * sf)} \u00d7 {(int)Math.Round(sel.Height * sf)}";
-        using var font = UiFont.Create(12f);
-        Size ts = TextRenderer.MeasureText(label, font);
-        float ly = sel.Top - ts.Height - 8;
-        if (ly < 0) ly = sel.Top + 4;
-        using var bg = new SolidBrush(Color.FromArgb(210, 33, 150, 243));
-        g.FillRectangle(bg, sel.Left + 4, ly, ts.Width + 10, ts.Height + 6);
-        TextRenderer.DrawText(g, label, font, new Point((int)(sel.Left + 9), (int)(ly + 3)), Color.White);
     }
 
     // ===== 鼠标 =====
@@ -404,9 +392,9 @@ public sealed class SnipOverlayForm : Form
         }
 
         var rect = RectFromPoints(_anchor, e.Location);
-        // 与 OnMouseUp 同一 5px 阈值: 点击时鼠标常漂移 1~3px,
+        // 与 OnMouseUp 共用 SnipGeometry.MinDragSide: 点击时鼠标常漂移 1~3px,
         // 微小矩形不能覆盖已有选区 (否则单击会把选区"抹掉", 之后双击确认时选区消失)
-        if (rect.Width >= 5 && rect.Height >= 5 && _selection != rect)
+        if (rect.Width >= SnipGeometry.MinDragSide && rect.Height >= SnipGeometry.MinDragSide && _selection != rect)
         {
             _selection = rect;
             Invalidate();
@@ -451,8 +439,8 @@ public sealed class SnipOverlayForm : Form
 
         // 更新选区
         var rect = RectFromPoints(_anchor, e.Location);
-        // 小于 5px 视为单击: 保留上一次选区 (兼容双击确认, 双击第二下不会清空选区)
-        if (rect.Width >= 5 && rect.Height >= 5)
+        // 小于阈值视为单击: 保留上一次选区 (兼容双击确认, 双击第二下不会清空选区)
+        if (rect.Width >= SnipGeometry.MinDragSide && rect.Height >= SnipGeometry.MinDragSide)
         {
             _selection = rect;
             OnSelectionChanged();
@@ -784,25 +772,9 @@ public sealed class SnipOverlayForm : Form
     private Bitmap RenderResult()
     {
         float sf = ScaleFactor;
-        Rectangle physical;
 
-        if (_selection is { } sel && sel.Width > 2 && sel.Height > 2)
-        {
-            int x = Math.Max(0, (int)(sel.X * sf));
-            int y = Math.Max(0, (int)(sel.Y * sf));
-            int w = Math.Max(1, (int)Math.Round(sel.Width * sf));
-            int h = Math.Max(1, (int)Math.Round(sel.Height * sf));
-            w = Math.Min(w, _screen.Width - x);
-            h = Math.Min(h, _screen.Height - y);
-            physical = new Rectangle(x, y, w, h);
-        }
-        else
-        {
-            // 未框选: 取屏幕中央 1/2 区域
-            int w = Math.Max(200, _screen.Width / 2);
-            int h = Math.Max(150, _screen.Height / 2);
-            physical = new Rectangle((_screen.Width - w) / 2, (_screen.Height - h) / 2, w, h);
-        }
+        // 唯一来源: 实时尺寸徽标报的就是这个矩形, 避免"标签与导出各算一份"后漂移
+        Rectangle physical = SnipGeometry.ExportRect(_selection, sf, _screen.Size);
 
         var crop = new Bitmap(physical.Width, physical.Height);
         using (var g = Graphics.FromImage(crop))

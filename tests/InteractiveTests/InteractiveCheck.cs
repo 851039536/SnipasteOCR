@@ -148,6 +148,100 @@ internal static class InteractiveCheck
                 .Invoke(form, [MouseArgs(outside)]);
             Application.DoEvents();
             Check(toolbar.Tool == AnnotationTool.None, "选区外按下会退出标注工具 (恢复可重新框选)");
+
+            // 8. 框选过程中的实时尺寸徽标: 每一步拖拽都要更新选区并画出徽标,
+            //    且徽标里的数值来自导出尺寸 (物理像素), 不是逻辑像素。
+            var selectionField = typeof(SnipOverlayForm).GetField("_selection", Priv)!;
+            selectionField.SetValue(form, null);
+
+            var mouseDown = typeof(SnipOverlayForm).GetMethod("OnMouseDown", Priv)!;
+            var mouseMove = typeof(SnipOverlayForm).GetMethod("OnMouseMove", Priv)!;
+            var mouseUp = typeof(SnipOverlayForm).GetMethod("OnMouseUp", Priv)!;
+
+            var start = new Point(200, 150);
+            mouseDown.Invoke(form, [MouseArgs(start)]);
+
+            var liveSizes = new List<Size>();
+            for (int i = 1; i <= 3; i++)
+            {
+                mouseMove.Invoke(form, [MouseArgs(new Point(start.X + 60 * i, start.Y + 40 * i))]);
+                Application.DoEvents();
+                var live = (Rectangle?)selectionField.GetValue(form);
+                Check(live is not null, $"拖拽第 {i} 步已有实时选区 (宽高可显示)");
+                if (live is { } lr) liveSizes.Add(lr.Size);
+            }
+            mouseUp.Invoke(form, [MouseArgs(new Point(start.X + 180, start.Y + 120))]);
+            Application.DoEvents();
+
+            Check(liveSizes.Count == 3, $"拖拽全程都有选区 (实得 {liveSizes.Count}/3)");
+            Check(liveSizes.Count == 3 && liveSizes[0].Width < liveSizes[1].Width && liveSizes[1].Width < liveSizes[2].Width &&
+                  liveSizes[0].Height < liveSizes[1].Height && liveSizes[1].Height < liveSizes[2].Height,
+                "拖拽过程中宽高逐步增大 (不是松手才更新)");
+
+            var liveSel = (Rectangle?)selectionField.GetValue(form);
+            Check(liveSel == new Rectangle(start.X, start.Y, 180, 120),
+                $"松手后选区等于拖拽范围 (实得 {liveSel})");
+
+            if (liveSel is { } finalSel)
+            {
+                var screenBmp = (Bitmap)typeof(SnipOverlayForm).GetField("_screen", Priv)!.GetValue(form)!;
+                float sf = (float)typeof(SnipOverlayForm).GetProperty("ScaleFactor", Priv)!.GetValue(form)!;
+                var exported = SnipGeometry.ExportRect(finalSel, sf, screenBmp.Size);
+
+                Check(exported.Width == (int)Math.Round(finalSel.Width * sf) &&
+                      exported.Height == (int)Math.Round(finalSel.Height * sf),
+                    $"导出尺寸按物理像素换算 ({exported.Width}x{exported.Height}, scale={sf:F2})");
+
+                var badgeBox = SnipSizeBadge.ComputeLayout(
+                    finalSel, SnipSizeBadge.MeasureText(exported.Size), form.ClientSize);
+                Check(badgeBox.Left >= 0 && badgeBox.Top >= 0 &&
+                      badgeBox.Right <= form.ClientSize.Width && badgeBox.Bottom <= form.ClientSize.Height,
+                    $"徽标完整落在屏幕内 (实得 {badgeBox})");
+
+                using var frame = new Bitmap(form.ClientSize.Width, form.ClientSize.Height);
+                using (var g = Graphics.FromImage(frame))
+                using (var pea = new PaintEventArgs(g, new Rectangle(Point.Empty, frame.Size)))
+                {
+                    typeof(SnipOverlayForm).GetMethod("OnPaint", Priv)!.Invoke(form, [pea]);
+                }
+
+                // 徽标框内应出现白色数字像素 (只查框内, 避免与选区蓝框/文字标注混淆)。
+                // 12px 字号下每位数只有十几颗纯白核心像素, 因此不设绝对阈值,
+                // 而是与"同样尺寸单独画一遍"的参考图对比: 少了说明没画或画错了尺寸。
+                static int WhiteCount(Bitmap bmp, Rectangle box)
+                {
+                    int n = 0;
+                    for (int y = box.Top + 1; y < Math.Min(bmp.Height, box.Bottom - 1); y++)
+                        for (int x = box.Left + 1; x < Math.Min(bmp.Width, box.Right - 1); x++)
+                        {
+                            var c = bmp.GetPixel(x, y);
+                            if (c.R > 230 && c.G > 230 && c.B > 230) n++;
+                        }
+                    return n;
+                }
+
+                int numeralPixels = WhiteCount(frame, badgeBox);
+                using var reference = new Bitmap(frame.Width, frame.Height);
+                using (var g = Graphics.FromImage(reference))
+                {
+                    g.Clear(Color.White);
+                    SnipSizeBadge.Draw(g, finalSel, exported.Size, reference.Size);
+                }
+                int referencePixels = WhiteCount(reference, badgeBox);
+
+                Check(numeralPixels > 5,
+                    $"覆盖层把尺寸数字画在徽标内 (白色像素={numeralPixels})");
+                Check(Math.Abs(numeralPixels - referencePixels) <= Math.Max(6, referencePixels / 4),
+                    $"徽标数值与参考绘制一致 (覆盖层={numeralPixels}, 参考={referencePixels})");
+
+                // 换一个明显不同的选区, 徽标应跟着走 (证明是实时跟随而非固定位置)
+                var movedBox = SnipSizeBadge.ComputeLayout(
+                    new Rectangle(600, 400, 180, 120),
+                    SnipSizeBadge.MeasureText(SnipGeometry.ExportRect(new Rectangle(600, 400, 180, 120), sf, screenBmp.Size).Size),
+                    form.ClientSize);
+                Check(movedBox.Left != badgeBox.Left || movedBox.Top != badgeBox.Top,
+                    "选区移动后徽标位置随之改变 (跟随选区)");
+            }
         }
 
         return runner.ToResult();
