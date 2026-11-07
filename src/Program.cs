@@ -99,10 +99,17 @@ internal static class Program
 
             IntPtr hwnd = tray.WindowHandle;
 
-            // 热键来自设置 (默认 F1 / F3), 支持运行期更换
+            // 热键来自设置 (默认 F1 / F3), 支持运行期更换; 两个热键各自带修饰键
             var settings = SettingsStore.Current;
             using var hotKeys = new HotKeyManager(hwnd);
-            var failures = hotKeys.RegisterAll(settings.HotKeyOcr, settings.HotKeyImage, settings.HotKeyModifiers);
+            var failures = hotKeys.RegisterAll(
+                settings.HotKeyOcr, settings.HotKeyImage,
+                settings.HotKeyModifiers, settings.HotKeyImageModifiers);
+
+            // 托盘菜单与悬停提示里的按键文案必须跟着配置走 (写死 F1/F3 会在改键后骗人)
+            tray.SyncHotKeyLabels(
+                settings.HotKeyOcr, settings.HotKeyModifiers,
+                settings.HotKeyImage, settings.HotKeyImageModifiers);
 
             if (failures.Count > 0)
             {
@@ -119,11 +126,14 @@ internal static class Program
             // 托盘菜单里更换热键
             tray.HotKeyChangeRequested += () =>
             {
-                using var dlg = new HotKeyForm(settings.HotKeyOcr, settings.HotKeyImage, settings.HotKeyModifiers);
+                using var dlg = new HotKeyForm(
+                    settings.HotKeyOcr, settings.HotKeyModifiers,
+                    settings.HotKeyImage, settings.HotKeyImageModifiers);
                 if (dlg.ShowDialog() != DialogResult.OK)
                     return;
 
-                var newFailures = hotKeys.RegisterAll(dlg.OcrKey, dlg.ImageKey, dlg.Modifiers);
+                var newFailures = hotKeys.RegisterAll(
+                    dlg.OcrKey, dlg.ImageKey, dlg.OcrModifiers, dlg.ImageModifiers);
                 if (newFailures.Count > 0)
                 {
                     MessageBox.Show(
@@ -134,12 +144,18 @@ internal static class Program
 
                 settings.HotKeyOcr = dlg.OcrKey;
                 settings.HotKeyImage = dlg.ImageKey;
-                settings.HotKeyModifiers = dlg.Modifiers;
+                settings.HotKeyModifiers = dlg.OcrModifiers;
+                settings.HotKeyImageModifiers = dlg.ImageModifiers;
                 SettingsStore.Save();
 
+                // 改键成功后同步托盘菜单与提示, 否则界面仍显示旧键
+                tray.SyncHotKeyLabels(
+                    settings.HotKeyOcr, settings.HotKeyModifiers,
+                    settings.HotKeyImage, settings.HotKeyImageModifiers);
+
                 MessageBox.Show(
-                    $"热键已更新:\n  截图识别 = {HotKeyManager.Describe((uint)dlg.Modifiers, (uint)dlg.OcrKey)}\n" +
-                    $"  截图标注 = {HotKeyManager.Describe((uint)dlg.Modifiers, (uint)dlg.ImageKey)}",
+                    $"热键已更新:\n  截图识别 = {HotKeyManager.Describe((uint)dlg.OcrModifiers, (uint)dlg.OcrKey)}\n" +
+                    $"  截图标注 = {HotKeyManager.Describe((uint)dlg.ImageModifiers, (uint)dlg.ImageKey)}",
                     "SnipasteOCR", MessageBoxButtons.OK, MessageBoxIcon.Information);
             };
 

@@ -18,6 +18,7 @@ src/                       产品代码 (唯一的出货工程, 也是唯一的 
   SnipGeometry.cs          框选几何唯一来源: 逻辑选区 → 导出物理矩形 / 有效选区判据
   Annotations/             标注引擎 (见下)
   OcrService.cs            OCR 引擎封装 (懒加载 / 档位切换 / 独立线程推理)
+  OcrModelProfile.cs       模型档位枚举 (单独成文件, 便于设置自检不链接 OCR 引擎)
   OcrResultForm.cs         结果窗口: 框叠加、字符级拖选、缩放联动
   OcrText.cs               结果后处理: 阅读顺序排序、表格/CSV 重建 (纯函数)
   OcrBox.cs                检测框四角几何辅助 (5 处调用点共用)
@@ -30,9 +31,9 @@ src/                       产品代码 (唯一的出货工程, 也是唯一的 
   PinnedImageForm.cs       贴图窗口 (钉在屏幕上的置顶小窗, 可拖动/右键关闭)
   SnipSizeBadge.cs         框选实时尺寸徽标 (宽 × 高, 物理像素; 纯函数布局 + 自绘)
   NativeMethods.cs         Win32 P/Invoke (消息/热键/窗口/菜单/托盘/输入模拟)
-tests/AnnotationTests/     离线自检, 197 项 (几何/命中/历史/渲染/工具栏/尺寸徽标/编辑框/OCR 后处理)
-tests/InteractiveTests/    交互自检, 33 项 (真实窗口 + 真实按键 + 拖拽实时尺寸, 需要桌面会话)
-tools/DriveTest/           端到端驱动实际 exe (真实鼠标键盘事件 + 抓屏取证)
+tests/AnnotationTests/     离线自检, 213 项 (几何/命中/历史/渲染/工具栏/尺寸徽标/设置迁移/编辑框/OCR 后处理)
+tests/InteractiveTests/    交互自检, 48 项 (真实窗口 + 真实按键 + 拖拽实时尺寸 + 托盘菜单文案 + IME, 需要桌面会话)
+tools/DriveTest/           端到端驱动实际 exe (真实鼠标键盘事件 + 抓屏取证 + 校验导出图)
 ```
 
 `src/Annotations/`:
@@ -65,10 +66,10 @@ dotnet publish src/SnipasteOcr.csproj -c Release -r win-x64 --self-contained -p:
 ```
 
 ```powershell
-# 离线自检 (197 项), 无需桌面会话 —— 改完必跑
+# 离线自检 (213 项), 无需桌面会话 —— 改完必跑
 dotnet run --project tests/AnnotationTests              # 期望输出「全部通过」, 退出码 0
 dotnet run --project tests/AnnotationTests -- sample    # 额外输出六种标注样例图
-# 交互自检 (33 项) —— 需要可用的桌面会话
+# 交互自检 (48 项) —— 需要可用的桌面会话
 dotnet run --project tests/InteractiveTests
 # 端到端驱动实际 exe (可选)
 dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
@@ -146,6 +147,11 @@ dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
   绘制/命中/字符定位三套坐标统一经 DPI 换算(Per-Monitor DPI v2)。
 - 覆盖层预览用 `Graphics.ScaleTransform` 缩放绘制,导出时用 `TranslateTransform` 平移 ——
   同一份数据、同一个渲染引擎,因此预览与导出**像素级一致**。
+- **文字标注必须手动换算到设备坐标**:`TextRenderer` 走 GDI,**不跟随 `Graphics` 的世界变换**
+  (平移/缩放),它把传入的点当作设备坐标。`RenderResult` 先 `TranslateTransform(-裁剪原点)` 再调引擎,
+  不补偿的话文字仍按屏幕坐标落点、被画到裁剪图外 —— 表现为"预览看得见文字、导出/识别结果里没有";
+  高 DPI 预览的 `ScaleTransform` 同理(文字错位且字号偏大)。`AnnotationEngine.DrawText` 用 `g.Transform`
+  换算锚点、按 `|det|^(1/2)` 缩放字号,`RenderChecks` 有两条断言守着导出平移与预览缩放。
 - **贴图窗口的尺寸也要换算**:`PinnedImageForm` 收到的是**物理像素**位图,而 `ClientSize` 是
   **逻辑像素**。必须除以 DPI 因子(与 `OcrResultForm.DpiFactor` 同一套),否则 150% 缩放下贴图被放大
   1.5 倍且只画出左上角一部分。绘制时同样要按 `ClientSize` 尺寸还原,不能直接 `DrawImageUnscaled`。
@@ -168,6 +174,8 @@ dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
   避免钉住时抢走用户正在输入程序的焦点 —— 注意 `ShowWithoutActivation` 是**只读属性, 只能重写**,
   直接赋值编译不过。
 - **贴图按钮只加在 F3(图片)模式**:OCR 模式的产物是文字,钉一张原图没有意义。
+  实现上由 `AnnotationToolbar.ShowPin` 控制:隐藏时必须同时从 `ComputeLayout` 与命中去掉,
+  不能只改可见性 —— 否则会留下一个"可点但 `PinToScreen` 直接 return"的假按钮。
 
 ### 并发 / OCR
 
@@ -187,11 +195,22 @@ dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
 - 改**默认热键**不只改 `AppSettings` 的初值 —— 错误值可能已经**落盘**到老用户的 `settings.json`,
   必须像 `SettingsStore.Load` 里那样做一次性迁移,否则老用户升级后症状依旧。
   迁移判据要收窄(这里要求整组值等于旧版默认组合),**别无条件改写**,否则会悄悄抹掉用户刻意的选择。
+- **两个热键的修饰键必须各存一份**:早期 `HotKeyForm` 只把第一个框的修饰键交出去,而 `RegisterAll`
+  对两项共用同一组 —— 第二个框可以显示 `F3`、实际注册的却是 `Ctrl+F3`。现在
+  `hotKeyModifiers` / `hotKeyImageModifiers` 各自独立;新字段用 **-1 表示"旧配置没有这一项"**,
+  由 `SettingsStore.Normalize` 继承旧值。**首次运行与配置损坏回退也要走 Normalize**,
+  否则 -1 会被当成位掩码传给 `RegisterHotKey`(注册全部失败)。
+- **托盘菜单与提示里的按键文案必须动态生成**:菜单项和 `szTip` 曾写死 `F1/F3`,改键后界面与事实不符。
+  用 `ModifyMenu`(按命令 ID) + `Shell_NotifyIcon(NIM_MODIFY)` 刷新,**不要重建菜单** ——
+  `ShowMenu` 依赖菜单项 ID 稳定来还原命令。
 
 ### 设置读写
 
 设置落盘到 `%LOCALAPPDATA%\SnipasteOCR\settings.json`。所有异常一律吞掉并回退默认值 ——
 **设置读写失败绝不能让程序崩溃或无法启动**。新增字段走 `AppSettings` + `SettingsStore.Update`。
+
+新增字段若需要"旧配置没有时继承另一个字段",在 `SettingsStore.Normalize` 里做,并保证
+**三条加载路径(文件存在 / 首次运行 / 反序列化失败)**都经过它;判据只看哨兵值,不要无条件改写用户显式存过的值。
 
 ### 开机自启 (`StartupRegistration`)
 
@@ -243,6 +262,9 @@ dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
 - 测试断言用具名 `CheckRunner`,不要各写一份 `int passed` + `Check(...)` 样板。
 - 断言应先断言行数/长度再做逐项索引,否则实现漂移时会抛 `IndexOutOfRange` 让整个自检崩掉,
   而不是报一条 FAIL。
+- **输入端到端工具必须检查调用结果**:DriveTest 的 `INPUT` 结构体曾少了联合体内存(x64 应为 40 字节),
+  `SendInput` 一直静默失败(返回 0),但日志照常打印"已输入文字" —— 端到端验证形同虚设,
+  真正的导出 bug 因此被掩盖。注入类 API 的返回值/错误码必须检查,否则"测试通过"没有意义。
 - **测试辅助函数本身也要写对**:`SplitLines` 曾把 `Split('\n', RemoveEmptyEntries)` 写在
   `TrimEnd('\r')` **之前**,于是 CRLF 文本里的空行被切成 `"\r"`、在去空时存活下来,
   凭空多出一行 —— 断言失败指向的是辅助函数而非产品代码。判空与去尾字符的顺序要对。

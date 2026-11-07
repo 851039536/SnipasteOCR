@@ -29,6 +29,9 @@
     <!-- 框选尺寸徽标与「逻辑选区 → 导出物理矩形」的单一来源 -->
     <Compile Include="..\..\src\SnipGeometry.cs" Link="Engine\SnipGeometry.cs" />
     <Compile Include="..\..\src\SnipSizeBadge.cs" Link="Engine\SnipSizeBadge.cs" />
+    <!-- 设置模型与迁移 (不依赖 OCR 引擎, 故枚举单独成文件) -->
+    <Compile Include="..\..\src\AppSettings.cs" Link="Engine\AppSettings.cs" />
+    <Compile Include="..\..\src\OcrModelProfile.cs" Link="Engine\OcrModelProfile.cs" />
     <!-- OCR 结果后处理 (纯函数): OcrText.cs 依赖 SDK 的检测框类型, 故需引用该包 -->
     <Compile Include="..\..\src\OcrText.cs" Link="Engine\OcrText.cs" />
     <Compile Include="..\..\src\OcrBox.cs" Link="Engine\OcrBox.cs" />

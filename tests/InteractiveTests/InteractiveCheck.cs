@@ -2,6 +2,8 @@
 // 检查编辑框是否真的获得焦点并收到字符。这覆盖了纯离屏测试无法触及的焦点链。
 using System.Drawing;
 using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Text;
 using System.Windows.Forms;
 using SnipasteOcr;
 using SnipasteOcr.Annotations;
@@ -165,11 +167,13 @@ internal static class InteractiveCheck
             for (int i = 1; i <= 3; i++)
             {
                 mouseMove.Invoke(form, [MouseArgs(new Point(start.X + 60 * i, start.Y + 40 * i))]);
-                Application.DoEvents();
+                // 同步读取: 这里不能 DoEvents —— 覆盖层是全屏前台窗口, 真实鼠标移动会产生
+                // 额外的 OnMouseMove 并覆盖注入的选区, 造成偶发的"宽高没有逐步增大"。
                 var live = (Rectangle?)selectionField.GetValue(form);
                 Check(live is not null, $"拖拽第 {i} 步已有实时选区 (宽高可显示)");
                 if (live is { } lr) liveSizes.Add(lr.Size);
             }
+            Application.DoEvents();
             mouseUp.Invoke(form, [MouseArgs(new Point(start.X + 180, start.Y + 120))]);
             Application.DoEvents();
 
@@ -260,6 +264,84 @@ internal static class InteractiveCheck
                 Check(movedPixels > 5 && stalePixels < 5,
                     $"移动选区后徽标跟随到新位置 (新位置={movedPixels}, 旧位置={stalePixels})");
             }
+
+            // 9. 识别模式不应出现「可点但无反应」的贴图按钮
+            Check(toolbar.ShowPin, "图片模式显示贴图按钮");
+            using (var ocrOverlay = new SnipOverlayForm(SnipMode.Ocr))
+            {
+                var ocrToolbar = (AnnotationToolbar)toolbarField.GetValue(ocrOverlay)!;
+                Check(!ocrToolbar.ShowPin, "识别模式隐藏贴图按钮");
+                Check(ocrToolbar.Width < toolbar.Width,
+                    $"识别模式工具栏更窄 (识别={ocrToolbar.Width}, 图片={toolbar.Width})");
+            }
+
+            // 10. 两个热键的修饰键必须各自独立 (旧实现只保存第一个框的, 第二个框的显示会骗人)
+            using (var dlg = new HotKeyForm(0x70, 0x2, 0x51, 0x1))   // Ctrl+F1 / Alt+Q
+            {
+                Check(dlg.OcrModifiers == 0x2 && dlg.ImageModifiers == 0x1,
+                    $"对话框分别保留两个修饰键 (实得 {dlg.OcrModifiers}/{dlg.ImageModifiers})");
+                Check(dlg.OcrKey == 0x70 && dlg.ImageKey == 0x51, "对话框分别保留两个键码");
+            }
+
+            // 11. 托盘菜单里的按键文案必须随热键更新 (不能写死 F1/F3)
+            using (var tray = new TrayController())
+            {
+                var hMenu = (IntPtr)typeof(TrayController).GetField("_hMenu", Priv)!.GetValue(tray)!;
+
+                tray.SyncHotKeyLabels(0x70, 0, 0x72, 0);
+                Check(MenuText(hMenu, 0x1000).Contains("F1", StringComparison.Ordinal),
+                    $"默认菜单显示 F1 (实得 \"{MenuText(hMenu, 0x1000)}\")");
+                Check(MenuText(hMenu, 0x1001).Contains("F3", StringComparison.Ordinal),
+                    $"默认菜单显示 F3 (实得 \"{MenuText(hMenu, 0x1001)}\")");
+
+                tray.SyncHotKeyLabels(0x51, 0x2 | 0x1, 0x2C, 0x4);   // Ctrl+Alt+Q / Shift+PrintScreen
+                string ocrText = MenuText(hMenu, 0x1000);
+                string imgText = MenuText(hMenu, 0x1001);
+                Check(ocrText == "截图识别 (Ctrl+Alt+Q)",
+                    $"改键后菜单同步识别热键 (实得 \"{ocrText}\")");
+                Check(imgText == "截图标注 (Shift+PrintScreen)",
+                    $"改键后菜单同步标注热键 (实得 \"{imgText}\")");
+            }
+
+            // 12. 真实键盘输入回归: 此前只用反射直接调用 OnKeyPress, 绕过了真实焦点链。
+            //     实际使用中"点过工具栏 → 再点画布"会让工具栏先拿到焦点,
+            //     此时必须把焦点交还给文字编辑控件, 否则打字全部落到工具栏上 (表现为"文字功能失效")。
+            {
+                toolbar.SetTool(AnnotationTool.Text);
+                bool toolbarFocused = toolbar.Focus();   // 模拟刚点过工具栏
+                Application.DoEvents();
+
+                typeof(SnipOverlayForm).GetMethod("BeginAnnotate", Priv)!
+                    .Invoke(form, [new Point(400, 300)]);   // 选区 (320,220,260,180) 内点击定位
+                Application.DoEvents();
+
+                var ed = (TextEditorOverlay?)editorField.GetValue(form);
+                Check(ed is not null && !ed.IsDisposed, "点击后创建文字编辑控件");
+                Check(ed is not null && ed.Focused,
+                    $"点画布后编辑控件拿到真实焦点 (工具栏先聚焦={toolbarFocused}, 编辑控件聚焦={ed?.Focused})");
+
+                if (ed is null || ed.IsDisposed)
+                    return runner.ToResult();
+
+                // 真实按键只会送到"系统前台窗口"。测试期间前台可能被终端抢走,
+                // 这两条失败说明是测试环境问题, 而不是产品问题。
+                Check(GetForegroundWindow() == form.Handle,
+                    $"覆盖层处于系统前台 (前台=0x{GetForegroundWindow():X}, 覆盖层=0x{form.Handle:X})");
+                Check(GetFocus() == ed.Handle,
+                    $"系统焦点在编辑控件 (focus=0x{GetFocus():X}, editor=0x{ed.Handle:X})");
+
+                // 走 SendInput 同一条系统输入队列: 这是此前断言覆盖不到的真实路径
+                SendVirtualKey(0x41);   // VK_A
+                Application.DoEvents();
+                Check(ed.Value == "a", $"真实按键进入编辑控件 (实得 \"{ed.Value}\")");
+
+                // 中文输入法: 编辑控件必须拿到 IME 上下文, 否则微软拼音等组合输入无法落到控件上
+                // (表现为"英文/数字能打, 中文怎么打都没字")。
+                IntPtr himc = ImmGetContext(ed.Handle);
+                Check(himc != IntPtr.Zero, "编辑控件具备 IME 上下文 (中文输入法可用)");
+                if (himc != IntPtr.Zero)
+                    ImmReleaseContext(ed.Handle, himc);
+            }
         }
 
         return runner.ToResult();
@@ -290,4 +372,40 @@ internal static class InteractiveCheck
     /// <summary>构造鼠标按下参数</summary>
     private static MouseEventArgs MouseArgs(Point p)
         => new(MouseButtons.Left, 1, p.X, p.Y, 0);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetMenuStringW(IntPtr hMenu, uint uIDItem, StringBuilder lpString, int cchMax, uint flags);
+
+    /// <summary>按命令 ID 读取托盘菜单项文本 (验证热键文案是动态生成的)</summary>
+    private static string MenuText(IntPtr menu, uint cmd)
+    {
+        var sb = new StringBuilder(256);
+        GetMenuStringW(menu, cmd, sb, sb.Capacity, 0);   // 0 = MF_BYCOMMAND
+        return sb.ToString();
+    }
+
+    [DllImport("user32.dll")]
+    private static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, IntPtr dwExtraInfo);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetFocus();
+
+    [DllImport("imm32.dll")]
+    private static extern IntPtr ImmGetContext(IntPtr hWnd);
+
+    [DllImport("imm32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ImmReleaseContext(IntPtr hWnd, IntPtr hIMC);
+
+    /// <summary>发送一次真实按键 (走系统输入队列, 与用户敲键盘同一条路径)</summary>
+    private static void SendVirtualKey(byte vk)
+    {
+        keybd_event(vk, 0, 0, IntPtr.Zero);
+        Thread.Sleep(30);
+        keybd_event(vk, 0, 0x0002, IntPtr.Zero);   // KEYEVENTF_KEYUP
+        Thread.Sleep(60);
+    }
 }

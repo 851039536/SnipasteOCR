@@ -418,8 +418,20 @@ public static class AnnotationEngine
         if (string.IsNullOrEmpty(a.Text))
             return;
 
-        using var font = CreateFont(a.FontSize);
-        var pt = new PointF(a.Start.X, a.Start.Y);
+        // TextRenderer 走 GDI, <b>不跟随 Graphics 的世界变换</b> (它把传入的点当作设备坐标)。
+        // 本项目有两处变换, 不补偿都会出错:
+        // - 导出 (RenderResult) 先 TranslateTransform(-裁剪左上角): 文字仍按屏幕坐标落点,
+        //   结果被画到裁剪图外面 —— 表现为"预览看得见文字, 导出的图片/识别结果里没有";
+        // - 高 DPI 预览用 ScaleTransform(1/sf): 文字画错位置且字号偏大。
+        // 因此这里手动把锚点与字号换算到设备空间。只处理平移 + 等比缩放 (标注渲染不会出现旋转/错切)。
+        Matrix transform = g.Transform;
+        float scale = UniformScale(transform);
+        var origins = new[] { new PointF(a.Start.X, a.Start.Y) };
+        transform.TransformPoints(origins);
+        PointF origin = origins[0];
+        var pt = new Point((int)Math.Round(origin.X), (int)Math.Round(origin.Y));
+
+        using var font = CreateFont(a.FontSize * scale);
         var flags = TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix;
 
         // TextRenderer 不支持描边, 用 8 方向偏移绘制深色来伪造描边
@@ -431,11 +443,22 @@ public static class AnnotationEngine
                 if (dx == 0 && dy == 0)
                     continue;
                 TextRenderer.DrawText(g, a.Text, font,
-                    new Point((int)pt.X + dx, (int)pt.Y + dy), outline, flags);
+                    new Point(pt.X + dx, pt.Y + dy), outline, flags);
             }
         }
 
-        TextRenderer.DrawText(g, a.Text, font, new Point((int)pt.X, (int)pt.Y), a.Color, flags);
+        TextRenderer.DrawText(g, a.Text, font, pt, a.Color, flags);
+    }
+
+    /// <summary>
+    /// 取世界变换里的等比缩放系数 (纯平移时为 1)。
+    /// 用 |行列式| 的平方根而不是单独取 X 方向长度: 对均匀缩放/镜像都成立。
+    /// </summary>
+    private static float UniformScale(Matrix m)
+    {
+        float det = m.Elements[0] * m.Elements[3] - m.Elements[1] * m.Elements[2];
+        float scale = MathF.Sqrt(MathF.Abs(det));
+        return scale > 0f ? scale : 1f;
     }
 
     /// <summary>

@@ -112,8 +112,19 @@ internal static class Drive
 
     [StructLayout(LayoutKind.Sequential)]
     struct KEYBDINPUT { public ushort wVk, wScan; public uint dwFlags, time; public IntPtr dwExtraInfo; }
-    [StructLayout(LayoutKind.Sequential)]
-    struct INPUT { public uint type; public KEYBDINPUT ki; }
+    /// <summary>
+    /// SendInput 的 INPUT 结构: type(4) + 8 字节对齐 + 联合体。
+    /// 联合体取最大成员 MOUSEINPUT 的 32 字节, 所以 x64 下总大小是 40。
+    /// 踩过的坑: 这里曾直接写 <c>{ uint type; KEYBDINPUT ki; }</c>, 得到 32 字节 ——
+    /// SendInput 因 cbSize 不符直接失败 (返回 0), 而调用方没检查返回值,
+    /// 于是"已输入文字"的日志照常打印, 实际一个字符都没进去, 白白掩盖了问题。
+    /// </summary>
+    [StructLayout(LayoutKind.Explicit, Size = 40)]
+    struct INPUT
+    {
+        [FieldOffset(0)] public uint type;
+        [FieldOffset(8)] public KEYBDINPUT ki;
+    }
 
     static void PostUnicode(char c)
     {
@@ -121,10 +132,13 @@ internal static class Drive
         down.ki.wScan = c; down.ki.dwFlags = KEYEVENTF_UNICODE;
         var up = new INPUT { type = 1 };
         up.ki.wScan = c; up.ki.dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP;
-        SendInput(2, [down, up], Marshal.SizeOf<INPUT>());
+        uint sent = SendInput(2, [down, up], Marshal.SizeOf<INPUT>());
+        if (sent != 2)
+            Say($"    !! SendInput 失败 (返回值 {sent}, 错误 {Marshal.GetLastWin32Error()}), 字符 '{c}' 未送出");
         Thread.Sleep(90);
     }
 
+    [STAThread]   // Clipboard 需要 STA 线程
     static void Main(string[] args)
     {
         Console.OutputEncoding = Encoding.UTF8;
@@ -253,6 +267,36 @@ internal static class Drive
         Thread.Sleep(1500);
         Say($"    提交后覆盖层是否仍可见: {IsWindowVisible(overlay)}");
         CaptureTo("after_enter.png");
+
+        // 8b. 再按一次回车: 第一次回车被文字编辑框吃掉(提交文字), 这一次才真正确认截图。
+        //     导出路径必须单独验证 —— 文字曾因 TextRenderer 不跟随 TranslateTransform 而在导出图里丢失,
+        //     当时只看"预览画出来了"是发现不了的。
+        Say("[8b] 再次回车确认截图, 检查导出的图片");
+        PressKey(0x0D);
+        Thread.Sleep(1500);
+        try
+        {
+            if (System.Windows.Forms.Clipboard.ContainsImage())
+            {
+                using var exported = System.Windows.Forms.Clipboard.GetImage();
+                if (exported is not null)
+                {
+                    string expPath = Path.Combine(AppContext.BaseDirectory, "exported.png");
+                    exported.Save(expPath, System.Drawing.Imaging.ImageFormat.Png);
+                    Say($"    导出图片 {exported.Width}x{exported.Height} -> {expPath}");
+                }
+            }
+            else
+            {
+                Say("    !! 剪贴板里没有图片 (确认动作没有执行?)");
+            }
+        }
+        catch (Exception ex)
+        {
+            Say("    !! 读取剪贴板失败: " + ex.Message);
+        }
+        Say($"    确认后覆盖层是否仍可见: {IsWindowVisible(overlay)}");
+        CaptureTo("after_confirm.png");
 
         // 9. 收尾
         PressKey(0x1B); // Esc

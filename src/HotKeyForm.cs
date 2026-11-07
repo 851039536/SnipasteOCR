@@ -15,13 +15,16 @@ public sealed class HotKeyForm : Form
     /// <summary>确定后: 截图识别的虚拟键码</summary>
     public int OcrKey => _ocrBox.VirtualKey;
 
-    /// <summary>确定后: 仅截图的虚拟键码</summary>
+    /// <summary>确定后: 截图标注的虚拟键码</summary>
     public int ImageKey => _imageBox.VirtualKey;
 
-    /// <summary>确定后: 修饰符 (MOD_* 组合)</summary>
-    public int Modifiers => _ocrBox.Modifiers;
+    /// <summary>确定后: 截图识别的修饰符</summary>
+    public int OcrModifiers => _ocrBox.Modifiers;
 
-    public HotKeyForm(int ocrKey, int imageKey, int modifiers)
+    /// <summary>确定后: 截图标注的修饰符 (两个热键各自独立)</summary>
+    public int ImageModifiers => _imageBox.Modifiers;
+
+    public HotKeyForm(int ocrKey, int ocrMods, int imageKey, int imageMods)
     {
         Text = "SnipasteOCR - 热键设置";
         FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -35,7 +38,7 @@ public sealed class HotKeyForm : Form
         var tip = new Label
         {
             Text = "点击下方输入框后，直接按下想用的组合键。\n" +
-                   "支持 F1-F12、字母、数字，可组合 Ctrl / Alt / Shift / Win。\n" +
+                   "支持 F1-F12、字母、数字，可组合 Ctrl / Alt / Shift。\n" +
                    "仅功能键 (F1-F12) 可不加修饰键，其余需带修饰键。",
             Location = new Point(18, 14),
             Size = new Size(395, 64),
@@ -54,11 +57,11 @@ public sealed class HotKeyForm : Form
             Location = new Point(100, 90),
             Size = new Size(310, 28),
         };
-        _ocrBox.SetKey(ocrKey, modifiers);
+        _ocrBox.SetKey(ocrKey, ocrMods);
 
         var imageLabel = new Label
         {
-            Text = "仅截图:",
+            Text = "截图标注:",
             Location = new Point(18, 130),
             Size = new Size(75, 26),
             TextAlign = ContentAlignment.MiddleLeft,
@@ -68,7 +71,7 @@ public sealed class HotKeyForm : Form
             Location = new Point(100, 128),
             Size = new Size(310, 28),
         };
-        _imageBox.SetKey(imageKey, modifiers);
+        _imageBox.SetKey(imageKey, imageMods);
 
         var ok = new Button
         {

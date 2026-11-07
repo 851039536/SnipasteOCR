@@ -106,8 +106,8 @@ public sealed class TrayController : IDisposable
         User32.AppendMenu(_hModelMenu, User32.MF_STRING, (IntPtr)CMD_MODEL_TINY,
             OcrService.DisplayName(OcrModelProfile.Tiny));
 
-        User32.AppendMenu(_hMenu, User32.MF_STRING, (IntPtr)CMD_SNIP_OCR, "截图并识别 (F1)");
-        User32.AppendMenu(_hMenu, User32.MF_STRING, (IntPtr)CMD_SNIP_IMAGE, "截图并标注 (F3)");
+        User32.AppendMenu(_hMenu, User32.MF_STRING, (IntPtr)CMD_SNIP_OCR, "截图识别 (F1)");
+        User32.AppendMenu(_hMenu, User32.MF_STRING, (IntPtr)CMD_SNIP_IMAGE, "截图标注 (F3)");
         User32.AppendMenu(_hMenu, User32.MF_STRING, (IntPtr)CMD_OCR_CLIPBOARD, "识别剪贴板图片");
         User32.AppendMenu(_hMenu, User32.MF_SEPARATOR, IntPtr.Zero, null);
         User32.AppendMenu(_hMenu, User32.MF_STRING | User32.MF_POPUP, _hModelMenu, "识别模型");
@@ -225,6 +225,33 @@ public sealed class TrayController : IDisposable
                 break;
             case CMD_EXIT: _instance?.ExitRequested?.Invoke(); break;
         }
+    }
+
+    /// <summary>
+    /// 按当前生效的热键刷新菜单两项文本与托盘悬停提示。
+    ///
+    /// 为什么必须动态生成: 热键可在对话框里改, 菜单与提示若写死 "F1/F3", 改键后界面就与事实不符。
+    /// 用 <c>ModifyMenu</c> 按命令 ID 改文本, 不重建菜单 —— `ShowMenu` 依赖菜单项 ID 稳定来还原命令。
+    /// </summary>
+    public void SyncHotKeyLabels(int ocrVk, int ocrMods, int imageVk, int imageMods)
+    {
+        string ocr = HotKeyManager.Describe((uint)ocrMods, (uint)ocrVk);
+        string image = HotKeyManager.Describe((uint)imageMods, (uint)imageVk);
+
+        User32.ModifyMenu(_hMenu, (uint)CMD_SNIP_OCR, User32.MF_BYCOMMAND | User32.MF_STRING,
+            (IntPtr)CMD_SNIP_OCR, $"截图识别 ({ocr})");
+        User32.ModifyMenu(_hMenu, (uint)CMD_SNIP_IMAGE, User32.MF_BYCOMMAND | User32.MF_STRING,
+            (IntPtr)CMD_SNIP_IMAGE, $"截图标注 ({image})");
+
+        var nid = new Shell32.NOTIFYICONDATA
+        {
+            cbSize = Marshal.SizeOf<Shell32.NOTIFYICONDATA>(),
+            hWnd = _hwnd,
+            uID = 1,
+            uFlags = Shell32.NIF_TIP,
+            szTip = $"SnipasteOCR - {ocr} 截图识别 / {image} 截图标注",
+        };
+        Shell32.Shell_NotifyIcon(Shell32.NIM_MODIFY, ref nid);
     }
 
     /// <summary>

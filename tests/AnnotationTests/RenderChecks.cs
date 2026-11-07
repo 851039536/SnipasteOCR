@@ -259,6 +259,68 @@ internal static class RenderChecks
             }
         }
 
+        // ===== 文字标注在"平移到裁剪坐标系"后仍必须画出来 =====
+        // 回归: 文字走 TextRenderer(GDI), 不跟随 GDI+ 的 Graphics 变换。
+        // RenderResult 导出时先 TranslateTransform(-裁剪左上角) 再调引擎 ——
+        // 文字会按"屏幕坐标"落点, 于是预览能看到文字、导出的图里却没有 (或被推到选区外)。
+        {
+            var bmp = Blank(200, 100);
+            var red = Color.FromArgb(255, 220, 0, 0);
+            using (var g = Graphics.FromImage(bmp))
+            {
+                var state = g.Save();
+                try
+                {
+                    g.TranslateTransform(-300, -200);   // 与 RenderResult 完全相同的处理
+                    AnnotationEngine.Draw(g, [
+                        new Annotation
+                        {
+                            Tool = AnnotationTool.Text,
+                            Start = new PointF(310, 210),   // 裁剪后应落在 (10,10)
+                            Text = "Hi",
+                            Color = red,
+                            FontSize = 18,
+                        }
+                    ], bmp);
+                }
+                finally { g.Restore(state); }
+            }
+
+            int painted = CountNear(bmp, red, 120, new Rectangle(0, 0, 80, 60));
+            Check(painted > 8, $"平移到裁剪坐标后文字仍画在导出图内 (红色像素={painted})");
+        }
+
+        // ===== 文字标注在缩放预览下必须随变换缩放 (150% DPI) =====
+        // 覆盖层预览用 ScaleTransform(1/sf); 若文字忽略缩放, 高 DPI 下会画到错误位置且字号偏大。
+        {
+            var bmp = Blank(300, 200);
+            var red = Color.FromArgb(255, 220, 0, 0);
+            using (var g = Graphics.FromImage(bmp))
+            {
+                var state = g.Save();
+                try
+                {
+                    g.ScaleTransform(0.5f, 0.5f);   // 物理 (100,60) → 逻辑 (50,30)
+                    AnnotationEngine.Draw(g, [
+                        new Annotation
+                        {
+                            Tool = AnnotationTool.Text,
+                            Start = new PointF(100, 60),
+                            Text = "Hi",
+                            Color = red,
+                            FontSize = 18,
+                        }
+                    ], bmp);
+                }
+                finally { g.Restore(state); }
+            }
+
+            int atScaled = CountNear(bmp, red, 120, new Rectangle(40, 20, 60, 30));
+            int atRaw = CountNear(bmp, red, 120, new Rectangle(95, 55, 60, 30));
+            Check(atScaled > 6 && atScaled > atRaw,
+                $"缩放预览下文字跟随变换 (缩放位置像素={atScaled}, 原始位置像素={atRaw})");
+        }
+
         return runner.ToResult();
     }
 

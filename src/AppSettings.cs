@@ -23,8 +23,19 @@ public sealed class AppSettings
     /// </summary>
     public int HotKeyImage { get; set; } = 0x72;
 
-    /// <summary>热键修饰符 (0 = 无; MOD_ALT=1, MOD_CONTROL=2, MOD_SHIFT=4, MOD_WIN=8)</summary>
+    /// <summary>截图识别热键的修饰符 (0 = 无; MOD_ALT=1, MOD_CONTROL=2, MOD_SHIFT=4, MOD_WIN=8)</summary>
     public int HotKeyModifiers { get; set; } = 0;
+
+    /// <summary>
+    /// 截图标注热键的修饰符。
+    ///
+    /// 早期版本两个热键<strong>共用</strong> <see cref="HotKeyModifiers"/>, 但对话框允许分别录制,
+    /// 于是出现过"界面显示 F3、实际注册的是 Ctrl+F3"的假显示。现在各自独立。
+    ///
+    /// 默认 -1 = "配置里还没有这一项", 由 <see cref="SettingsStore.Load"/> 迁移为与识别热键相同 ——
+    /// 旧用户升级后行为完全不变, 不会因为反序列化成 0 而悄悄丢掉修饰键。
+    /// </summary>
+    public int HotKeyImageModifiers { get; set; } = -1;
 
     /// <summary>OCR 结果是否按阅读顺序 (上→下, 左→右) 重排</summary>
     public bool SortReadingOrder { get; set; } = true;
@@ -83,47 +94,63 @@ public static class SettingsStore
     /// <summary>从磁盘读取设置; 任何失败都回退到默认值</summary>
     private static AppSettings Load()
     {
+        AppSettings loaded;
         try
         {
             if (!File.Exists(FilePath))
-                return new AppSettings();
+                return Normalize(new AppSettings());
 
             string json = File.ReadAllText(FilePath);
-            var loaded = JsonSerializer.Deserialize(json, SettingsJsonContext.Default.AppSettings)
-                         ?? new AppSettings();
-
-            // 一次性迁移: 早期版本把"F3"错写成 0x73 (实为 F4), 该错误默认值已经落盘到用户配置里。
-            // 若只改代码里的默认值, 老用户按 F3 仍然没反应 —— 必须把已存盘的错误值也纠正过来。
-            //
-            // 判据刻意收得很窄: 只有"整组值恰好等于旧版默认组合"才迁移。
-            // 用户若主动改过 OCR 热键或加过修饰键, 说明这份配置被手工调过, 此时 0x73 很可能是
-            // 他真的想用 F4, 就应当尊重原意、不动它 (误迁移比不迁移更糟: 会悄悄改掉用户的选择)。
-            if (loaded.HotKeyOcr == 0x70 && loaded.HotKeyImage == 0x73 && loaded.HotKeyModifiers == 0)
-            {
-                loaded.HotKeyImage = 0x72;   // 0x73(F4) -> 0x72(F3)
-
-                // 立即落盘, 让修正在下次启动前就固化下来 (只做一次, 之后不再命中该分支)。
-                // 这里刻意不走 Save(): Save() 依赖 _current, 而此刻 _current 尚未赋值,
-                // 直接写文件才是正确的时机, 也避免在锁内再进锁。
-                try
-                {
-                    File.WriteAllText(FilePath,
-                        JsonSerializer.Serialize(loaded, SettingsJsonContext.Default.AppSettings));
-                }
-                catch
-                {
-                    // 写不进去(只读/占用)也不影响本次运行: 内存里已经是正确值,
-                    // 下次启动会再次尝试迁移, 行为幂等。
-                }
-            }
-
-            return loaded;
+            loaded = JsonSerializer.Deserialize(json, SettingsJsonContext.Default.AppSettings)
+                     ?? new AppSettings();
         }
         catch
         {
             // 文件损坏 / 无权限 / 反序列化失败: 用默认值, 不影响启动
-            return new AppSettings();
+            return Normalize(new AppSettings());
         }
+
+        Normalize(loaded);
+
+        // 一次性迁移: 早期版本把"F3"错写成 0x73 (实为 F4), 该错误默认值已经落盘到用户配置里。
+        // 若只改代码里的默认值, 老用户按 F3 仍然没反应 —— 必须把已存盘的错误值也纠正过来。
+        //
+        // 判据刻意收得很窄: 只有"整组值恰好等于旧版默认组合"才迁移。
+        // 用户若主动改过 OCR 热键或加过修饰键, 说明这份配置被手工调过, 此时 0x73 很可能是
+        // 他真的想用 F4, 就应当尊重原意、不动它 (误迁移比不迁移更糟: 会悄悄改掉用户的选择)。
+        if (loaded.HotKeyOcr == 0x70 && loaded.HotKeyImage == 0x73 && loaded.HotKeyModifiers == 0)
+        {
+            loaded.HotKeyImage = 0x72;   // 0x73(F4) -> 0x72(F3)
+
+            // 立即落盘, 让修正固化下来 (只做一次, 之后不再命中该分支)。
+            // 这里刻意不走 Save(): Save() 依赖 _current, 而此刻 _current 尚未赋值,
+            // 直接写文件才是正确的时机, 也避免在锁内再进锁。
+            try
+            {
+                File.WriteAllText(FilePath,
+                    JsonSerializer.Serialize(loaded, SettingsJsonContext.Default.AppSettings));
+            }
+            catch
+            {
+                // 写不进去(只读/占用)也不影响本次运行: 内存里已经是正确值,
+                // 下次启动会再次尝试迁移, 行为幂等。
+            }
+        }
+
+        return loaded;
+    }
+
+    /// <summary>
+    /// 补齐"配置里没有"的新字段。所有加载路径 (文件 / 首次运行 / 损坏回退) 都必须经过这里,
+    /// 否则未归一化的哨兵值 (-1) 会被当成修饰符位掩码传给 RegisterHotKey。
+    /// </summary>
+    private static AppSettings Normalize(AppSettings s)
+    {
+        // -1 = 旧配置没有这一项。当年两个热键共用修饰键, 继承即可, 升级后行为完全不变;
+        // 用户显式存过的 0 (确实不要修饰键) 不受影响。
+        if (s.HotKeyImageModifiers < 0)
+            s.HotKeyImageModifiers = s.HotKeyModifiers;
+        return s;
     }
 
     /// <summary>把当前设置写回磁盘; 失败静默忽略</summary>

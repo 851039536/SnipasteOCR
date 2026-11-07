@@ -28,14 +28,19 @@ public sealed class HotKeyManager : IDisposable
 
     public HotKeyManager(IntPtr hwnd) => _hwnd = hwnd;
 
-    /// <summary>注册两个热键; 返回失败说明列表 (空 = 全部成功)</summary>
-    public List<string> RegisterAll(int ocrVk, int imageVk, int modifiers)
+    /// <summary>
+    /// 注册两个热键; 返回失败说明列表 (空 = 全部成功)。
+    ///
+    /// 两个热键各自带修饰键: 早期版本共用一组, 而对话框允许分别录制 ——
+    /// 结果第二项可能"显示 F3、实际注册 Ctrl+F3", 界面在骗人。
+    /// </summary>
+    public List<string> RegisterAll(int ocrVk, int imageVk, int ocrModifiers, int imageModifiers)
     {
         var failures = new List<string>();
-        if (!TryRegister(Action.SnipOcr, (uint)modifiers, (uint)ocrVk, out string e1))
-            failures.Add($"截图识别热键 ({Describe((uint)modifiers, (uint)ocrVk)}) 注册失败: {e1}");
-        if (!TryRegister(Action.SnipImage, (uint)modifiers, (uint)imageVk, out string e2))
-            failures.Add($"截图标注热键 ({Describe((uint)modifiers, (uint)imageVk)}) 注册失败: {e2}");
+        if (!TryRegister(Action.SnipOcr, (uint)ocrModifiers, (uint)ocrVk, out string e1))
+            failures.Add($"截图识别热键 ({Describe((uint)ocrModifiers, (uint)ocrVk)}) 注册失败: {e1}");
+        if (!TryRegister(Action.SnipImage, (uint)imageModifiers, (uint)imageVk, out string e2))
+            failures.Add($"截图标注热键 ({Describe((uint)imageModifiers, (uint)imageVk)}) 注册失败: {e2}");
         return failures;
     }
 

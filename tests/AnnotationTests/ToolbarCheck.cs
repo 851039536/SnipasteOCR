@@ -281,6 +281,43 @@ internal static class ToolbarCheck
             tb2.Dispose();
         }
 
+        // ===== 识别模式必须隐藏「贴图」按钮 =====
+        // 回归: 该按钮原先无条件绘制, 但 PinToScreen 在识别模式下直接 return ——
+        // 可点、无反应、无提示的假控件。隐藏时必须连布局与命中一起移除, 不能只改可见性。
+        {
+            var tb6 = new AnnotationToolbar();
+            void PaintToolbar()
+            {
+                using var pb = new Bitmap(tb6.Width, tb6.Height, PixelFormat.Format32bppArgb);
+                using var g = Graphics.FromImage(pb);
+                using var pea = new PaintEventArgs(g, new Rectangle(0, 0, tb6.Width, tb6.Height));
+                typeof(AnnotationToolbar).GetMethod("OnPaint", BindingFlags.NonPublic | BindingFlags.Instance)!
+                    .Invoke(tb6, [pea]);
+            }
+
+            int widthWithPin = tb6.Width;
+            PaintToolbar();   // 命中区域在 OnPaint 中重建, 不画一次读不到 _pinRect
+            var pinBefore = (Rectangle)typeof(AnnotationToolbar).GetField("_pinRect", flags)!.GetValue(tb6)!;
+            Check(pinBefore.Width > 0, "默认 (图片模式) 显示贴图按钮");
+
+            tb6.ShowPin = false;
+            PaintToolbar();
+
+            var pinAfter = (Rectangle)typeof(AnnotationToolbar).GetField("_pinRect", flags)!.GetValue(tb6)!;
+            var cancelAfter = (Rectangle)typeof(AnnotationToolbar).GetField("_cancelRect", flags)!.GetValue(tb6)!;
+
+            Check(pinAfter == Rectangle.Empty, $"隐藏后贴图按钮无命中区域 (实得 {pinAfter})");
+            Check(widthWithPin - tb6.Width == 34 + 3,
+                $"隐藏后工具栏收窄一个按钮位 (实得 {widthWithPin - tb6.Width}, 期望 37)");
+            Check(tb6.Width - cancelAfter.Right == 7,
+                $"隐藏后尾部留白仍为 7px (实得 {tb6.Width - cancelAfter.Right})");
+            Check(cancelAfter.Bottom <= tb6.Height, "隐藏后按钮仍完整落在工具栏内");
+
+            tb6.ShowPin = true;
+            Check(tb6.Width == widthWithPin, $"重新显示后宽度恢复 (实得 {tb6.Width}, 期望 {widthWithPin})");
+            tb6.Dispose();
+        }
+
         tb.Dispose();
         bmp.Dispose();
         return runner.ToResult();

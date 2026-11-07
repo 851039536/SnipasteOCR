@@ -80,6 +80,29 @@ public sealed class AnnotationToolbar : Control
     }
     private bool _canRedo;
 
+    /// <summary>
+    /// 是否显示「贴图(钉住)」按钮。
+    ///
+    /// 贴图只对图片模式 (F3) 有意义: 识别模式的产物是文字, 钉一张原图没用。
+    /// 早期无论模式都绘制该按钮, 但 <c>PinToScreen</c> 在识别模式下直接 return ——
+    /// 按钮可点、无反应、无提示, 属于"假控件"。隐藏时必须同时从布局与命中中移除, 不能只改可见性。
+    /// </summary>
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    [Browsable(false)]
+    public bool ShowPin
+    {
+        get => _showPin;
+        set
+        {
+            if (_showPin == value)
+                return;
+            _showPin = value;
+            Size = new Size(MeasurePreferredWidth(_showPin), ToolbarHeight);
+            Invalidate();
+        }
+    }
+    private bool _showPin = true;
+
     // ===== 事件 =====
     /// <summary>工具或样式发生变化 (宿主据此更新光标与当前画笔)</summary>
     public event Action? ToolChanged;
@@ -130,7 +153,7 @@ public sealed class AnnotationToolbar : Control
             ControlStyles.SupportsTransparentBackColor,
             true);
         BackColor = Color.FromArgb(240, 38, 40, 44);
-        Size = new Size(MeasurePreferredWidth(), ToolbarHeight);
+        Size = new Size(MeasurePreferredWidth(_showPin), ToolbarHeight);
         Cursor = Cursors.Hand;
     }
 
@@ -141,7 +164,8 @@ public sealed class AnnotationToolbar : Control
     /// 收紧后又变成按钮溢出 2px)。这类"同一逻辑写两遍"正是本项目的核心不变量所禁止的。
     /// </summary>
     /// <param name="width">工具栏宽度; 传 0 表示"只算所需宽度", 各元素 X 依次排布</param>
-    private static ToolbarLayout ComputeLayout(int width)
+    /// <param name="showPin">是否排入贴图按钮; 隐藏时不占位, 工具栏整体左移一个按钮宽度</param>
+    private static ToolbarLayout ComputeLayout(int width, bool showPin)
     {
         int x = PadLeft;
 
@@ -179,8 +203,13 @@ public sealed class AnnotationToolbar : Control
 
         // 贴图(钉住): 与撤销/重做同组 —— 都是"对当前结果做点什么"的动作按钮,
         // 放在这里不必再插一条分隔线, 也避免工具栏继续变宽。
-        var pin = new Rectangle(x, 0, ButtonSize, ButtonSize);
-        x += ButtonSize + Gap;
+        // 识别模式没有贴图语义, 隐藏时必须整块跳过 (不占位), 否则尾部会留一个空白按钮位。
+        Rectangle pin = Rectangle.Empty;
+        if (showPin)
+        {
+            pin = new Rectangle(x, 0, ButtonSize, ButtonSize);
+            x += ButtonSize + Gap;
+        }
 
         x += SepWidth - Gap;
         int sep4 = x - SepWidth / 2 - 1;
@@ -216,7 +245,7 @@ public sealed class AnnotationToolbar : Control
         int TotalWidth);
 
     /// <summary>工具栏所需宽度 (与 OnPaint 同源, 不再各写一份)</summary>
-    private static int MeasurePreferredWidth() => ComputeLayout(0).TotalWidth;
+    private static int MeasurePreferredWidth(bool showPin) => ComputeLayout(0, showPin).TotalWidth;
 
     /// <summary>
     /// 绘制工具栏: 深色圆角底 + 工具图标 + 颜色/线宽选择 + 操作按钮。
@@ -243,7 +272,7 @@ public sealed class AnnotationToolbar : Control
 
         // 位置统一由 ComputeLayout 给出 (与 MeasurePreferredWidth 同源),
         // 这里只负责按工具栏高度做垂直居中并绘制。
-        var L = ComputeLayout(Width);
+        var L = ComputeLayout(Width, ShowPin);
         int cy = Height / 2;
 
         // ---- 工具按钮 (纯图标, 等宽) ----
@@ -320,8 +349,9 @@ public sealed class AnnotationToolbar : Control
         _redoRect = CenterY(L.Redo, ButtonSize, cy);
         DrawIconButton(g, _redoRect, ToolbarIcon.Redo, CanRedo, _hoverActionKey == "redo");
 
-        _pinRect = CenterY(L.Pin, ButtonSize, cy);
-        DrawIconButton(g, _pinRect, ToolbarIcon.Pin, enabled: true, _hoverActionKey == "pin");
+        _pinRect = ShowPin ? CenterY(L.Pin, ButtonSize, cy) : Rectangle.Empty;
+        if (ShowPin)
+            DrawIconButton(g, _pinRect, ToolbarIcon.Pin, enabled: true, _hoverActionKey == "pin");
 
         DrawSeparator(g, L.Sep4, cy);
 
@@ -649,7 +679,7 @@ public sealed class AnnotationToolbar : Control
     {
         if (_undoRect.Contains(p)) return "undo";
         if (_redoRect.Contains(p)) return "redo";
-        if (_pinRect.Contains(p)) return "pin";
+        if (ShowPin && _pinRect.Contains(p)) return "pin";
         if (_saveRect.Contains(p)) return "save";
         if (_confirmRect.Contains(p)) return "confirm";
         if (_cancelRect.Contains(p)) return "cancel";

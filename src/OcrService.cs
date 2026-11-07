@@ -6,15 +6,6 @@ using Sdcb.SimdPaddleOCR.Models.ChineseV6Tiny;
 
 namespace SnipasteOcr;
 
-/// <summary>识别模型档位 (可在托盘菜单中切换)</summary>
-public enum OcrModelProfile
-{
-    /// <summary>ChineseV6 Medium (132MB): 精度优先, 小字/模糊/形近字更准</summary>
-    Medium = 0,
-    /// <summary>ChineseV6 Tiny (6MB): 速度优先, 推理约快 9 倍</summary>
-    Tiny = 1,
-}
-
 /// <summary>
 /// OCR 服务: 懒加载 SimdPaddleOCR 引擎 (模型来自 NuGet 嵌入资源, 完全离线)。
 /// 对 Bitmap 仅做瞬时 LockBits 复制, 推理在独立字节缓冲上进行,

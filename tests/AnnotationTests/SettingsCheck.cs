@@ -1,0 +1,75 @@
+// 校验设置模型: 新增「截图标注修饰键」的默认值、旧配置迁移与 JSON 往返。
+// 迁移是高风险区 (AGENTS.md 明确要求新增字段对旧配置可用), 且它不依赖桌面会话。
+using System.Reflection;
+using System.Text.Json;
+using SnipasteOcr;
+
+namespace SnipasteOcr.Tests;
+
+internal static class SettingsCheck
+{
+    public static (int Passed, List<string> Failures) Run()
+    {
+        var runner = new CheckRunner();
+        void Check(bool cond, string name) => runner.Check(cond, name);
+
+        // Normalize 是加载路径的最后一步 (私有), 按真实调用方式验证
+        var normalize = typeof(SettingsStore).GetMethod("Normalize", BindingFlags.NonPublic | BindingFlags.Static)!;
+        AppSettings Normalize(AppSettings s) => (AppSettings)normalize.Invoke(null, [s])!;
+
+        // ===== 1. 旧配置 (没有 hotKeyImageModifiers) 必须继承原修饰键 =====
+        // 当年两个热键共用一套修饰键, 升级后若读成 0, 用户的 Ctrl+F3 会悄悄变成裸 F3。
+        {
+            const string legacy = """
+                {
+                  "modelProfile": 0,
+                  "hotKeyOcr": 81,
+                  "hotKeyImage": 83,
+                  "hotKeyModifiers": 3,
+                  "sortReadingOrder": true,
+                  "runAtStartup": false
+                }
+                """;
+            var s = JsonSerializer.Deserialize(legacy, SettingsJsonContext.Default.AppSettings)!;
+            Check(s.HotKeyImageModifiers == -1, "旧配置缺字段时读出哨兵值 -1 (尚未迁移)");
+
+            Normalize(s);
+            Check(s.HotKeyOcr == 81 && s.HotKeyImage == 83, "旧配置的键码保持不变");
+            Check(s.HotKeyImageModifiers == 3,
+                $"旧配置继承原修饰键 (实得 {s.HotKeyImageModifiers}, 期望 3)");
+        }
+
+        // ===== 2. 用户显式存过的 0 不能被迁移改写 =====
+        {
+            const string saved = """
+                { "hotKeyOcr": 81, "hotKeyImage": 83, "hotKeyModifiers": 3, "hotKeyImageModifiers": 0 }
+                """;
+            var s = Normalize(JsonSerializer.Deserialize(saved, SettingsJsonContext.Default.AppSettings)!);
+            Check(s.HotKeyImageModifiers == 0,
+                $"显式保存的「无修饰键」不被覆盖 (实得 {s.HotKeyImageModifiers})");
+        }
+
+        // ===== 3. 首次运行 / 配置损坏回退 =====
+        // 默认对象也必须归一化, 否则 -1 会被当成位掩码传给 RegisterHotKey。
+        {
+            var s = Normalize(new AppSettings());
+            Check(s.HotKeyImageModifiers == 0,
+                $"首次运行时哨兵值被归一化 (实得 {s.HotKeyImageModifiers})");
+            Check(s.HotKeyOcr == 0x70 && s.HotKeyImage == 0x72, "默认热键仍为 F1 / F3");
+        }
+
+        // ===== 4. 新字段必须真的落盘且往返一致 =====
+        {
+            var original = new AppSettings { HotKeyModifiers = 3, HotKeyImageModifiers = 0 };
+            string json = JsonSerializer.Serialize(original, SettingsJsonContext.Default.AppSettings);
+            Check(json.Contains("hotKeyImageModifiers", StringComparison.OrdinalIgnoreCase),
+                "新字段写入配置文件");
+
+            var back = JsonSerializer.Deserialize(json, SettingsJsonContext.Default.AppSettings)!;
+            Check(back.HotKeyModifiers == 3 && back.HotKeyImageModifiers == 0,
+                $"两组修饰键往返一致 (实得 {back.HotKeyModifiers}/{back.HotKeyImageModifiers})");
+        }
+
+        return runner.ToResult();
+    }
+}

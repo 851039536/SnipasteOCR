@@ -68,6 +68,8 @@ public sealed class SnipOverlayForm : Form
 
         // 工具栏: 初始隐藏, 框选完成后出现在选区下方
         _toolbar.Visible = false;
+        // 贴图只对图片模式有意义 (识别模式的产物是文字), 识别模式下隐藏该按钮
+        _toolbar.ShowPin = mode == SnipMode.Image;
         _toolbar.ToolChanged += OnToolChanged;
         _toolbar.UndoRequested += DoUndo;
         _toolbar.RedoRequested += DoRedo;
@@ -279,17 +281,21 @@ public sealed class SnipOverlayForm : Form
         // 只画在当前选区内 (与最终导出一致)
         AnnotationEngine.Draw(g, [ann], _screen, physSel);
 
-        // 光标: 按最后一行文字宽度定位
-        using var font = UiFont.Create(AnnotationEngine.DefaultFontSize);
+        // 光标: 按最后一行文字宽度定位。
+        // 文字由引擎按"设备字号"绘制 (见 AnnotationEngine.DrawText), 光标必须用同一套设备度量,
+        // 再乘回 ScaleFactor 换算到当前 Graphics 的世界坐标 —— 否则高 DPI 下光标会落在文字中间。
+        float sf = ScaleFactor;
+        using var font = UiFont.Create(AnnotationEngine.DefaultFontSize * sf);
         Size size = TextRenderer.MeasureText(_editingText, font,
             new Size(int.MaxValue, int.MaxValue), TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
 
-        float caretX = _textAnchorPhysical.X + size.Width;
-        float caretTop = _textAnchorPhysical.Y;
-        float caretBottom = caretTop + MathF.Max(size.Height, font.Height);
+        float caretDeviceX = _textAnchorPhysical.X / sf + size.Width;
+        float caretDeviceTop = _textAnchorPhysical.Y / sf;
+        float caretDeviceBottom = caretDeviceTop + MathF.Max(size.Height, font.Height);
+        float caretX = caretDeviceX * sf;
 
-        using var pen = new Pen(Color.FromArgb(230, 255, 255, 255), MathF.Max(1f, ScaleFactor));
-        g.DrawLine(pen, caretX, caretTop, caretX, caretBottom);
+        using var pen = new Pen(Color.FromArgb(230, 255, 255, 255), MathF.Max(1f, sf));
+        g.DrawLine(pen, caretX, caretDeviceTop * sf, caretX, caretDeviceBottom * sf);
     }
 
     // ===== 鼠标 =====
