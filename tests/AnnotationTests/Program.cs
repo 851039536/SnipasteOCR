@@ -172,6 +172,7 @@ RunGroup("尺寸徽标校验", SnipSizeCheck.Run);
 RunGroup("设置迁移校验", SettingsCheck.Run);
 RunGroup("文字编辑框校验", TextEditorChecks.Run);
 RunGroup("OCR 后处理校验", OcrTextChecks.Run);
+RunGroup("选词几何校验", OcrSelectionChecks.Run);
 
 Console.WriteLine();
 Console.WriteLine(failures == 0 ? "全部通过" : $"{failures} 项失败");

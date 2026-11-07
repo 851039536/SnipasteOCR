@@ -35,6 +35,8 @@
     <!-- OCR 结果后处理 (纯函数): OcrText.cs 依赖 SDK 的检测框类型, 故需引用该包 -->
     <Compile Include="..\..\src\OcrText.cs" Link="Engine\OcrText.cs" />
     <Compile Include="..\..\src\OcrBox.cs" Link="Engine\OcrBox.cs" />
+    <!-- 选词几何纯函数 (字符索引反解 / 阅读顺序名次), 结果窗口本身依赖 WinForms 不进离线工程 -->
+    <Compile Include="..\..\src\OcrSelection.cs" Link="Engine\OcrSelection.cs" />
   </ItemGroup>
 
   <ItemGroup>

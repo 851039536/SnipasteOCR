@@ -70,6 +70,29 @@ internal static class SettingsCheck
                 $"两组修饰键往返一致 (实得 {back.HotKeyModifiers}/{back.HotKeyImageModifiers})");
         }
 
+        // ===== 5. 单击复制开关: 旧配置缺字段时为 true, 显式 false 保留 =====
+        // 不能让"读取旧配置"把新功能悄悄关掉, 也不能把用户主动关掉的开关重新打开。
+        {
+            const string legacy = """
+                { "hotKeyOcr": 81, "hotKeyImage": 83 }
+                """;
+            var old = JsonSerializer.Deserialize(legacy, SettingsJsonContext.Default.AppSettings)!;
+            Check(old.ClickToCopy, "旧配置缺 ClickToCopy 时默认为 true");
+
+            const string disabled = """
+                { "clickToCopy": false }
+                """;
+            var off = JsonSerializer.Deserialize(disabled, SettingsJsonContext.Default.AppSettings)!;
+            Check(!off.ClickToCopy, "显式保存的 false 不被默认值覆盖");
+
+            Check(new AppSettings().ClickToCopy, "新配置默认开启单击复制");
+
+            string json = JsonSerializer.Serialize(new AppSettings { ClickToCopy = false }, SettingsJsonContext.Default.AppSettings);
+            Check(json.Contains("clickToCopy", StringComparison.OrdinalIgnoreCase), "新字段写入配置文件");
+            var back = JsonSerializer.Deserialize(json, SettingsJsonContext.Default.AppSettings)!;
+            Check(!back.ClickToCopy, "单击复制开关往返一致");
+        }
+
         return runner.ToResult();
     }
 }

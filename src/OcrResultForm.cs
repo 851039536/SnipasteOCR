@@ -32,6 +32,7 @@ public sealed class OcrResultForm : Form
     private Point _dragAnchorClient;                     // 拖选起点 (客户端坐标)
     private (int Line, int Start, int End)? _partial;    // 行内选中范围 [Start, End)
     private float[][] _lineCumW = [];                    // 每行字符累计宽度权重
+    private int[] _lineRank = [];                        // _lines 索引 -> 阅读顺序名次
 
     private readonly ToolStrip _toolStrip = new();
     private readonly ToolStripButton _zoomOut = new();
@@ -89,14 +90,24 @@ public sealed class OcrResultForm : Form
         UpdateZoomLabel();
         SetStatus("正在识别\u2026");
 
-        OcrService.Instance.StatusChanged += s =>
-        {
-            if (IsHandleCreated)
-                try { BeginInvoke(() => SetStatus(s)); }
-                catch (ObjectDisposedException) { }
-        };
+        // 单例事件链会随窗口打开次数增长: 必须用具名方法订阅, 并在 OnFormClosed 退订,
+        // 否则每次打开结果窗口都会留下一个捕获 this 的委托, 窗体无法回收。
+        OcrService.Instance.StatusChanged += OnServiceStatus;
 
         Shown += (_, _) => StartOcr();
+    }
+
+    /// <summary>把引擎状态切回 UI 线程; 句柄已销毁时静默丢弃 (后台线程仍在识别的收尾阶段)</summary>
+    private void OnServiceStatus(string text)
+    {
+        if (IsDisposed || !IsHandleCreated)
+            return;
+        try
+        {
+            BeginInvoke(() => SetStatus(text));
+        }
+        catch (ObjectDisposedException) { }
+        catch (InvalidOperationException) { } // 检查与调用之间句柄被销毁的竞态
     }
 
     /// <summary>构建工具栏: 缩放 / 全选 / 复制 / 保存 / 关闭</summary>
@@ -143,7 +154,7 @@ public sealed class OcrResultForm : Form
 
         _selectAll.Text = "全选";
         _selectAll.ToolTipText = "选择全部识别结果 ( Ctrl+A )";
-        _selectAll.Click += (_, _) => { _selected.Clear(); _partial = null; for (int i = 0; i < _lines.Length; i++) _selected.Add(i); Invalidate(); };
+        _selectAll.Click += (_, _) => SelectAll();
 
         _copySelection.Text = "复制选中";
         _copySelection.ToolTipText = "复制选中文本 ( Ctrl+C )";
@@ -487,13 +498,7 @@ public sealed class OcrResultForm : Form
         if (cum.Length < 2) return 0;
         var b = _lines[line].Box;
         float u = (ProjU(b.X1, b.Y1, b.X2, b.Y2, ix, iy) + ProjU(b.X4, b.Y4, b.X3, b.Y3, ix, iy)) / 2f;
-        if (_lines[line].AppliedRotationDegrees == 180)
-            u = 1f - u; // 180 度旋转时文字方向与框顶边相反
-        float target = u * cum[cum.Length - 1];
-        int idx = 0;
-        for (int k = 0; k < cum.Length - 1; k++)
-            if (cum[k] <= target) idx = k;
-        return idx;
+        return OcrSelection.CharIndexFromU(cum, u, _lines[line].AppliedRotationDegrees);
     }
 
     // 行内字符范围 -> 高亮四边形 (逻辑客户端坐标)
@@ -525,6 +530,26 @@ public sealed class OcrResultForm : Form
         ];
     }
 
+    /// <summary>
+    /// 清空整行选中与行内部分选中。
+    /// 二者必须同时清 —— 只清 _selected 会留下"画面上没有高亮、Ctrl+C 却仍能复制"的
+    /// 隐藏选区 (空白单击、Shift 取消最后一行都曾踩过)。
+    /// </summary>
+    private void ClearSelection()
+    {
+        _selected.Clear();
+        _partial = null;
+    }
+
+    /// <summary>全选所有检测块 (工具栏按钮与 Ctrl+A 共用)</summary>
+    private void SelectAll()
+    {
+        ClearSelection();
+        for (int i = 0; i < _lines.Length; i++)
+            _selected.Add(i);
+        Invalidate();
+    }
+
     /// <summary>左键按下: 空白处=清除选中/拖动窗口, 文本块上=Shift 多选 或 进入字符级拖选</summary>
     protected override void OnMouseDown(MouseEventArgs e)
     {
@@ -537,7 +562,7 @@ public sealed class OcrResultForm : Form
         {
             if ((Control.ModifierKeys & Keys.Shift) == 0)
             {
-                _selected.Clear();
+                ClearSelection();
                 Invalidate();
             }
             // 无边框窗体: 按住空白处拖动可移动窗口
@@ -551,6 +576,9 @@ public sealed class OcrResultForm : Form
         {
             if (_selected.Contains(hit)) _selected.Remove(hit);
             else _selected.Add(hit);
+            // Shift 取消最后一行时, 行内部分选区可能仍指向它: 不清掉就会变成看不见的选区
+            if (_partial is { } stale && !_selected.Contains(stale.Line))
+                _partial = null;
         }
         else
         {
@@ -562,9 +590,8 @@ public sealed class OcrResultForm : Form
             float dpi = DpiFactor();
             _dragAnchorChar = CharIndexAt(hit, (e.X * dpi - ir.X) / _scale, (e.Y * dpi - ir.Y) / _scale);
             _dragAnchorClient = e.Location;
-            _selected.Clear();
+            ClearSelection();
             _selected.Add(hit); // 整行淡高亮 + 行内字符强高亮
-            _partial = null;
         }
         Invalidate();
     }
@@ -652,36 +679,46 @@ public sealed class OcrResultForm : Form
         Zoom(e.Delta > 0 ? 1.15f : 1f / 1.15f);
     }
 
-    /// <summary>左键松开: 未拖动的字符级按下视为单击 (整行选中); 点击空白处清空选中</summary>
+    /// <summary>
+    /// 左键松开: 未拖动的字符级按下视为单击 (整行选中); 点击空白处清空选中。
+    /// 单击文本块时按设置自动复制该块 (F-1)。
+    /// </summary>
     protected override void OnMouseUp(MouseEventArgs e)
     {
         base.OnMouseUp(e);
         if (e.Button == MouseButtons.Left)
             _draggingMove = false;
-        if (_charDrag && e.Button == MouseButtons.Left)
+        if (!_charDrag || e.Button != MouseButtons.Left)
+            return;
+
+        _charDrag = false;
+        int clickedLine = _dragLine;
+        bool dragged = _charDragMoved;
+        _dragLine = -1;
+        _charDragMoved = false;
+
+        if (!dragged && clickedLine >= 0)
         {
-            _charDrag = false;
-            if (!_charDragMoved)
-            {
-                // 未拖动 = 单击: 选中整行
-                if (_dragLine >= 0)
-                {
-                    _selected.Clear();
-                    _selected.Add(_dragLine);
-                    _partial = null;
-                    Invalidate();
-                }
-                else
-                {
-                    _selected.Clear();
-                    _partial = null;
-                    Invalidate();
-                }
-            }
-            _dragLine = -1;
-            _charDragMoved = false;
-            UpdateIdleStatus();
+            ClearSelection();
+            _selected.Add(clickedLine);
+            Invalidate();
+
+            // 只在"单击检测块"时复制: 拖选、Shift 多选、空白单击都不复制。
+            // 复制后不要调用 UpdateIdleStatus, 否则"已复制 N 字符"会立刻被"已选 N 字符"覆盖;
+            // 鼠标移到别的块时 OnMouseMove 会自然刷新状态。
+            if (SettingsStore.Current.ClickToCopy)
+                CopyText(_lines[clickedLine].Text);
+            else
+                UpdateIdleStatus();
+            return;
         }
+
+        if (!dragged)
+        {
+            ClearSelection();
+            Invalidate();
+        }
+        UpdateIdleStatus();
     }
 
     // 无边框窗体: 边缘 6 像素内返回对应命中区, 由系统处理缩放并显示缩放光标;
@@ -735,10 +772,7 @@ public sealed class OcrResultForm : Form
                 CopyText(GetSelectedText());
                 return true;
             case Keys.Control | Keys.A:
-                _selected.Clear();
-                _partial = null;
-                for (int i = 0; i < _lines.Length; i++) _selected.Add(i);
-                Invalidate();
+                SelectAll();
                 return true;
             case Keys.Add:
             case Keys.Oemplus:
@@ -783,13 +817,18 @@ public sealed class OcrResultForm : Form
         return string.Join("\n", rows.Select(l => l.Text).Where(t => !string.IsNullOrWhiteSpace(t)));
     }
 
-    /// <summary>当前选中的文本: 整行选中按行取, 行内部分选中取 [Start, End) 子串</summary>
+    /// <summary>
+    /// 当前选中的文本: 整行选中按行取, 行内部分选中取 [Start, End) 子串。
+    /// 输出顺序按阅读顺序名次, 与「复制全部」「复制段落」一致 ——
+    /// 直接按检测顺序排序时, 多栏截图的多选复制会右栏在前。
+    /// </summary>
     private string GetSelectedText()
     {
         if (_selected.Count == 0)
-            return _partial is { } p ? _lines[p.Line].Text.Substring(p.Start, p.End - p.Start) : string.Empty;
+            return string.Empty; // _partial 必然伴随 _selected (见 ClearSelection 的不变量)
+
         var parts = new List<string>();
-        foreach (int i in _selected.OrderBy(i => i))
+        foreach (int i in _selected.OrderBy(RankOf).ThenBy(i => i))
         {
             string t = _lines[i].Text;
             if (_partial is { } p && p.Line == i)
@@ -800,7 +839,10 @@ public sealed class OcrResultForm : Form
         return string.Join("\n", parts);
     }
 
-    private bool HasSelection() => _selected.Count > 0 || _partial is not null;
+    /// <summary>检测行索引 -> 阅读顺序名次; 空白行 (无名词) 排到最后</summary>
+    private int RankOf(int line) => line >= 0 && line < _lineRank.Length ? _lineRank[line] : int.MaxValue;
+
+    private bool HasSelection() => _selected.Count > 0;
 
     /// <summary>当前选中字符数 (用于状态栏提示)</summary>
     private int SelectedCharCount()
@@ -813,8 +855,6 @@ public sealed class OcrResultForm : Form
             else
                 n += _lines[i].Text.Length;
         }
-        if (_selected.Count == 0 && _partial is { } q)
-            n += q.End - q.Start;
         return n;
     }
 
@@ -826,7 +866,9 @@ public sealed class OcrResultForm : Form
         if (HasSelection())
             SetStatus($"已选 {SelectedCharCount()} 字符 (Ctrl+C 复制)");
         else
-            SetStatus($"{_lines.Length} 个文本块 · 单击/拖选 · Shift 多选 · Ctrl+滚轮缩放");
+            SetStatus(SettingsStore.Current.ClickToCopy
+                ? $"{_lines.Length} 个文本块 · 单击复制 · 拖选文字 · Shift 多选 · Ctrl+滚轮缩放"
+                : $"{_lines.Length} 个文本块 · 单击/拖选 · Shift 多选 · Ctrl+滚轮缩放");
     }
 
     /// <summary>文本写入剪贴板并在状态栏反馈结果</summary>
@@ -894,9 +936,9 @@ public sealed class OcrResultForm : Form
                         return;
                     _lines = result.Lines;
                     _wordOrder = SettingsStore.Current.SortReadingOrder;
-                    _selected.Clear();
-                    _partial = null;
+                    ClearSelection();
                     _lineCumW = BuildCharWeights(_lines);
+                    _lineRank = OcrSelection.BuildReadingRanks(_lines, _wordOrder);
                     _hover = -1;
                     _ocrDone = true;
                     _minScale = ComputeFitScale();
@@ -920,9 +962,10 @@ public sealed class OcrResultForm : Form
         });
     }
 
-    /// <summary>取消 OCR 任务并释放位图</summary>
+    /// <summary>取消 OCR 任务、退订状态事件并释放位图</summary>
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
+        OcrService.Instance.StatusChanged -= OnServiceStatus;
         _cts?.Cancel();
         _cts?.Dispose();
         _src.Dispose();

@@ -40,6 +40,13 @@ public sealed class AppSettings
     /// <summary>OCR 结果是否按阅读顺序 (上→下, 左→右) 重排</summary>
     public bool SortReadingOrder { get; set; } = true;
 
+    /// <summary>
+    /// 单击识别结果窗口中的文本块时自动复制该块。
+    /// 默认开启 —— 这是用户最常用的动作; 但单击就改写剪贴板是副作用,
+    /// 托盘菜单提供开关, 便于只想浏览结果的用户关掉。旧配置没有该字段时靠属性初值得到 true。
+    /// </summary>
+    public bool ClickToCopy { get; set; } = true;
+
     /// <summary>跟随系统的开机自启</summary>
     public bool RunAtStartup { get; set; }
 

@@ -22,6 +22,7 @@ src/                       产品代码 (唯一的出货工程, 也是唯一的 
   OcrResultForm.cs         结果窗口: 框叠加、字符级拖选、缩放联动
   OcrText.cs               结果后处理: 阅读顺序排序、表格/CSV 重建 (纯函数)
   OcrBox.cs                检测框四角几何辅助 (5 处调用点共用)
+  OcrSelection.cs          选词几何纯函数 (字符索引反解 / 多选阅读顺序名次)
   AppSettings.cs           配置持久化 + AOT 安全 JSON 源生成上下文
   HotKeyManager.cs         全局热键注册/重注册 (支持运行期换键)
   HotKeyForm.cs            热键设置对话框 (按键录制)
@@ -31,8 +32,8 @@ src/                       产品代码 (唯一的出货工程, 也是唯一的 
   PinnedImageForm.cs       贴图窗口 (钉在屏幕上的置顶小窗, 可拖动/右键关闭)
   SnipSizeBadge.cs         框选实时尺寸徽标 (宽 × 高, 物理像素; 纯函数布局 + 自绘)
   NativeMethods.cs         Win32 P/Invoke (消息/热键/窗口/菜单/托盘/输入模拟)
-tests/AnnotationTests/     离线自检, 215 项 (几何/命中/历史/渲染/工具栏/尺寸徽标/设置迁移/编辑框/OCR 后处理)
-tests/InteractiveTests/    交互自检, 48 项 (真实窗口 + 真实按键 + 拖拽实时尺寸 + 托盘菜单文案 + IME, 需要桌面会话)
+tests/AnnotationTests/     离线自检, 237 项 (几何/命中/历史/渲染/工具栏/尺寸徽标/设置迁移/编辑框/OCR 后处理/选词几何)
+tests/InteractiveTests/    交互自检, 61 项 (真实窗口 + 真实按键 + 拖拽实时尺寸 + 托盘菜单文案 + 结果窗口单击复制 + IME, 需要桌面会话)
 tools/DriveTest/           端到端驱动实际 exe (真实鼠标键盘事件 + 抓屏取证 + 校验导出图)
 ```
 
@@ -66,10 +67,10 @@ dotnet publish src/SnipasteOcr.csproj -c Release -r win-x64 --self-contained -p:
 ```
 
 ```powershell
-# 离线自检 (215 项), 无需桌面会话 —— 改完必跑
+# 离线自检 (237 项), 无需桌面会话 —— 改完必跑
 dotnet run --project tests/AnnotationTests              # 期望输出「全部通过」, 退出码 0
 dotnet run --project tests/AnnotationTests -- sample    # 额外输出六种标注样例图
-# 交互自检 (48 项) —— 需要可用的桌面会话
+# 交互自检 (61 项) —— 需要可用的桌面会话
 dotnet run --project tests/InteractiveTests
 # 端到端驱动实际 exe (可选)
 dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
@@ -122,6 +123,8 @@ dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
 | `SnipGeometry.ExportRect` | 实时尺寸徽标 **和** `RenderResult` 裁剪导出 **和** 无效选区兜底 |
 | `SnipGeometry.MinDragSide` / `IsValidSelection` | 拖拽/松手判定 **和** 遮罩绘制 **和** 导出判据 |
 | `SnipSizeBadge.Segments`(私有,内部共用) | 徽标文本度量 **和** 分段绘制 |
+| `OcrSelection.CharIndexFromU` | 字符级拖选的光标索引 **和** 离线断言(唯一的中线判定实现) |
+| `OcrSelection.BuildReadingRanks` | 多选/全选复制顺序 **和** 离线断言(内部复用 `OcrText.SortReadingOrder`) |
 
 - `OcrBox.TopEdge` 与 `BottomEdge` 的取点顺序必须**同向**(`X1→X2` 与 `X4→X3`),
   否则按同一参数 `u` 插值出的高亮四边形会自交。
@@ -140,6 +143,20 @@ dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
 - **徽标还要避开工具栏**:`PositionToolbar` 在选区贴底时会把工具栏翻转到选区上方,而工具栏是子控件,
   会整块盖住窗体自绘内容 —— 早期徽标正好落在同一位置,只剩 2px 可见。因此 `OnPaint` 必须把
   `_toolbar.Bounds` 传给 `ComputeLayout`,重叠时依次让到工具栏上方 → 选区内侧 → 工具栏下方。
+- **字符光标索引必须允许等于文本长度**:`OcrSelection.CharIndexFromU` 返回 `0..n`(`n` = 行尾光标),
+  按字符中线判定左右半格。踩过的坑:旧实现循环只推到 `n-1`,拖到行尾永远少选最后一个字符,
+  且 `cur == t.Length` 的贴边收尾分支成了死代码。拖选复制与高亮共用 `_partial`,修一处两者同步修好。
+- **清空选中只能走 `ClearSelection`**:`_selected`(整行)与 `_partial`(行内范围)必须同清。
+  只清其一会留下"画面上没有高亮、`Ctrl+C` 却还能复制"的隐藏选区;Shift 取消最后一行时也要清掉
+  指向已取消行的 `_partial`。`HasSelection` 只认 `_selected`,因为 `_partial` 必然伴随它。
+- **多选复制的顺序必须按阅读顺序名次**:`GetSelectedText` 不能再按 `_lines` 检测顺序排序。
+  检测顺序在多栏截图里可能右栏在前,直接按索引拼接会与「复制全部」不一致。
+  名次由 `OcrSelection.BuildReadingRanks` 复用 `OcrText.SortReadingOrder` 生成,排序规则不得另写一份。
+- **单击复制只在"未拖动的单击检测块"生效**:拖选(`_charDragMoved`)、`Shift` 多选(不进 `_charDrag`)、
+  空白单击都不写剪贴板;复制范围就是当前检测块,不要合并同一视觉行(表格会粘列)。
+  `OnMouseUp` 里复制后**不要**再调 `UpdateIdleStatus`,否则「已复制 N 字符」会立刻被「已选 N 字符」覆盖。
+- **`OcrService.StatusChanged` 必须退订**:结果窗口用具名方法订阅,`OnFormClosed` 里 `-=`。
+  匿名 lambda 无法退订,每开一次窗口就会在单例事件链上留下一个捕获 `this` 的委托,窗体无法回收。
 
 ### 坐标系与 DPI
 
@@ -214,6 +231,10 @@ dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
 
 新增字段若需要"旧配置没有时继承另一个字段",在 `SettingsStore.Normalize` 里做,并保证
 **三条加载路径(文件存在 / 首次运行 / 反序列化失败)**都经过它;判据只看哨兵值,不要无条件改写用户显式存过的值。
+
+布尔开关类新字段(如 `ClickToCopy`)直接给属性初值即可:旧 JSON 缺字段时反序列化会保留初值,
+显式存过的 `false` 也不会被覆盖。结果窗口每次单击都读 `SettingsStore.Current`,因此托盘里切换开关后,
+已经打开的结果窗口会立即响应,不需要重启或重建窗口。
 
 ### 开机自启 (`StartupRegistration`)
 

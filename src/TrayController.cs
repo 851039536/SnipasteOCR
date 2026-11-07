@@ -22,6 +22,7 @@ public sealed class TrayController : IDisposable
     private const int CMD_STARTUP = 0x1006;
     private const int CMD_OCR_CLIPBOARD = 0x1007;
     private const int CMD_PREVENT_SLEEP = 0x1008;
+    private const int CMD_CLICK_TO_COPY = 0x1009;
     private static readonly uint TRAY_CALLBACK = User32.WM_APP + 1;
 
     // 静态持有: 窗口过程委托必须防止被 GC; 单实例引用用于回调
@@ -59,6 +60,12 @@ public sealed class TrayController : IDisposable
     /// API 调用失败时勾选会回到未勾选, 不骗人。
     /// </summary>
     public event Action<bool>? PreventSleepToggleRequested;
+
+    /// <summary>
+    /// 用户切换"单击复制识别结果" (参数为期望的新状态)。
+    /// 由 Program 落盘; 结果窗口在每次单击时读取设置, 因此打开中的窗口也会立即响应。
+    /// </summary>
+    public event Action<bool>? ClickToCopyToggleRequested;
 
     /// <summary>注册窗口类与宿主窗口, 创建右键菜单和托盘图标; 任一步失败抛 Win32Exception</summary>
     public TrayController()
@@ -116,12 +123,14 @@ public sealed class TrayController : IDisposable
         // 文案用"防止电脑休眠"而非"保持屏幕常亮": 本机制阻止的是空闲触发的休眠/息屏,
         // 合盖、按电源键、屏保锁屏都拦不住, 文案不能给出做不到的承诺。
         User32.AppendMenu(_hMenu, User32.MF_STRING, (IntPtr)CMD_PREVENT_SLEEP, "防止电脑休眠");
+        User32.AppendMenu(_hMenu, User32.MF_STRING, (IntPtr)CMD_CLICK_TO_COPY, "单击复制识别结果");
         User32.AppendMenu(_hMenu, User32.MF_SEPARATOR, IntPtr.Zero, null);
         User32.AppendMenu(_hMenu, User32.MF_STRING, (IntPtr)CMD_EXIT, "退出");
 
         SyncModelChecks();
         SyncStartupCheck();
         SyncPreventSleepCheck();
+        SyncClickToCopyCheck();
 
         // 3. 托盘图标
         var nid = new Shell32.NOTIFYICONDATA
@@ -223,6 +232,10 @@ public sealed class TrayController : IDisposable
                 _instance?.PreventSleepToggleRequested?.Invoke(!SleepPreventer.IsActive);
                 _instance?.SyncPreventSleepCheck();
                 break;
+            case CMD_CLICK_TO_COPY:
+                _instance?.ClickToCopyToggleRequested?.Invoke(!SettingsStore.Current.ClickToCopy);
+                _instance?.SyncClickToCopyCheck();
+                break;
             case CMD_EXIT: _instance?.ExitRequested?.Invoke(); break;
         }
     }
@@ -293,6 +306,15 @@ public sealed class TrayController : IDisposable
             _hMenu,
             (uint)CMD_PREVENT_SLEEP,
             User32.MF_BYCOMMAND | (SleepPreventer.IsActive ? User32.MF_CHECKED : User32.MF_UNCHECKED));
+    }
+
+    /// <summary>按设置刷新「单击复制识别结果」的勾选 (纯设置项, 无外部真实状态需要回读)</summary>
+    private void SyncClickToCopyCheck()
+    {
+        User32.CheckMenuItem(
+            _hMenu,
+            (uint)CMD_CLICK_TO_COPY,
+            User32.MF_BYCOMMAND | (SettingsStore.Current.ClickToCopy ? User32.MF_CHECKED : User32.MF_UNCHECKED));
     }
 
     /// <summary>从嵌入 PNG 资源生成 32x32 托盘图标; 资源缺失时用蓝色方块占位</summary>

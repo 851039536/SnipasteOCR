@@ -7,6 +7,7 @@ using System.Text;
 using System.Windows.Forms;
 using SnipasteOcr;
 using SnipasteOcr.Annotations;
+using Sdcb.SimdPaddleOCR;
 
 namespace SnipasteOcr.Tests;
 
@@ -344,6 +345,113 @@ internal static class InteractiveCheck
             }
         }
 
+        // 13. 结果窗口: 单击自动复制 (F-1)、隐藏选区与多选阅读顺序 (O-3/O-4)、事件退订 (O-5)
+        {
+            var statusField = typeof(OcrService).GetField("StatusChanged", BindingFlags.NonPublic | BindingFlags.Instance)!;
+            int StatusSubscribers() =>
+                (statusField.GetValue(OcrService.Instance) as Delegate)?.GetInvocationList().Length ?? 0;
+
+            int subscribersBefore = StatusSubscribers();
+            var src = new Bitmap(600, 300);
+            var resultForm = new OcrResultForm(src);
+            var settings = SettingsStore.Current;
+            bool savedClickToCopy = settings.ClickToCopy;
+            string? originalClip = GetClipboardTextSafe();
+
+            try
+            {
+                _ = resultForm.Handle; // 建句柄但不 Show: Show 会触发 Shown -> 真的开始 OCR
+                Check(StatusSubscribers() == subscribersBefore + 1, "结果窗口订阅引擎状态事件");
+
+                // 检测顺序故意与阅读顺序不同: 输入 Bottom, Top, Middle
+                var lines = new[]
+                {
+                    Det("Bottom", 10, 200),
+                    Det("Top", 10, 20),
+                    Det("Middle", 10, 110),
+                };
+                typeof(OcrResultForm).GetField("_lines", Priv)!.SetValue(resultForm, lines);
+                typeof(OcrResultForm).GetField("_ocrDone", Priv)!.SetValue(resultForm, true);
+                typeof(OcrResultForm).GetField("_wordOrder", Priv)!.SetValue(resultForm, true);
+                var buildWeights = typeof(OcrResultForm).GetMethod("BuildCharWeights", BindingFlags.NonPublic | BindingFlags.Static)!;
+                typeof(OcrResultForm).GetField("_lineCumW", Priv)!.SetValue(resultForm, buildWeights.Invoke(null, [lines]));
+                typeof(OcrResultForm).GetField("_lineRank", Priv)!.SetValue(
+                    resultForm, OcrSelection.BuildReadingRanks(lines, sortReadingOrder: true));
+
+                settings.ClickToCopy = true;
+                var mouseDown = typeof(OcrResultForm).GetMethod("OnMouseDown", Priv)!;
+                var mouseMove = typeof(OcrResultForm).GetMethod("OnMouseMove", Priv)!;
+                var mouseUp = typeof(OcrResultForm).GetMethod("OnMouseUp", Priv)!;
+
+                void ClickAt(Point p)
+                {
+                    mouseDown.Invoke(resultForm, [new MouseEventArgs(MouseButtons.Left, 1, p.X, p.Y, 0)]);
+                    mouseUp.Invoke(resultForm, [new MouseEventArgs(MouseButtons.Left, 1, p.X, p.Y, 0)]);
+                }
+
+                var topPoint = BoxCenter(resultForm, lines[1].Box);
+                var middlePoint = BoxCenter(resultForm, lines[2].Box);
+                var bottomPoint = BoxCenter(resultForm, lines[0].Box);
+                var selected = (HashSet<int>)typeof(OcrResultForm).GetField("_selected", Priv)!.GetValue(resultForm)!;
+
+                // 13.1 单击文本块: 选中整行并复制该块
+                SetClipboardTextSafe("--marker--");
+                ClickAt(topPoint);
+                Check(GetClipboardTextSafe() == "Top",
+                    $"单击复制当前检测块 (实得 \"{GetClipboardTextSafe()}\")");
+                Check(selected.SetEquals([1]), "单击后整行保持选中");
+                string status = (string)typeof(OcrResultForm).GetField("_statusText", Priv)!.GetValue(resultForm)!;
+                Check(status.Contains("已复制", StringComparison.Ordinal), $"状态栏显示已复制 (实得 \"{status}\")");
+
+                // 13.2 Shift+单击只切换多选, 不写剪贴板
+                SetClipboardTextSafe("--marker--");
+                keybd_event(0x10, 0, 0, IntPtr.Zero); // VK_SHIFT down
+                try { ClickAt(bottomPoint); }
+                finally { keybd_event(0x10, 0, 0x0002, IntPtr.Zero); } // KEYEVENTF_KEYUP
+                Check(GetClipboardTextSafe() == "--marker--", "Shift+单击不写剪贴板");
+                Check(selected.SetEquals([0, 1]),
+                    $"Shift+单击切换多选 (实得 {string.Join(",", selected.OrderBy(i => i))})");
+
+                // 13.3 块内拖动是字符级拖选, 松手不复制
+                SetClipboardTextSafe("--marker--");
+                mouseDown.Invoke(resultForm, [new MouseEventArgs(MouseButtons.Left, 1, middlePoint.X - 20, middlePoint.Y, 0)]);
+                mouseMove.Invoke(resultForm, [new MouseEventArgs(MouseButtons.Left, 1, middlePoint.X + 20, middlePoint.Y, 0)]);
+                mouseUp.Invoke(resultForm, [new MouseEventArgs(MouseButtons.Left, 1, middlePoint.X + 20, middlePoint.Y, 0)]);
+                Check(GetClipboardTextSafe() == "--marker--", "块内拖选松手不复制");
+
+                // 13.4 单击空白不复制
+                SetClipboardTextSafe("--marker--");
+                ClickAt(new Point(resultForm.ClientSize.Width - 30, resultForm.ClientSize.Height / 2));
+                Check(GetClipboardTextSafe() == "--marker--", "单击空白不复制");
+                Check(selected.Count == 0, "单击空白清空整行选中");
+
+                // 13.5 关闭开关后只选中不复制
+                settings.ClickToCopy = false;
+                SetClipboardTextSafe("--marker--");
+                ClickAt(middlePoint);
+                Check(GetClipboardTextSafe() == "--marker--", "关闭 ClickToCopy 后单击不复制");
+                Check(selected.SetEquals([2]), "关闭开关后仍选中整行");
+
+                // 13.6 全选复制按阅读顺序输出
+                SetClipboardTextSafe("--marker--");
+                InvokeCmdKey(resultForm, Keys.Control | Keys.A);
+                InvokeCmdKey(resultForm, Keys.Control | Keys.C);
+                string? copied = GetClipboardTextSafe();
+                Check(copied == "Top\nMiddle\nBottom",
+                    $"Ctrl+A / Ctrl+C 按阅读顺序输出 (实得 \"{copied?.Replace("\n", "\\n")}\")");
+
+                resultForm.Close();
+                Check(StatusSubscribers() == subscribersBefore, "关闭结果窗口后退订引擎状态事件");
+            }
+            finally
+            {
+                settings.ClickToCopy = savedClickToCopy;
+                RestoreClipboard(originalClip);
+                resultForm.Dispose();
+                src.Dispose();
+            }
+        }
+
         return runner.ToResult();
     }
 
@@ -372,6 +480,60 @@ internal static class InteractiveCheck
     /// <summary>构造鼠标按下参数</summary>
     private static MouseEventArgs MouseArgs(Point p)
         => new(MouseButtons.Left, 1, p.X, p.Y, 0);
+
+    /// <summary>检测框中心对应的客户端坐标 (走产品自己的坐标换算, 避免测试另写一份)</summary>
+    private static Point BoxCenter(OcrResultForm form, PaddleOcrDetectionBox box)
+    {
+        var mi = typeof(OcrResultForm).GetMethod("BoxToClientPoints", Priv)!;
+        var pts = (PointF[])mi.Invoke(form, [box])!;
+        return new Point(
+            (int)Math.Round(pts.Average(p => p.X)),
+            (int)Math.Round(pts.Average(p => p.Y)));
+    }
+
+    /// <summary>反射调用结果窗口的 ProcessCmdKey (protected 且参数是 ref Message)</summary>
+    private static bool InvokeCmdKey(OcrResultForm form, Keys key)
+    {
+        var mi = typeof(OcrResultForm).GetMethod("ProcessCmdKey", Priv)!;
+        object?[] args = [new Message { Msg = 0x0100 }, key];   // WM_KEYDOWN
+        return (bool)mi.Invoke(form, args)!;
+    }
+
+    /// <summary>构造一行检测结果 (轴对齐 100x24)</summary>
+    private static PaddleOcrLine Det(string text, float left, float top)
+        => new()
+        {
+            Text = text,
+            Box = new PaddleOcrDetectionBox(
+                left, top, left + 100, top, left + 100, top + 24, left, top + 24, 1f),
+            RecognitionScore = 1f,
+            ClassificationScore = 1f,
+            ClassificationLabel = 0,
+            AppliedRotationDegrees = 0,
+            EmittedCount = 0,
+        };
+
+    private static string? GetClipboardTextSafe()
+    {
+        try { return Clipboard.ContainsText() ? Clipboard.GetText() : null; }
+        catch { return null; }
+    }
+
+    private static void SetClipboardTextSafe(string text)
+    {
+        try { Clipboard.SetText(text); }
+        catch { /* 剪贴板被占用时测试环境问题, 后续断言会如实失败 */ }
+    }
+
+    private static void RestoreClipboard(string? text)
+    {
+        try
+        {
+            if (text is null) Clipboard.Clear();
+            else Clipboard.SetText(text);
+        }
+        catch { }
+    }
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern int GetMenuStringW(IntPtr hMenu, uint uIDItem, StringBuilder lpString, int cchMax, uint flags);

@@ -97,6 +97,10 @@ internal static class Program
                 SettingsStore.Update(s => s.PreventSleep = actual);
             };
 
+            // 单击复制识别结果: 纯设置项, 落盘即可; 结果窗口每次单击都读取当前设置
+            tray.ClickToCopyToggleRequested += want =>
+                SettingsStore.Update(s => s.ClickToCopy = want);
+
             IntPtr hwnd = tray.WindowHandle;
 
             // 热键来自设置 (默认 F1 / F3), 支持运行期更换; 两个热键各自带修饰键
