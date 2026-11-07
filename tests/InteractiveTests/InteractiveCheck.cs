@@ -192,8 +192,10 @@ internal static class InteractiveCheck
                       exported.Height == (int)Math.Round(finalSel.Height * sf),
                     $"导出尺寸按物理像素换算 ({exported.Width}x{exported.Height}, scale={sf:F2})");
 
+                // 工具栏是子控件, 会盖住徽标: 参考图与断言都按真实工具栏外框布局
+                Rectangle? toolbarBox = toolbar.Visible ? toolbar.Bounds : null;
                 var badgeBox = SnipSizeBadge.ComputeLayout(
-                    finalSel, SnipSizeBadge.MeasureText(exported.Size), form.ClientSize);
+                    finalSel, SnipSizeBadge.MeasureText(exported.Size), form.ClientSize, toolbarBox);
                 Check(badgeBox.Left >= 0 && badgeBox.Top >= 0 &&
                       badgeBox.Right <= form.ClientSize.Width && badgeBox.Bottom <= form.ClientSize.Height,
                     $"徽标完整落在屏幕内 (实得 {badgeBox})");
@@ -225,7 +227,7 @@ internal static class InteractiveCheck
                 using (var g = Graphics.FromImage(reference))
                 {
                     g.Clear(Color.White);
-                    SnipSizeBadge.Draw(g, finalSel, exported.Size, reference.Size);
+                    SnipSizeBadge.Draw(g, finalSel, exported.Size, reference.Size, toolbarBox);
                 }
                 int referencePixels = WhiteCount(reference, badgeBox);
 
@@ -234,13 +236,29 @@ internal static class InteractiveCheck
                 Check(Math.Abs(numeralPixels - referencePixels) <= Math.Max(6, referencePixels / 4),
                     $"徽标数值与参考绘制一致 (覆盖层={numeralPixels}, 参考={referencePixels})");
 
-                // 换一个明显不同的选区, 徽标应跟着走 (证明是实时跟随而非固定位置)
+                // 换一个明显不同的选区并真正重绘: 徽标必须画到新位置, 而不是固定不动。
+                // 只比较两次 ComputeLayout 的结果是恒真的, 证明不了"跟随", 所以这里走真实 OnPaint。
+                var movedSel = new Rectangle(320, 220, 260, 180);
+                selectionField.SetValue(form, movedSel);
+                typeof(SnipOverlayForm).GetMethod("OnSelectionChanged", Priv)!.Invoke(form, null);
+                Application.DoEvents();
+
+                using var movedFrame = new Bitmap(form.ClientSize.Width, form.ClientSize.Height);
+                using (var g = Graphics.FromImage(movedFrame))
+                using (var pea = new PaintEventArgs(g, new Rectangle(Point.Empty, movedFrame.Size)))
+                {
+                    typeof(SnipOverlayForm).GetMethod("OnPaint", Priv)!.Invoke(form, [pea]);
+                }
+
+                var movedExported = SnipGeometry.ExportRect(movedSel, sf, screenBmp.Size);
                 var movedBox = SnipSizeBadge.ComputeLayout(
-                    new Rectangle(600, 400, 180, 120),
-                    SnipSizeBadge.MeasureText(SnipGeometry.ExportRect(new Rectangle(600, 400, 180, 120), sf, screenBmp.Size).Size),
-                    form.ClientSize);
-                Check(movedBox.Left != badgeBox.Left || movedBox.Top != badgeBox.Top,
-                    "选区移动后徽标位置随之改变 (跟随选区)");
+                    movedSel, SnipSizeBadge.MeasureText(movedExported.Size), form.ClientSize,
+                    toolbar.Visible ? toolbar.Bounds : null);
+
+                int movedPixels = WhiteCount(movedFrame, movedBox);
+                int stalePixels = WhiteCount(movedFrame, badgeBox);
+                Check(movedPixels > 5 && stalePixels < 5,
+                    $"移动选区后徽标跟随到新位置 (新位置={movedPixels}, 旧位置={stalePixels})");
             }
         }
 

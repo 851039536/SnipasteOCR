@@ -152,17 +152,14 @@ public sealed class SnipOverlayForm : Form
         return new RectangleF(r.X / sf, r.Y / sf, r.Width / sf, r.Height / sf);
     }
 
-    /// <summary>当前选区对应的物理像素矩形 (无选区时返回 null)</summary>
+    /// <summary>
+    /// 当前选区对应的物理像素矩形 (无选区时返回 null)。
+    /// 走 <see cref="SnipGeometry.ExportRect"/> 而非自算: 命中测试/预览裁剪与最终导出必须同一份取整结果。
+    /// </summary>
     private RectangleF? SelectionPhysical
-    {
-        get
-        {
-            if (!SnipGeometry.IsValidSelection(_selection) || _selection is not { } sel)
-                return null;
-            float sf = ScaleFactor;
-            return new RectangleF(sel.X * sf, sel.Y * sf, sel.Width * sf, sel.Height * sf);
-        }
-    }
+        => SnipGeometry.IsValidSelection(_selection)
+            ? SnipGeometry.ExportRect(_selection, ScaleFactor, _screen.Size)
+            : null;
 
     /// <summary>当前选中工具的画笔 (从工具栏同步)</summary>
     private Annotation CreateShape(AnnotationTool tool, PointF start) => new()
@@ -186,15 +183,17 @@ public sealed class SnipOverlayForm : Form
         if (_selection is { } sel && SnipGeometry.IsValidSelection(sel))
         {
             float sf = ScaleFactor;
+            // 逻辑选区 → 物理矩形: 预览用的源区域、标注裁剪和导出共用同一份取整结果
+            Rectangle export = SnipGeometry.ExportRect(sel, sf, _screen.Size);
+            RectangleF physSel = export;
 
             // 选区外半透明遮罩
             using (var dim = new SolidBrush(Color.FromArgb(60, 0, 0, 0)))
                 g.FillRectangle(dim, ClientRectangle);
             // 把选区原样画回 (去除遮罩)
-            g.DrawImage(_screen, sel, new RectangleF(sel.X * sf, sel.Y * sf, sel.Width * sf, sel.Height * sf), GraphicsUnit.Pixel);
+            g.DrawImage(_screen, sel, physSel, GraphicsUnit.Pixel);
 
             // 标注: 只在选区内绘制 (与最终导出一致)
-            var physSel = new RectangleF(sel.X * sf, sel.Y * sf, sel.Width * sf, sel.Height * sf);
             DrawAnnotations(g, physSel);
 
             // 边框 + 尺寸标签
@@ -203,8 +202,10 @@ public sealed class SnipOverlayForm : Form
             using (var pen2 = new Pen(Color.FromArgb(255, 33, 150, 243), 2f))
                 g.DrawRectangle(pen2, new Rectangle(sel.X + 1, sel.Y + 1, Math.Max(0, sel.Width - 2), Math.Max(0, sel.Height - 2)));
 
-            // 实时尺寸: 与导出共用 ExportRect, 保证"标签写的 = 实际裁出来的"
-            SnipSizeBadge.Draw(g, sel, SnipGeometry.ExportRect(sel, sf, _screen.Size).Size, ClientSize);
+            // 实时尺寸: 与导出共用 ExportRect, 保证"标签写的 = 实际裁出来的";
+            // 同时让开工具栏 —— 选区贴底时工具栏会翻转到选区上方压住徽标
+            SnipSizeBadge.Draw(g, sel, export.Size, ClientSize,
+                _toolbar.Visible ? _toolbar.Bounds : null);
         }
         else
         {

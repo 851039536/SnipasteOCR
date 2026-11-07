@@ -93,6 +93,20 @@ internal static class SnipSizeCheck
               full.Right <= client.Width - 4 && full.Bottom <= client.Height - 4,
             $"全屏框选时徽标仍完整可见 (实得 {full})");
 
+        // 工具栏是子控件, 会覆盖窗体自绘内容: 选区贴底时工具栏翻转到选区上方, 徽标必须让位
+        var bottomSel = new Rectangle(100, 900, 400, 160);
+        var flippedToolbar = new Rectangle(100, 850, 600, 42);
+        var avoided = SnipSizeBadge.ComputeLayout(bottomSel, text, client, flippedToolbar);
+        Check(!avoided.IntersectsWith(flippedToolbar),
+            $"工具栏翻转到选区上方时徽标让开工具栏 (badge={avoided}, toolbar={flippedToolbar})");
+        Check(avoided.Top >= 4 && avoided.Bottom <= flippedToolbar.Top,
+            $"徽标整体落在工具栏上方 (badge={avoided})");
+
+        var belowToolbar = new Rectangle(100, 1068, 600, 42);
+        Check(SnipSizeBadge.ComputeLayout(bottomSel, text, client, belowToolbar).Top ==
+              SnipSizeBadge.ComputeLayout(bottomSel, text, client).Top,
+            "工具栏在选区下方时不改变徽标位置");
+
         // 客户区比徽标还小时不能抛 (Math.Clamp 上下界翻转的经典坑)
         Rectangle tinyBox;
         bool tinyOk;

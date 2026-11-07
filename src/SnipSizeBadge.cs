@@ -66,8 +66,10 @@ internal static class SnipSizeBadge
     /// <summary>
     /// 徽标面板外框 (逻辑坐标)。优先贴在选区上方; 上方放不下则移入选区内侧顶端
     /// (不放选区下方 —— 那里是工具栏的位置), 最后夹紧到屏幕内。
+    /// <paramref name="avoid"/> 传工具栏外框: 工具栏是子控件, 会整块盖住窗体自绘内容,
+    /// 选区贴底时它会翻转到选区上方, 正好压在徽标上, 因此重叠时必须让位。
     /// </summary>
-    public static Rectangle ComputeLayout(Rectangle sel, Size textSize, Size client)
+    public static Rectangle ComputeLayout(Rectangle sel, Size textSize, Size client, Rectangle? avoid = null)
     {
         int w = textSize.Width + PadX * 2;
         int h = textSize.Height + PadY * 2;
@@ -77,16 +79,39 @@ internal static class SnipSizeBadge
         if (y < Margin)
             y = sel.Top + Gap;
 
-        x = Math.Clamp(x, Margin, Math.Max(Margin, client.Width - w - Margin));
-        y = Math.Clamp(y, Margin, Math.Max(Margin, client.Height - h - Margin));
-        return new Rectangle(x, y, w, h);
+        var box = Place(x, y, w, h, client);
+
+        // 依次尝试: 工具栏上方 → 选区内侧顶端 → 工具栏下方。
+        // 都被占（如工具栏跨满整屏）就保持原位, 至少不越出客户区。
+        if (avoid is { } tb && box.IntersectsWith(tb))
+        {
+            int[] candidates = [tb.Top - h - Gap, sel.Top + Gap, tb.Bottom + Gap];
+            foreach (int candidate in candidates)
+            {
+                var shifted = Place(x, candidate, w, h, client);
+                if (!shifted.IntersectsWith(tb))
+                {
+                    box = shifted;
+                    break;
+                }
+            }
+        }
+
+        return box;
     }
 
+    /// <summary>把徽标左上角放到 (x, y), 并夹紧到客户区内 (客户区比徽标小时也不抛)</summary>
+    private static Rectangle Place(int x, int y, int w, int h, Size client) => new(
+        Math.Clamp(x, Margin, Math.Max(Margin, client.Width - w - Margin)),
+        Math.Clamp(y, Margin, Math.Max(Margin, client.Height - h - Margin)),
+        w,
+        h);
+
     /// <summary>在覆盖层上绘制徽标; physical 必须是 <see cref="SnipGeometry.ExportRect"/> 的结果尺寸</summary>
-    public static void Draw(Graphics g, Rectangle sel, Size physical, Size client)
+    public static void Draw(Graphics g, Rectangle sel, Size physical, Size client, Rectangle? toolbar = null)
     {
         Size textSize = MeasureText(physical);
-        Rectangle box = ComputeLayout(sel, textSize, client);
+        Rectangle box = ComputeLayout(sel, textSize, client, toolbar);
 
         var smoothing = g.SmoothingMode;
         g.SmoothingMode = SmoothingMode.AntiAlias;

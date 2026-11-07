@@ -30,7 +30,7 @@ src/                       产品代码 (唯一的出货工程, 也是唯一的 
   PinnedImageForm.cs       贴图窗口 (钉在屏幕上的置顶小窗, 可拖动/右键关闭)
   SnipSizeBadge.cs         框选实时尺寸徽标 (宽 × 高, 物理像素; 纯函数布局 + 自绘)
   NativeMethods.cs         Win32 P/Invoke (消息/热键/窗口/菜单/托盘/输入模拟)
-tests/AnnotationTests/     离线自检, 194 项 (几何/命中/历史/渲染/工具栏/尺寸徽标/编辑框/OCR 后处理)
+tests/AnnotationTests/     离线自检, 197 项 (几何/命中/历史/渲染/工具栏/尺寸徽标/编辑框/OCR 后处理)
 tests/InteractiveTests/    交互自检, 33 项 (真实窗口 + 真实按键 + 拖拽实时尺寸, 需要桌面会话)
 tools/DriveTest/           端到端驱动实际 exe (真实鼠标键盘事件 + 抓屏取证)
 ```
@@ -65,7 +65,7 @@ dotnet publish src/SnipasteOcr.csproj -c Release -r win-x64 --self-contained -p:
 ```
 
 ```powershell
-# 离线自检 (194 项), 无需桌面会话 —— 改完必跑
+# 离线自检 (197 项), 无需桌面会话 —— 改完必跑
 dotnet run --project tests/AnnotationTests              # 期望输出「全部通过」, 退出码 0
 dotnet run --project tests/AnnotationTests -- sample    # 额外输出六种标注样例图
 # 交互自检 (33 项) —— 需要可用的桌面会话
@@ -136,6 +136,9 @@ dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
   "上方放不下就塞进选区",横向没夹紧 —— 贴着屏幕右边框选时标签右半截被屏幕裁掉。
   现在布局统一由 `SnipSizeBadge.ComputeLayout` 夹紧四边(底部不放 —— 那里是工具栏),
   `SnipSizeCheck` 断言"任何选区位置下徽标都完整落在客户区内"。
+- **徽标还要避开工具栏**:`PositionToolbar` 在选区贴底时会把工具栏翻转到选区上方,而工具栏是子控件,
+  会整块盖住窗体自绘内容 —— 早期徽标正好落在同一位置,只剩 2px 可见。因此 `OnPaint` 必须把
+  `_toolbar.Bounds` 传给 `ComputeLayout`,重叠时依次让到工具栏上方 → 选区内侧 → 工具栏下方。
 
 ### 坐标系与 DPI
 
