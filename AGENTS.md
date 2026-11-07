@@ -84,6 +84,33 @@ dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
   **反射直接调用控件方法会绕过真实的焦点链与绘制路径**,会掩盖 bug,不能替代真实窗口验证。
 - 影响 AOT 裁剪或模型资源的改动 → 必须真跑一次 `publish` 并运行产物,**不能只看 `build` 通过**。
 
+### AOT 发布环境 (只装 .NET SDK 不够)
+
+`dotnet publish -p:PublishAot=true` 需要 **MSVC 链接器 + Windows SDK**。安装与验证:
+
+1. 打开 `C:\Program Files (x86)\Microsoft Visual Studio\Installer\setup.exe`。
+2. 修改已安装的 Visual Studio 实例(本机为 `G:\Program\Microsoft Visual Studio\18\Community`);
+   列表为空时安装 **Visual Studio Build Tools** 即可,不必装完整 IDE。
+3. 工作负载 → 勾选 **「使用 C++ 的桌面开发」**(Desktop development with C++),
+   右侧确认包含 **MSVC x64/x86 生成工具** 与 **Windows 10/11 SDK** → 安装/修改。
+4. 验证(必须返回非空路径,且 `vcvarsall.bat` 存在):
+   ```powershell
+   & "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe" `
+       -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+       -property installationPath
+   Test-Path "<VS 安装路径>\VC\Auxiliary\Build\vcvarsall.bat"
+   ```
+5. **`where link.exe` 能找到 link.exe 不代表环境可用**:本机实测有
+   `G:\...\VC\Tools\MSVC\14.50.35717\bin\Hostx64\x64\link.exe`,但同一实例缺
+   `vcvarsall.bat`、x64 库与 Windows SDK,ILC 的 `findvcvarsall.bat` 仍报
+   `Platform linker not found`。ILC 10.0.7 的判定链是
+   `vswhere -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64`
+   → `<VS>\VC\Auxiliary\Build\vcvarsall.bat` → `LIB`/`where link`。
+6. 环境不满足时**不得把任务标记为发布验证通过**:在交付说明里写
+   "AOT publish 未验证 (缺 C++ 工作负载)"并附上待复跑命令,不能用 `dotnet build` 代替。
+   新版本 VS 若仍不提供 `vcvarsall.bat`(本机 VS 18 的 `vcvars64.bat` 只是转调它的壳),
+   安装 VS 2022 Build Tools 的 v143 工具集或升级 ILC;**不要手改 VS 安装目录**。
+
 ---
 
 ## 硬性约束(踩过坑,别重犯)

@@ -394,9 +394,11 @@
 - **测试**：`AnnotationTests` 274 项、`InteractiveTests` 65 项。新增 4 项交互断言
   （DPI 1.5× 坐标/命中、CTC 真实宽度拖选、CTC 行尾全选）。既有「真实按键进入编辑控件」
   一项在基线 worktree 与本机均失败（中文输入法组合态吞掉字母），不是本轮回归。
-- **AOT publish**：本机只有 VS Installer、缺 MSVC C++ 链接器（`Platform linker not found`），
-  未能完成产物验证；需在装有 Desktop Development for C++ 的机器上复跑
-  `dotnet publish src/SnipasteOcr.csproj -c Release -r win-x64 --self-contained -p:PublishAot=true`
+- **AOT publish**：本机已装 VS 18 Community（`G:\Program\Microsoft Visual Studio\18\Community`），
+  但未安装「使用 C++ 的桌面开发」工作负载：同实例虽有 `link.exe`，却缺 `vcvarsall.bat`、
+  x64 库与 Windows SDK，ILC 10.0.7 的 `findvcvarsall.bat` 仍报 `Platform linker not found`。
+  需在 Visual Studio Installer 中修改该实例、勾选该工作负载（或安装 VS 2022 Build Tools），
+  然后复跑 `dotnet publish src/SnipasteOcr.csproj -c Release -r win-x64 --self-contained -p:PublishAot=true`
   并运行产物。
 
 剩余未做：O-8 置信度可视化、O-9 高倍缩放平移、O-10 状态栏长文本、P3 的 O-11～O-14。

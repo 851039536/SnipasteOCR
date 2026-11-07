@@ -171,6 +171,14 @@ SnipasteOcr.exe      # 启动后驻留系统托盘
 
 需要 [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)。
 
+此外, NativeAOT 发布还需要 **Visual Studio Build Tools 的「使用 C++ 的桌面开发」工作负载**
+(MSVC x64/x86 生成工具 + Windows 10/11 SDK)。只装 .NET SDK 会在链接阶段报
+`Platform linker not found`。安装方式: 打开 Visual Studio Installer → 修改已安装实例
+(或安装 Build Tools, 不必装完整 IDE) → 工作负载 → 勾选「使用 C++ 的桌面开发」→ 安装。
+验证: `<VS>\VC\Auxiliary\Build\vcvarsall.bat` 存在, 且
+`vswhere -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64` 能返回安装路径。
+仅有 `link.exe` 不代表环境可用 —— 缺 `vcvarsall.bat`/库/SDK 时仍会链接失败。
+
 以下命令均在**仓库根目录**执行(产品代码在 `src/`,不在仓库根):
 
 ```powershell
