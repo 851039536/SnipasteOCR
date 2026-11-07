@@ -23,6 +23,7 @@ src/                       产品代码 (唯一的出货工程, 也是唯一的 
   OcrText.cs               结果后处理: 阅读顺序排序、表格/CSV 重建 (纯函数)
   OcrBox.cs                检测框四角几何辅助 (5 处调用点共用)
   OcrSelection.cs          选词几何纯函数 (字符索引反解 / 多选阅读顺序名次)
+  OcrGlyphLayout.cs        CTC 字符框布局 (真实字符边界/高亮; 缺失时回退权重)
   AppSettings.cs           配置持久化 + AOT 安全 JSON 源生成上下文
   HotKeyManager.cs         全局热键注册/重注册 (支持运行期换键)
   HotKeyForm.cs            热键设置对话框 (按键录制)
@@ -32,8 +33,8 @@ src/                       产品代码 (唯一的出货工程, 也是唯一的 
   PinnedImageForm.cs       贴图窗口 (钉在屏幕上的置顶小窗, 可拖动/右键关闭)
   SnipSizeBadge.cs         框选实时尺寸徽标 (宽 × 高, 物理像素; 纯函数布局 + 自绘)
   NativeMethods.cs         Win32 P/Invoke (消息/热键/窗口/菜单/托盘/输入模拟)
-tests/AnnotationTests/     离线自检, 237 项 (几何/命中/历史/渲染/工具栏/尺寸徽标/设置迁移/编辑框/OCR 后处理/选词几何)
-tests/InteractiveTests/    交互自检, 61 项 (真实窗口 + 真实按键 + 拖拽实时尺寸 + 托盘菜单文案 + 结果窗口单击复制 + IME, 需要桌面会话)
+tests/AnnotationTests/     离线自检, 274 项 (几何/命中/历史/渲染/工具栏/尺寸徽标/设置迁移/编辑框/OCR 后处理/选词几何/CTC 字符框)
+tests/InteractiveTests/    交互自检, 65 项 (真实窗口 + 真实按键 + 拖拽实时尺寸 + 托盘菜单文案 + 结果窗口单击复制 + DPI 基准 + CTC 选词 + IME, 需要桌面会话)
 tools/DriveTest/           端到端驱动实际 exe (真实鼠标键盘事件 + 抓屏取证 + 校验导出图)
 ```
 
@@ -67,10 +68,10 @@ dotnet publish src/SnipasteOcr.csproj -c Release -r win-x64 --self-contained -p:
 ```
 
 ```powershell
-# 离线自检 (237 项), 无需桌面会话 —— 改完必跑
+# 离线自检 (274 项), 无需桌面会话 —— 改完必跑
 dotnet run --project tests/AnnotationTests              # 期望输出「全部通过」, 退出码 0
 dotnet run --project tests/AnnotationTests -- sample    # 额外输出六种标注样例图
-# 交互自检 (61 项) —— 需要可用的桌面会话
+# 交互自检 (65 项) —— 需要可用的桌面会话
 dotnet run --project tests/InteractiveTests
 # 端到端驱动实际 exe (可选)
 dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
@@ -125,6 +126,7 @@ dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
 | `SnipSizeBadge.Segments`(私有,内部共用) | 徽标文本度量 **和** 分段绘制 |
 | `OcrSelection.CharIndexFromU` | 字符级拖选的光标索引 **和** 离线断言(唯一的中线判定实现) |
 | `OcrSelection.BuildReadingRanks` | 多选/全选复制顺序 **和** 离线断言(内部复用 `OcrText.SortReadingOrder`) |
+| `OcrGlyphLayout` | 结果窗口字符命中/高亮 **和** 离线断言; 不可用时统一回退 `OcrSelection.CharIndexFromU` + `_lineCumW` |
 
 - `OcrBox.TopEdge` 与 `BottomEdge` 的取点顺序必须**同向**(`X1→X2` 与 `X4→X3`),
   否则按同一参数 `u` 插值出的高亮四边形会自交。
@@ -157,11 +159,26 @@ dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
   `OnMouseUp` 里复制后**不要**再调 `UpdateIdleStatus`,否则「已复制 N 字符」会立刻被「已选 N 字符」覆盖。
 - **`OcrService.StatusChanged` 必须退订**:结果窗口用具名方法订阅,`OnFormClosed` 里 `-=`。
   匿名 lambda 无法退订,每开一次窗口就会在单例事件链上留下一个捕获 `this` 的委托,窗体无法回收。
+- **CTC 字符框能用就不要再按权重猜**:`OcrService` 已开 `returnCtcAlignment: true`,
+  `OcrGlyphLayout` 把 `EstimateCharacterBoxes()` 的逐 token 框展开为每个 UTF-16 字符的框。
+  必须知道的语义:① 每个 token 一个框, token 可能包含多个字符 —— 边界按字符数均分, 框共享;
+  ② 空格是一个独立 token(文本为 `" "`), 不能过滤; ③ 180° 旋转与竖排裁剪的坐标已由引擎还原,
+  **不要再手动翻转字符框**, 只翻转归一化位置 `u`; ④ 竖排/长条检测框的字符框沿长边排列,
+  当前不支持, 直接返回 null 回退; ⑤ CTC 缺失、字符数不一致、几何异常都必须回退到
+  `_lineCumW` 权重 —— 宁可精度差一点, 不能让整行选词失效。
+- **表格分列不能用单一左边界**:同一列里居中表头与右对齐数字的 `Left` 差别很大。
+  `OcrText.BuildColumnBands` 取「单元格数最多的行」做参考(跨列表头只占一格, 不能让它桥接列间空白),
+  把单元格 `[Left, Right]` 投影到 x 轴, 按空隙两侧单元格数量 + 空隙宽度选列分隔,
+  再按最大重叠归入列带。分行仍只走 `ClusterRows`; 改分列时不要重新引入左边界容差聚类。
 
 ### 坐标系与 DPI
 
 - 标注几何**一律存位图物理像素**(与 `SnipOverlayForm._screen` 同坐标系),不是窗口客户区逻辑坐标。
   绘制/命中/字符定位三套坐标统一经 DPI 换算(Per-Monitor DPI v2)。
+- **结果窗口的 DPI 必须取窗口自身**:`Graphics.FromHwnd(IntPtr.Zero)` 拿的是桌面 DC(主屏 DPI),
+  Per-Monitor V2 下窗口移到副屏后不会跟着变,图片尺寸/命中/字符高亮会整体偏移。
+  `OcrResultForm` 缓存 `DeviceDpi`(`OnHandleCreated` / `OnDpiChanged`),构造时按 96 估算、
+  句柄创建后校正一次;`SetDpiFactorForTest` 是 internal 测试钩子,不得在生产路径调用。
 - 覆盖层预览用 `Graphics.ScaleTransform` 缩放绘制,导出时用 `TranslateTransform` 平移 ——
   同一份数据、同一个渲染引擎,因此预览与导出**像素级一致**。
 - **文字标注用字形轮廓绘制,不要退回 `TextRenderer`**:`TextRenderer`(GDI)**不跟随 `Graphics` 的
@@ -205,6 +222,10 @@ dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
   不阻塞 UI。
 - **推理不锁图**:识别前对位图做瞬时 `LockBits` 拷贝到 `byte[]`,推理在独立缓冲上进行,
   不持有位图锁,UI 线程可随时重绘。
+- **CTC 对齐默认开启**:`OcrService.Recognize` 以 `returnCtcAlignment: true` 调用带该参数的重载,
+  每行会多出 `CtcSpans`。实测 Tiny 档开关的 p50 差异在测量噪声内(两次 20 轮: +0.9% / -5.2%),
+  换来逐字真实框;关掉会让 `OcrGlyphLayout` 整体回退到权重估算,选词精度下降。
+  改引擎调用重载后必须真跑 AOT publish 并运行产物。
 - `HotKeyManager` 换键时**先注册新键(用 probe id),成功后才注销旧键**,失败则回滚保留原热键,
   避免"换失败导致两个热键都没了"。
 - **虚拟键码别手算**:`VK_F1 = 0x70` 起算,所以 `VK_F3 = 0x72`、`VK_F4 = 0x73`。
@@ -307,7 +328,9 @@ dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
 ## 已知限制
 
 - 仅 x64 Windows,发布产物与编译机架构绑定;中文识别为主,西文可用但非最优。
-- 字符级选区按宽度权重估算(汉字 1.0 / ASCII 0.6 / 空格 0.35),边缘与真实字符边界可能有 1~2px 偏差。
+- 字符级选区优先用 CTC 真实字符框;CTC 缺失/字符数不一致/竖排行时回退到宽度权重估算
+  (汉字 1.0 / ASCII 0.6 / 空格 0.35),边缘与真实字符边界可能有 1~2px 偏差。
+- 竖排文字仍不支持准确选词:当前投影沿检测框顶边进行,竖排行会回退到不准确的权重估算。
 - 文字标注用 GDI+ 字形轮廓绘制,**不做字体链接**:字体族缺字形时(如 emoji)不会自动回退到其它字体,
   与系统"缺字自动补字体"不同。中文由 `UiFont` 选定的字体覆盖,不受影响。
 - **不要尝试加离线截屏翻译**:已在 README 记录评估结论 —— 当前技术栈不可行。

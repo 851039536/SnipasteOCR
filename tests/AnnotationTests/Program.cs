@@ -173,6 +173,7 @@ RunGroup("设置迁移校验", SettingsCheck.Run);
 RunGroup("文字编辑框校验", TextEditorChecks.Run);
 RunGroup("OCR 后处理校验", OcrTextChecks.Run);
 RunGroup("选词几何校验", OcrSelectionChecks.Run);
+RunGroup("CTC 字符框校验", OcrGlyphLayoutChecks.Run);
 
 Console.WriteLine();
 Console.WriteLine(failures == 0 ? "全部通过" : $"{failures} 项失败");

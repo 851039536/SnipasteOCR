@@ -37,6 +37,8 @@
     <Compile Include="..\..\src\OcrBox.cs" Link="Engine\OcrBox.cs" />
     <!-- 选词几何纯函数 (字符索引反解 / 阅读顺序名次), 结果窗口本身依赖 WinForms 不进离线工程 -->
     <Compile Include="..\..\src\OcrSelection.cs" Link="Engine\OcrSelection.cs" />
+    <!-- CTC 字符框布局 (纯函数): 真实字符框 -> 光标边界/高亮, 不可用时回退权重 -->
+    <Compile Include="..\..\src\OcrGlyphLayout.cs" Link="Engine\OcrGlyphLayout.cs" />
   </ItemGroup>
 
   <ItemGroup>

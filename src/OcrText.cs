@@ -83,7 +83,7 @@ public static class OcrText
 
     /// <summary>
     /// 按坐标重建为 CSV (制表符分隔的表格文本)。
-    /// 思路: 行由纵向聚类得到, 列由各行起始 x 的聚类得到, 缺失单元格留空。
+    /// 思路: 行由纵向聚类得到, 列由横向「列带」得到, 缺失单元格留空。
     /// 适合从截图里的表格快速取数。
     /// </summary>
     public static string ToCsv(IReadOnlyList<Line> lines, char delimiter = '\t')
@@ -95,32 +95,30 @@ public static class OcrText
         // 1) 纵向分行 (与阅读顺序排序共用同一实现)
         var sortedRows = ClusterRows(valid);
 
-        // 2) 横向分列: 收集所有"文本块左边界"作为列锚点 (容差取中位块高)
-        float avgHeight = valid.Average(l => l.Height);
-        float colTolerance = Math.Max(6f, avgHeight * 0.6f);
-        var colAnchors = new List<float>();
-        foreach (var row in sortedRows)
-        {
-            foreach (var cell in row)
-            {
-                if (!colAnchors.Any(a => Math.Abs(a - cell.Left) <= colTolerance))
-                    colAnchors.Add(cell.Left);
-            }
-        }
-        colAnchors.Sort();
+        // 2) 横向分列: 取「单元格数最多的行」作为参考行, 把单元格的 [Left, Right]
+        //    投影到 x 轴, 用区间空隙切列带。
+        //    不能只按左边界聚类: 同一列里居中表头与右对齐数字的 Left 差别很大,
+        //    会被判成多个列, 导致 CSV 列数膨胀、值错位。
+        var bands = BuildColumnBands(sortedRows);
+        if (bands.Count == 0)
+            return string.Empty;
 
-        // 3) 填充网格
-        var grid = new string[sortedRows.Count, colAnchors.Count];
+        // 3) 填充网格: 按与列带的重叠长度归入 (并列取最左), 缺失格留空
+        var grid = new string[sortedRows.Count, bands.Count];
         for (int r = 0; r < sortedRows.Count; r++)
         {
             foreach (var cell in sortedRows[r])
             {
                 int best = 0;
-                float bestDist = float.MaxValue;
-                for (int c = 0; c < colAnchors.Count; c++)
+                float bestOverlap = float.MinValue;
+                for (int c = 0; c < bands.Count; c++)
                 {
-                    float d = Math.Abs(colAnchors[c] - cell.Left);
-                    if (d < bestDist) { bestDist = d; best = c; }
+                    float overlap = Math.Min(bands[c].Right, cell.Right) - Math.Max(bands[c].Left, cell.Left);
+                    if (overlap > bestOverlap)
+                    {
+                        bestOverlap = overlap;
+                        best = c;
+                    }
                 }
                 // 同一格已有内容 (极少数重叠) 则追加
                 grid[r, best] = string.IsNullOrEmpty(grid[r, best])
@@ -132,8 +130,8 @@ public static class OcrText
         var sb = new StringBuilder();
         for (int r = 0; r < sortedRows.Count; r++)
         {
-            var cells = new string[colAnchors.Count];
-            for (int c = 0; c < colAnchors.Count; c++)
+            var cells = new string[bands.Count];
+            for (int c = 0; c < bands.Count; c++)
                 cells[c] = Escape(grid[r, c] ?? string.Empty, delimiter);
             // 去掉行尾多余空列
             int last = cells.Length - 1;
@@ -142,6 +140,106 @@ public static class OcrText
             sb.AppendLine(string.Join(delimiter, cells.Take(last + 1)));
         }
         return sb.ToString().TrimEnd();
+    }
+
+    /// <summary>一个列带在 x 轴上的覆盖范围</summary>
+    private readonly record struct ColumnBand(float Left, float Right);
+
+    /// <summary>
+    /// 从各行单元格的横向区间推导列带 (唯一实现)。
+    ///
+    /// 参考行取「单元格数最多的行」: 跨列表头通常只占一个单元格, 若把它算进去,
+    /// 它的宽区间会桥接两列、让列分隔消失。参考行之间仍用区间并集求候选空隙,
+    /// 再按「空隙两侧的单元格数量 + 空隙宽度」选真正的列分隔 ——
+    /// 列内因对齐产生的窄空隙两侧单元格少, 列间的稳定空白两侧单元格多。
+    /// 选出的分隔把并集切段合并成列带; 无法确定时宁少拆不多拆。
+    /// </summary>
+    private static List<ColumnBand> BuildColumnBands(List<List<Line>> rows)
+    {
+        if (rows.Count == 0)
+            return [];
+
+        int maxCells = rows.Max(r => r.Count);
+        // 单列表 (每行最多一个单元格): 不同行的居中/缩进不应被误拆成多列
+        if (maxCells <= 1)
+            return [SpanOf(rows.SelectMany(r => r))];
+
+        var reference = rows.Where(r => r.Count == maxCells).ToList();
+        if (reference.Count == 0)
+            reference = rows;
+
+        var intervals = reference
+            .SelectMany(r => r)
+            .Where(c => c.Right > c.Left)
+            .Select(c => (c.Left, c.Right))
+            .OrderBy(x => x.Left)
+            .ToList();
+        if (intervals.Count == 0)
+            return [SpanOf(rows.SelectMany(r => r))];
+
+        var segments = new List<(float Left, float Right)> { intervals[0] };
+        for (int i = 1; i < intervals.Count; i++)
+        {
+            var (left, right) = intervals[i];
+            // 只合并真正重叠的区间; 仅"相接"的单元格保留为 0 宽空隙,
+            // 让同一行里两个紧邻的块仍能按列分开 (旧左边界聚类行为不回归)。
+            if (left < segments[^1].Right)
+                segments[^1] = (segments[^1].Left, Math.Max(segments[^1].Right, right));
+            else
+                segments.Add((left, right));
+        }
+
+        // 所有参考单元格连成一个重叠簇: 没有可用的列间空白, 只能算一列
+        if (segments.Count <= 1)
+            return [new ColumnBand(segments[0].Left, segments[0].Right)];
+
+        var gaps = new List<(int Index, float Width, int Score)>();
+        for (int i = 0; i < segments.Count - 1; i++)
+        {
+            var (segLeft, segRight) = segments[i];
+            var (nextLeft, nextRight) = segments[i + 1];
+            int leftCells = reference.Sum(row => row.Count(c => c.Left < segRight && c.Right > segLeft));
+            int rightCells = reference.Sum(row => row.Count(c => c.Left < nextRight && c.Right > nextLeft));
+            gaps.Add((i, nextLeft - segRight, leftCells + rightCells));
+        }
+
+        int splitCount = Math.Min(maxCells - 1, gaps.Count);
+        var chosen = gaps
+            .OrderByDescending(g => g.Score)
+            .ThenByDescending(g => g.Width)
+            .Take(splitCount)
+            .Select(g => g.Index)
+            .ToHashSet();
+
+        var bands = new List<ColumnBand>();
+        float bandLeft = segments[0].Left, bandRight = segments[0].Right;
+        for (int i = 0; i < segments.Count - 1; i++)
+        {
+            if (chosen.Contains(i))
+            {
+                bands.Add(new ColumnBand(bandLeft, bandRight));
+                bandLeft = segments[i + 1].Left;
+                bandRight = segments[i + 1].Right;
+            }
+            else
+            {
+                bandRight = Math.Max(bandRight, segments[i + 1].Right);
+            }
+        }
+        bands.Add(new ColumnBand(bandLeft, bandRight));
+        return bands;
+    }
+
+    /// <summary>一组单元格的横向总覆盖范围</summary>
+    private static ColumnBand SpanOf(IEnumerable<Line> cells)
+    {
+        float left = float.MaxValue, right = float.MinValue;
+        foreach (var cell in cells)
+        {
+            left = Math.Min(left, cell.Left);
+            right = Math.Max(right, cell.Right);
+        }
+        return new ColumnBand(left, right);
     }
 
     /// <summary>CSV 字段转义 (含分隔符/引号/换行时加引号)</summary>

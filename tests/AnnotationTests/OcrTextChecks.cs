@@ -51,6 +51,7 @@ internal static class OcrTextChecks
 
             var csv = OcrText.ToCsv([.. lines]);
             Check(SplitLines(csv).Length == 1, $"微差基线的两个块归为表格同一行 (实得 {SplitLines(csv).Length} 行)");
+            Check(SplitLines(csv)[0] == "A\tB", $"仅相接的相邻块仍按两列分开 (实得 \"{SplitLines(csv)[0]}\")");
         }
 
         // ===== 4. 关键一致性: 阅读顺序的行划分 == 表格的行划分 =====
@@ -249,6 +250,56 @@ internal static class OcrTextChecks
             Check(OcrText.ToMarkdown([Ln("   ", 10, 10)]).Length == 0, "ToMarkdown 全空白返回空串");
         }
 
+        // ===== 15. 表格分列: 居中表头 + 右对齐数字 (左边界各不相同) =====
+        // 旧实现只按 Left 聚类, 表头与数字会各占一列, CSV 列数膨胀。
+        {
+            var lines = new[]
+            {
+                LnSize("姓名", 40, 20, 40),  LnSize("金额", 240, 20, 40),
+                LnSize("张三", 10, 120, 40), LnSize("1,200", 260, 120, 40),
+                LnSize("李四", 10, 220, 40), LnSize("98", 280, 220, 20),
+            };
+            var rows = SplitLines(OcrText.ToCsv(lines, '\t'));
+
+            Check(rows.Length == 3, $"居中/右对齐表格仍为 3 行 (实得 {rows.Length})");
+            if (rows.Length == 3)
+            {
+                Check(rows[0] == "姓名\t金额", $"表头保持两列 (实得 \"{rows[0]}\")");
+                Check(rows[1] == "张三\t1,200", $"左对齐姓名 + 右对齐数字同列对齐 (实得 \"{rows[1]}\")");
+                Check(rows[2] == "李四\t98", $"不同宽度的右对齐数字仍归第二列 (实得 \"{rows[2]}\")");
+            }
+        }
+
+        // ===== 16. 跨列表头: 参考行取单元格最多的数据行, 宽表头归入重叠最大的列 =====
+        {
+            var lines = new[]
+            {
+                LnSize("合计", 30, 20, 230),   // 横跨两列
+                LnSize("1", 10, 120, 40), LnSize("2", 250, 120, 40),
+                LnSize("3", 10, 220, 40), LnSize("4", 250, 220, 40),
+            };
+            var rows = SplitLines(OcrText.ToCsv(lines, '\t'));
+
+            Check(rows.Length == 3, $"跨列表头表格仍为 3 行 (实得 {rows.Length})");
+            if (rows.Length == 3)
+            {
+                Check(rows[0] == "合计", $"跨列表头放在重叠更大的首列 (实得 \"{rows[0]}\")");
+                Check(rows[1] == "1\t2" && rows[2] == "3\t4", "数据行的两列不被宽表头桥接");
+            }
+        }
+
+        // ===== 17. 单列表: 每行一个单元格时不应因居中/缩进差异拆成多列 =====
+        {
+            var lines = new[]
+            {
+                LnSize("第一行", 30, 20, 60),
+                LnSize("第二行", 40, 120, 60),
+            };
+            var rows = SplitLines(OcrText.ToCsv(lines, '\t'));
+            Check(rows.Length == 2 && rows[0] == "第一行" && rows[1] == "第二行",
+                $"单列表不同缩进不拆列 (实得 \"{string.Join("|", rows)}\")");
+        }
+
         return runner.ToResult();
     }
 
@@ -268,6 +319,10 @@ internal static class OcrTextChecks
     /// <summary>构造一行 (左/上给定, 固定 80x20 大小)</summary>
     private static OcrText.Line Ln(string text, float left, float top)
         => new(text, left, top, left + 80, top + 20);
+
+    /// <summary>构造一行 (显式宽度, 用于居中/右对齐表格用例)</summary>
+    private static OcrText.Line LnSize(string text, float left, float top, float width, float height = 20)
+        => new(text, left, top, left + width, top + height);
 
     /// <summary>构造一个带文本的检测结果 (文本 + 四角)</summary>
     private static PaddleOcrLine Det(string text,

@@ -15,6 +15,16 @@ public sealed class OcrResultForm : Form
     private readonly Bitmap _src;
     private float _scale = 1f;
     private float _minScale;
+
+    /// <summary>
+    /// 窗口所在屏幕的 DPI 因子 (物理像素 / 逻辑像素)。
+    ///
+    /// 不能用 <c>Graphics.FromHwnd(IntPtr.Zero)</c> 取桌面 DC —— 那是**主屏** DPI,
+    /// Per-Monitor V2 下窗口移到副屏后不会跟着变, 图片尺寸、命中与字符高亮会整体偏移。
+    /// 这里由 <see cref="OnHandleCreated"/> 与 <see cref="OnDpiChanged"/> 维护。
+    /// </summary>
+    private float _dpi = 1f;
+    private bool _dpiInitialized;
     private PaddleOcrLine[] _lines = [];
     private readonly HashSet<int> _selected = [];
     private int _hover = -1;
@@ -31,7 +41,8 @@ public sealed class OcrResultForm : Form
     private int _dragAnchorChar;                         // 拖选起点字符索引
     private Point _dragAnchorClient;                     // 拖选起点 (客户端坐标)
     private (int Line, int Start, int End)? _partial;    // 行内选中范围 [Start, End)
-    private float[][] _lineCumW = [];                    // 每行字符累计宽度权重
+    private float[][] _lineCumW = [];                    // 每行字符累计宽度权重 (CTC 缺失时的回退)
+    private OcrGlyphLayout?[] _lineGlyphs = [];          // 每行 CTC 真实字符框布局 (不支持时为 null)
     private int[] _lineRank = [];                        // _lines 索引 -> 阅读顺序名次
 
     private readonly ToolStrip _toolStrip = new();
@@ -239,11 +250,7 @@ public sealed class OcrResultForm : Form
     }
 
     // _src 为物理像素, 客户区/鼠标坐标为逻辑像素, 1:1 显示需按 DPI 换算
-    private static float DpiFactor()
-    {
-        using var g = Graphics.FromHwnd(IntPtr.Zero);
-        return g.DpiX / 96f;
-    }
+    private float DpiFactor() => _dpi;
 
     // 初始窗口尺寸: 图片 1:1 (逻辑像素) + 工具栏; 超出屏幕工作区时按比例收缩
     private Size SizeFromImage()
@@ -305,6 +312,54 @@ public sealed class OcrResultForm : Form
             _scale = fit;
             UpdateZoomLabel();
         }
+        Invalidate();
+    }
+
+    /// <summary>
+    /// 句柄创建后才能拿到窗口真实 DPI。构造阶段按 96 DPI 估算初始尺寸,
+    /// 这里按当前屏幕 DPI 校正一次, 否则 150% 缩放下窗口初始大小会差 1.5 倍。
+    /// </summary>
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        _dpi = DeviceDpi / 96f;
+        if (!_dpiInitialized)
+        {
+            _dpiInitialized = true;
+            Size = SizeFromImage();
+            _minScale = ComputeFitScale();
+            _scale = _minScale;
+        }
+        else
+        {
+            _minScale = ComputeFitScale();
+            if (_scale < _minScale) _scale = _minScale;
+        }
+        UpdateZoomLabel();
+        Invalidate();
+    }
+
+    /// <summary>窗口跨屏移动时系统会触发; 更新 DPI 后重新按新比例换算所有坐标与缩放下限</summary>
+    protected override void OnDpiChanged(DpiChangedEventArgs e)
+    {
+        base.OnDpiChanged(e);
+        _dpi = e.DeviceDpiNew / 96f;
+        _minScale = ComputeFitScale();
+        if (_scale < _minScale) _scale = _minScale;
+        UpdateZoomLabel();
+        Invalidate();
+    }
+
+    /// <summary>
+    /// 仅供交互自检注入 DPI 因子, 用于在没有混合 DPI 屏幕的机器上断言坐标换算。
+    /// 生产路径只由句柄创建/跨屏事件维护 <see cref="_dpi"/>。
+    /// </summary>
+    internal void SetDpiFactorForTest(float dpi)
+    {
+        _dpi = dpi;
+        _minScale = ComputeFitScale();
+        _scale = _minScale;
+        UpdateZoomLabel();
         Invalidate();
     }
 
@@ -391,9 +446,23 @@ public sealed class OcrResultForm : Form
                     {
                         using var strongBrush = new SolidBrush(Color.FromArgb(160, 33, 150, 243));
                         using var strongPen = new Pen(Color.FromArgb(255, 33, 150, 243), 1.4f);
-                        var cp = CharRangePoints(i, p.Start, p.End);
-                        g.FillPolygon(strongBrush, cp);
-                        g.DrawPolygon(strongPen, cp);
+                        var quads = CharRangeQuads(i, p.Start, p.End);
+                        if (quads is not null)
+                        {
+                            // CTC 真实字符框: 逐字填充, 边界与真实字形一致
+                            using var path = new GraphicsPath { FillMode = FillMode.Winding };
+                            foreach (var quad in quads)
+                                path.AddPolygon(quad);
+                            g.FillPath(strongBrush, path);
+                            g.DrawPath(strongPen, path);
+                        }
+                        else
+                        {
+                            // 回退: 按字符宽度权重在检测框内插值出一条高亮带
+                            var cp = CharRangePoints(i, p.Start, p.End);
+                            g.FillPolygon(strongBrush, cp);
+                            g.DrawPolygon(strongPen, cp);
+                        }
                     }
                 }
                 else if (hover)
@@ -494,10 +563,15 @@ public sealed class OcrResultForm : Form
     /// <summary>原图坐标在检测框行内方向上的归一化位置 (0=行首, 1=行尾), 处理 180 度旋转</summary>
     private int CharIndexAt(int line, float ix, float iy)
     {
-        var cum = _lineCumW[line];
-        if (cum.Length < 2) return 0;
         var b = _lines[line].Box;
         float u = (ProjU(b.X1, b.Y1, b.X2, b.Y2, ix, iy) + ProjU(b.X4, b.Y4, b.X3, b.Y3, ix, iy)) / 2f;
+
+        // 有 CTC 真实字符框时按真实边界判定; 否则回退到字符宽度权重
+        if (line < _lineGlyphs.Length && _lineGlyphs[line] is { } glyph)
+            return glyph.IndexAtSourceU(u);
+
+        var cum = _lineCumW[line];
+        if (cum.Length < 2) return 0;
         return OcrSelection.CharIndexFromU(cum, u, _lines[line].AppliedRotationDegrees);
     }
 
@@ -528,6 +602,37 @@ public sealed class OcrResultForm : Form
             Map(Lerp(topA, topB, uA)), Map(Lerp(topA, topB, uB)),
             Map(Lerp(botA, botB, uB)), Map(Lerp(botA, botB, uA)),
         ];
+    }
+
+    /// <summary>
+    /// 行内字符范围 [start, end) 对应的真实字符四边形 (逻辑客户端坐标);
+    /// 该行没有 CTC 布局时返回 null, 由调用方回退到 <see cref="CharRangePoints"/>。
+    /// </summary>
+    private PointF[][]? CharRangeQuads(int line, int start, int end)
+    {
+        if (line < 0 || line >= _lineGlyphs.Length || _lineGlyphs[line] is not { } glyph)
+            return null;
+
+        int a = Math.Clamp(start, 0, glyph.Boxes.Length);
+        int b = Math.Clamp(end, a, glyph.Boxes.Length);
+        if (a == b)
+            return null;
+
+        var ir = ImageRect();
+        float dpi = DpiFactor();
+        PointF Map(float x, float y) => new((x * _scale + ir.X) / dpi, (y * _scale + ir.Y) / dpi);
+
+        var quads = new PointF[b - a][];
+        for (int i = a; i < b; i++)
+        {
+            var box = glyph.Boxes[i];
+            quads[i - a] =
+            [
+                Map(box.X1, box.Y1), Map(box.X2, box.Y2),
+                Map(box.X3, box.Y3), Map(box.X4, box.Y4),
+            ];
+        }
+        return quads;
     }
 
     /// <summary>
@@ -938,6 +1043,7 @@ public sealed class OcrResultForm : Form
                     _wordOrder = SettingsStore.Current.SortReadingOrder;
                     ClearSelection();
                     _lineCumW = BuildCharWeights(_lines);
+                    _lineGlyphs = OcrGlyphLayout.BuildAll(_lines);
                     _lineRank = OcrSelection.BuildReadingRanks(_lines, _wordOrder);
                     _hover = -1;
                     _ocrDone = true;

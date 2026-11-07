@@ -452,6 +452,80 @@ internal static class InteractiveCheck
             }
         }
 
+        // 14. O-2 / O-7: 窗口自身 DPI 基准 + CTC 真实字符框选词
+        {
+            var src = new Bitmap(600, 300);
+            var resultForm = new OcrResultForm(src);
+            var settings = SettingsStore.Current;
+            bool savedClickToCopy = settings.ClickToCopy;
+            string? originalClip = GetClipboardTextSafe();
+
+            try
+            {
+                _ = resultForm.Handle;
+                var line = CtcDet("abc", 10, 10, 300, 40);
+                var lines = new[] { line };
+                typeof(OcrResultForm).GetField("_lines", Priv)!.SetValue(resultForm, lines);
+                typeof(OcrResultForm).GetField("_ocrDone", Priv)!.SetValue(resultForm, true);
+                typeof(OcrResultForm).GetField("_wordOrder", Priv)!.SetValue(resultForm, true);
+                var buildWeights = typeof(OcrResultForm).GetMethod("BuildCharWeights", BindingFlags.NonPublic | BindingFlags.Static)!;
+                typeof(OcrResultForm).GetField("_lineCumW", Priv)!.SetValue(resultForm, buildWeights.Invoke(null, [lines]));
+                typeof(OcrResultForm).GetField("_lineGlyphs", Priv)!.SetValue(resultForm, OcrGlyphLayout.BuildAll(lines));
+                typeof(OcrResultForm).GetField("_lineRank", Priv)!.SetValue(
+                    resultForm, OcrSelection.BuildReadingRanks(lines, sortReadingOrder: true));
+                settings.ClickToCopy = true;
+
+                // 14.1 DPI: 注入 1.5 后 ImageRect 必须按窗口 DPI 居中, 而不是主屏的 1.0
+                resultForm.SetDpiFactorForTest(1.5f);
+                var imageRect = (RectangleF)typeof(OcrResultForm).GetMethod("ImageRect", Priv)!
+                    .Invoke(resultForm, null)!;
+                float scale = (float)typeof(OcrResultForm).GetField("_scale", Priv)!.GetValue(resultForm)!;
+                float expectedX = (resultForm.ClientSize.Width * 1.5f - src.Width * scale) / 2f;
+                Check(Math.Abs(imageRect.X - expectedX) <= 1f,
+                    $"DPI=1.5 时 ImageRect 使用窗口自身 DPI (实得 {imageRect.X:F1}, 期望 {expectedX:F1})");
+
+                var center = BoxCenter(resultForm, line.Box);
+                int hit = (int)typeof(OcrResultForm).GetMethod("HitTest", Priv)!.Invoke(resultForm, [center])!;
+                Check(hit == 0, $"DPI=1.5 时命中仍落在文本块内 (实得 {hit})");
+                resultForm.SetDpiFactorForTest(1f);
+
+                // 14.2 CTC 真实宽度: u=0.2..0.3 对应第二个字符;
+                // 旧权重算法在这里两端都落在字符 1, 会得到空选区。
+                var mouseDown = typeof(OcrResultForm).GetMethod("OnMouseDown", Priv)!;
+                var mouseMove = typeof(OcrResultForm).GetMethod("OnMouseMove", Priv)!;
+                var mouseUp = typeof(OcrResultForm).GetMethod("OnMouseUp", Priv)!;
+                var from = BoxPointAt(resultForm, line.Box, 0.2f);
+                var to = BoxPointAt(resultForm, line.Box, 0.3f);
+                SetClipboardTextSafe("--marker--");
+                mouseDown.Invoke(resultForm, [new MouseEventArgs(MouseButtons.Left, 1, from.X, from.Y, 0)]);
+                mouseMove.Invoke(resultForm, [new MouseEventArgs(MouseButtons.Left, 1, to.X, to.Y, 0)]);
+                mouseUp.Invoke(resultForm, [new MouseEventArgs(MouseButtons.Left, 1, to.X, to.Y, 0)]);
+                InvokeCmdKey(resultForm, Keys.Control | Keys.C);
+                Check(GetClipboardTextSafe() == "b",
+                    $"CTC 真实边界把 0.2~0.3 映射到第二个字符 (实得 \"{GetClipboardTextSafe()}\")");
+
+                // 14.3 CTC 下行尾仍能包含最后一个字符
+                var head = BoxPointAt(resultForm, line.Box, 0.02f);
+                var tail = BoxPointAt(resultForm, line.Box, 0.98f);
+                SetClipboardTextSafe("--marker--");
+                mouseDown.Invoke(resultForm, [new MouseEventArgs(MouseButtons.Left, 1, head.X, head.Y, 0)]);
+                mouseMove.Invoke(resultForm, [new MouseEventArgs(MouseButtons.Left, 1, tail.X, tail.Y, 0)]);
+                mouseUp.Invoke(resultForm, [new MouseEventArgs(MouseButtons.Left, 1, tail.X, tail.Y, 0)]);
+                InvokeCmdKey(resultForm, Keys.Control | Keys.C);
+                Check(GetClipboardTextSafe() == "abc",
+                    $"CTC 下行尾拖选包含全部字符 (实得 \"{GetClipboardTextSafe()}\")");
+
+                resultForm.Close();
+            }
+            finally
+            {
+                settings.ClickToCopy = savedClickToCopy;
+                RestoreClipboard(originalClip);
+                resultForm.Dispose();
+                src.Dispose();
+            }
+        }
+
         return runner.ToResult();
     }
 
@@ -489,6 +563,49 @@ internal static class InteractiveCheck
         return new Point(
             (int)Math.Round(pts.Average(p => p.X)),
             (int)Math.Round(pts.Average(p => p.Y)));
+    }
+
+    /// <summary>检测框顶边上归一化位置 u 处的客户端坐标</summary>
+    private static Point BoxPointAt(OcrResultForm form, PaddleOcrDetectionBox box, float u)
+    {
+        var mi = typeof(OcrResultForm).GetMethod("BoxToClientPoints", Priv)!;
+        var pts = (PointF[])mi.Invoke(form, [box])!;
+        return new Point(
+            (int)Math.Round(pts[0].X + (pts[1].X - pts[0].X) * u),
+            (int)Math.Round(pts[0].Y + (pts[1].Y - pts[0].Y) * u));
+    }
+
+    /// <summary>构造逐字 CTC 行 (每字占 2 列, 字间空 2 列), 用于验证真实字符边界</summary>
+    private static PaddleOcrLine CtcDet(string text, float left, float top, float width, float height)
+    {
+        int timeSteps = Math.Max(20, text.Length * 4 + 2);
+        var spans = new PaddleOcrCtcSpan[text.Length];
+        for (int i = 0; i < text.Length; i++)
+        {
+            spans[i] = new PaddleOcrCtcSpan
+            {
+                Text = text[i].ToString(),
+                Score = 1f,
+                StartColumn = i * 4,
+                EndColumn = i * 4 + 2,
+            };
+        }
+
+        return new PaddleOcrLine
+        {
+            Text = text,
+            Box = new PaddleOcrDetectionBox(
+                left, top, left + width, top, left + width, top + height, left, top + height, 1f),
+            RecognitionScore = 1f,
+            ClassificationScore = 1f,
+            ClassificationLabel = 0,
+            AppliedRotationDegrees = 0,
+            EmittedCount = (uint)text.Length,
+            CtcSpans = spans,
+            RecognitionTimeSteps = timeSteps,
+            RecognitionContentWidth = 100,
+            RecognitionTensorWidth = 100,
+        };
     }
 
     /// <summary>反射调用结果窗口的 ProcessCmdKey (protected 且参数是 ref Message)</summary>

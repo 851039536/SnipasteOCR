@@ -80,7 +80,11 @@ public sealed class OcrService : IDisposable
         {
             var ocr = EnsureInitializedLocked();
             cancellationToken.ThrowIfCancellationRequested();
-            return ocr.Run(pixels.AsSpan(), width, height, stride, ImagePixelFormat.Bgra32);
+            // 开启 CTC 对齐: 每行带上逐 token 的 CtcSpans, 结果窗口用它生成真实字符框。
+            // 关闭时 CtcSpans 为 null, 选词只能回退到字符宽度权重 (有 1~2px 偏差)。
+            // 该数据只在 decode 时顺带记录, 不改变模型图, 开销远小于一次推理本身。
+            return ocr.Run(pixels.AsSpan(), width, height, returnCtcAlignment: true,
+                sourceStride: stride, format: ImagePixelFormat.Bgra32);
         }
     }
 

@@ -371,3 +371,32 @@
 - `CopyText` 对空文本与剪贴板异常都有兜底，不会让窗口崩溃。
 - `OcrService.Recognize` 先做瞬时 `LockBits` 快照，推理期间不持有位图锁，UI 可以继续重绘。
 - 识别失败会进入 `_ocrDone=true` 分支，状态栏有提示，不会卡在「正在识别」。
+
+---
+
+## 八、实施状态（2026-11-07，第二批后）
+
+已落地：
+
+- **第一批 + F-1**：O-1（字符索引返回 `0..n`）、O-3（`ClearSelection` 单一入口）、
+  O-4（多选按阅读顺序名次）、O-5（状态事件退订）、F-1（单击复制当前检测块 + 托盘开关）。
+- **O-2**：结果窗口缓存 `DeviceDpi`（`OnHandleCreated` / `OnDpiChanged`），不再用
+  `Graphics.FromHwnd(IntPtr.Zero)` 取主屏 DPI。本机双屏同为 100%，只通过 internal 钩子做了
+  1.5× 坐标与命中断言；100% + 150% 实机验证仍待补。
+- **O-6**：`ToCsv` 改为列带算法。参考行取「单元格数最多的行」（跨列表头不会被当作参考行桥接列间空白），
+  单元格 `[Left,Right]` 投影后按空隙两侧单元格数量与宽度选列分隔，再按最大重叠归入列带。
+  新增居中表头 + 右对齐数字、跨列宽表头、单列表不误拆三组用例。
+- **O-7**：`OcrService` 以 `returnCtcAlignment: true` 调用；新增 `OcrGlyphLayout` 把逐 token
+  字符框展开为每个 UTF-16 字符的框与文本轴光标边界。命中用真实边界，高亮直接填充逐字四边形；
+  缺失/字符数不一致/竖排时回退字符宽度权重。
+- **CTC 基准**（Tiny 档，900×360 固定样本，20 轮交替，两次）：p50 开销 `+0.9%` / `-5.2%`，
+  在测量噪声内；6/6 行成功生成布局，`CtcSpans` 字符数与 `Text` 长度全部一致。
+- **测试**：`AnnotationTests` 274 项、`InteractiveTests` 65 项。新增 4 项交互断言
+  （DPI 1.5× 坐标/命中、CTC 真实宽度拖选、CTC 行尾全选）。既有「真实按键进入编辑控件」
+  一项在基线 worktree 与本机均失败（中文输入法组合态吞掉字母），不是本轮回归。
+- **AOT publish**：本机只有 VS Installer、缺 MSVC C++ 链接器（`Platform linker not found`），
+  未能完成产物验证；需在装有 Desktop Development for C++ 的机器上复跑
+  `dotnet publish src/SnipasteOcr.csproj -c Release -r win-x64 --self-contained -p:PublishAot=true`
+  并运行产物。
+
+剩余未做：O-8 置信度可视化、O-9 高倍缩放平移、O-10 状态栏长文本、P3 的 O-11～O-14。
