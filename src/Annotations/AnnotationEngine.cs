@@ -25,29 +25,28 @@ public static class AnnotationEngine
     // ===== 文字度量 =====
 
     /// <summary>
-    /// 度量文字尺寸 (物理像素)。使用 GDI 的 TextRenderer, 与最终绘制方式一致。
+    /// 度量文字尺寸 (世界坐标/物理像素)。与 <see cref="DrawText"/> 共用同一套字体与排版参数,
+    /// 保证"量出来的"就是"画出来的" —— 光标定位、命中框、退化判定都依赖它。
     /// </summary>
     public static SizeF MeasureText(string? text, float fontSize)
     {
         if (string.IsNullOrEmpty(text))
             return SizeF.Empty;
 
-        // 多行文本按 \n 拆分, 取最大行宽 + 总高度
         using var font = CreateFont(fontSize);
-        string[] lines = text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
-        float width = 0f;
-        int lineHeight = font.Height;
-
-        foreach (string line in lines)
-        {
-            Size s = TextRenderer.MeasureText(line.Length == 0 ? " " : line, font,
-                new Size(int.MaxValue, int.MaxValue), TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
-            if (s.Width > width)
-                width = s.Width;
-        }
-
-        return new SizeF(width, lineHeight * lines.Length);
+        using var format = CreateTextFormat();
+        using var probe = new Bitmap(1, 1);
+        using var g = Graphics.FromImage(probe);
+        return g.MeasureString(text, font, PointF.Empty, format);
     }
+
+    /// <summary>文字排版参数 (度量与绘制共用, 避免两边各调一套导致光标偏移)</summary>
+    private static StringFormat CreateTextFormat() => new(StringFormat.GenericTypographic)
+    {
+        // 不自动折行 (只按 \n 分段) + 计入尾随空格, 否则光标会停在最后一个可见字后面
+        FormatFlags = StringFormatFlags.NoWrap | StringFormatFlags.MeasureTrailingSpaces,
+        Trimming = StringTrimming.None,
+    };
 
     /// <summary>创建标注用字体 (统一走 UiFont 解析, 避免字体缺失时静默回退)</summary>
     private static Font CreateFont(float size) => UiFont.Create(size);
@@ -74,7 +73,6 @@ public static class AnnotationEngine
         var oldSmoothing = g.SmoothingMode;
         var oldPixelOffset = g.PixelOffsetMode;
         var oldCompositing = g.CompositingMode;
-        var oldTextHint = g.TextRenderingHint;
 
         try
         {
@@ -83,11 +81,6 @@ public static class AnnotationEngine
 
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.PixelOffsetMode = PixelOffsetMode.HighQuality;
-            // 标注文字一律用灰度抗锯齿。
-            // 默认的 ClearType 是按"黑字白底"调校的彩色亚像素渲染: 在"彩色文字 + 白描边"上
-            // 会产生明显的蓝/橙彩边 (实测红字白边一处就有一百多个偏蓝像素), 导出图里尤其刺眼。
-            // 灰度 AA 没有色相偏移, 也仍保留平滑边缘。
-            g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
 
             foreach (var a in annotations)
             {
@@ -103,7 +96,6 @@ public static class AnnotationEngine
             g.SmoothingMode = oldSmoothing;
             g.PixelOffsetMode = oldPixelOffset;
             g.CompositingMode = oldCompositing;
-            g.TextRenderingHint = oldTextHint;
         }
     }
 
@@ -420,53 +412,37 @@ public static class AnnotationEngine
         return small;
     }
 
-    /// <summary>文字: 带描边以保证任意背景上可读 (先画白色/深色轮廓再填色)</summary>
+    /// <summary>
+    /// 文字: 取字形轮廓后"先描边、再填充"。
+    ///
+    /// 为什么不用 <see cref="TextRenderer"/>(GDI):
+    /// - 它<b>不跟随 Graphics 的世界变换</b> (导出平移/高 DPI 预览缩放都要手动补偿, 极易漏画);
+    /// - 它受系统 ClearType 影响, "彩色文字 + 白描边"会在边缘混出蓝/橙杂色;
+    /// - 用 8 次偏移绘制伪造描边, 半透明描边叠加还会在字边形成粉/灰混色。
+    ///
+    /// 轮廓法在世界坐标里绘制, 预览与导出天然一致; 描边是真正的外扩路径, 边缘是干净的两色混合。
+    /// 代价: GDI+ 不做字体链接, 字体族缺字形时不会自动回退 (中文由 <see cref="UiFont"/> 选定的字体覆盖)。
+    /// </summary>
     private static void DrawText(Graphics g, Annotation a)
     {
         if (string.IsNullOrEmpty(a.Text))
             return;
 
-        // TextRenderer 走 GDI, <b>不跟随 Graphics 的世界变换</b> (它把传入的点当作设备坐标)。
-        // 本项目有两处变换, 不补偿都会出错:
-        // - 导出 (RenderResult) 先 TranslateTransform(-裁剪左上角): 文字仍按屏幕坐标落点,
-        //   结果被画到裁剪图外面 —— 表现为"预览看得见文字, 导出的图片/识别结果里没有";
-        // - 高 DPI 预览用 ScaleTransform(1/sf): 文字画错位置且字号偏大。
-        // 因此这里手动把锚点与字号换算到设备空间。只处理平移 + 等比缩放 (标注渲染不会出现旋转/错切)。
-        Matrix transform = g.Transform;
-        float scale = UniformScale(transform);
-        var origins = new[] { new PointF(a.Start.X, a.Start.Y) };
-        transform.TransformPoints(origins);
-        PointF origin = origins[0];
-        var pt = new Point((int)Math.Round(origin.X), (int)Math.Round(origin.Y));
+        using var font = CreateFont(a.FontSize);
+        using var format = CreateTextFormat();
+        using var path = new GraphicsPath();
+        path.AddString(a.Text, font.FontFamily, (int)font.Style, a.FontSize,
+            new PointF(a.Start.X, a.Start.Y), format);
+        if (path.PointCount == 0)
+            return;
 
-        using var font = CreateFont(a.FontSize * scale);
-        var flags = TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix;
-
-        // TextRenderer 不支持描边, 用 8 方向偏移绘制深色来伪造描边
+        // 描边宽度 = 2px (约 1px 露在字形外侧), 圆角连接避免尖角刺出
         Color outline = OutlineColorFor(a.Color);
-        for (int dx = -1; dx <= 1; dx++)
-        {
-            for (int dy = -1; dy <= 1; dy++)
-            {
-                if (dx == 0 && dy == 0)
-                    continue;
-                TextRenderer.DrawText(g, a.Text, font,
-                    new Point(pt.X + dx, pt.Y + dy), outline, flags);
-            }
-        }
+        using (var pen = new Pen(outline, MathF.Max(2f, a.FontSize * 0.11f)) { LineJoin = LineJoin.Round })
+            g.DrawPath(pen, path);
 
-        TextRenderer.DrawText(g, a.Text, font, pt, a.Color, flags);
-    }
-
-    /// <summary>
-    /// 取世界变换里的等比缩放系数 (纯平移时为 1)。
-    /// 用 |行列式| 的平方根而不是单独取 X 方向长度: 对均匀缩放/镜像都成立。
-    /// </summary>
-    private static float UniformScale(Matrix m)
-    {
-        float det = m.Elements[0] * m.Elements[3] - m.Elements[1] * m.Elements[2];
-        float scale = MathF.Sqrt(MathF.Abs(det));
-        return scale > 0f ? scale : 1f;
+        using var fill = new SolidBrush(a.Color);
+        g.FillPath(fill, path);
     }
 
     /// <summary>

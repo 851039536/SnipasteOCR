@@ -281,21 +281,15 @@ public sealed class SnipOverlayForm : Form
         // 只画在当前选区内 (与最终导出一致)
         AnnotationEngine.Draw(g, [ann], _screen, physSel);
 
-        // 光标: 按最后一行文字宽度定位。
-        // 文字由引擎按"设备字号"绘制 (见 AnnotationEngine.DrawText), 光标必须用同一套设备度量,
-        // 再乘回 ScaleFactor 换算到当前 Graphics 的世界坐标 —— 否则高 DPI 下光标会落在文字中间。
-        float sf = ScaleFactor;
-        using var font = UiFont.Create(AnnotationEngine.DefaultFontSize * sf);
-        Size size = TextRenderer.MeasureText(_editingText, font,
-            new Size(int.MaxValue, int.MaxValue), TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
+        // 光标: 与引擎共用同一套 GDI+ 度量, 直接用世界坐标定位 (Graphics 的缩放会一并作用)
+        float worldFontSize = AnnotationEngine.DefaultFontSize * ScaleFactor;
+        SizeF size = AnnotationEngine.MeasureText(_editingText, worldFontSize);
+        float caretX = _textAnchorPhysical.X + size.Width;
+        float caretTop = _textAnchorPhysical.Y;
+        float caretBottom = caretTop + MathF.Max(size.Height, worldFontSize);
 
-        float caretDeviceX = _textAnchorPhysical.X / sf + size.Width;
-        float caretDeviceTop = _textAnchorPhysical.Y / sf;
-        float caretDeviceBottom = caretDeviceTop + MathF.Max(size.Height, font.Height);
-        float caretX = caretDeviceX * sf;
-
-        using var pen = new Pen(Color.FromArgb(230, 255, 255, 255), MathF.Max(1f, sf));
-        g.DrawLine(pen, caretX, caretDeviceTop * sf, caretX, caretDeviceBottom * sf);
+        using var pen = new Pen(Color.FromArgb(230, 255, 255, 255), MathF.Max(1f, ScaleFactor));
+        g.DrawLine(pen, caretX, caretTop, caretX, caretBottom);
     }
 
     // ===== 鼠标 =====

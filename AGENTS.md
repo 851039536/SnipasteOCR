@@ -147,15 +147,14 @@ dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
   绘制/命中/字符定位三套坐标统一经 DPI 换算(Per-Monitor DPI v2)。
 - 覆盖层预览用 `Graphics.ScaleTransform` 缩放绘制,导出时用 `TranslateTransform` 平移 ——
   同一份数据、同一个渲染引擎,因此预览与导出**像素级一致**。
-- **文字标注必须手动换算到设备坐标**:`TextRenderer` 走 GDI,**不跟随 `Graphics` 的世界变换**
-  (平移/缩放),它把传入的点当作设备坐标。`RenderResult` 先 `TranslateTransform(-裁剪原点)` 再调引擎,
-  不补偿的话文字仍按屏幕坐标落点、被画到裁剪图外 —— 表现为"预览看得见文字、导出/识别结果里没有";
-  高 DPI 预览的 `ScaleTransform` 同理(文字错位且字号偏大)。`AnnotationEngine.DrawText` 用 `g.Transform`
-  换算锚点、按 `|det|^(1/2)` 缩放字号,`RenderChecks` 有两条断言守着导出平移与预览缩放。
-- **标注文字必须用灰度抗锯齿**:ClearType 的彩色亚像素是按"黑字白底"调校的,用在"彩色文字 + 白描边"上
-  会产生明显的蓝/橙彩边(实测红字白边一处就有 100+ 个偏蓝像素),导出图放大后尤其刺眼。
-  `AnnotationEngine.Draw` 在绘制期间把 `TextRenderingHint` 设为 `AntiAliasGridFit`,结束后还原;
-  `RenderChecks` 断言文字区域没有偏蓝像素。
+- **文字标注用字形轮廓绘制,不要退回 `TextRenderer`**:`TextRenderer`(GDI)**不跟随 `Graphics` 的
+  世界变换** —— 导出时 `TranslateTransform(-裁剪原点)` 会让文字按屏幕坐标落点、被画到裁剪图外
+  ("预览有字、导出/识别结果里没有");高 DPI 预览的 `ScaleTransform` 同理(错位且字号偏大)。
+  它还受系统 ClearType 影响:"彩色文字 + 白描边"会混出蓝/橙彩边;用 8 次偏移伪造描边更会叠出粉边。
+  因此 `AnnotationEngine.DrawText` 改为 `GraphicsPath.AddString` 取轮廓,先 `DrawPath` 真描边再
+  `FillPath` 填充;`MeasureText` 用同一套 GDI+ 字体与排版参数(`StringFormat.GenericTypographic`),
+  光标/命中框因此与绘制一致。`RenderChecks` 守着:导出平移后文字仍在图内、预览缩放后位置正确、
+  文字区域没有偏蓝像素。
 - **贴图窗口的尺寸也要换算**:`PinnedImageForm` 收到的是**物理像素**位图,而 `ClientSize` 是
   **逻辑像素**。必须除以 DPI 因子(与 `OcrResultForm.DpiFactor` 同一套),否则 150% 缩放下贴图被放大
   1.5 倍且只画出左上角一部分。绘制时同样要按 `ClientSize` 尺寸还原,不能直接 `DrawImageUnscaled`。
@@ -288,6 +287,8 @@ dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
 
 - 仅 x64 Windows,发布产物与编译机架构绑定;中文识别为主,西文可用但非最优。
 - 字符级选区按宽度权重估算(汉字 1.0 / ASCII 0.6 / 空格 0.35),边缘与真实字符边界可能有 1~2px 偏差。
+- 文字标注用 GDI+ 字形轮廓绘制,**不做字体链接**:字体族缺字形时(如 emoji)不会自动回退到其它字体,
+  与系统"缺字自动补字体"不同。中文由 `UiFont` 选定的字体覆盖,不受影响。
 - **不要尝试加离线截屏翻译**:已在 README 记录评估结论 —— 当前技术栈不可行。
   `Sdcb.SimdPaddleOCR.OnnxSharp` 的 `DType` 不支持 INT8 量化张量,算子表缺 `LayerNormalization`
   与 `Attention`;主流可离线分发的 NMT 模型要么体积过大、要么依赖原生 DLL 破坏单文件、要么仅限非商业。
