@@ -31,7 +31,7 @@ src/                       产品代码 (唯一的出货工程, 也是唯一的 
   PinnedImageForm.cs       贴图窗口 (钉在屏幕上的置顶小窗, 可拖动/右键关闭)
   SnipSizeBadge.cs         框选实时尺寸徽标 (宽 × 高, 物理像素; 纯函数布局 + 自绘)
   NativeMethods.cs         Win32 P/Invoke (消息/热键/窗口/菜单/托盘/输入模拟)
-tests/AnnotationTests/     离线自检, 213 项 (几何/命中/历史/渲染/工具栏/尺寸徽标/设置迁移/编辑框/OCR 后处理)
+tests/AnnotationTests/     离线自检, 215 项 (几何/命中/历史/渲染/工具栏/尺寸徽标/设置迁移/编辑框/OCR 后处理)
 tests/InteractiveTests/    交互自检, 48 项 (真实窗口 + 真实按键 + 拖拽实时尺寸 + 托盘菜单文案 + IME, 需要桌面会话)
 tools/DriveTest/           端到端驱动实际 exe (真实鼠标键盘事件 + 抓屏取证 + 校验导出图)
 ```
@@ -66,7 +66,7 @@ dotnet publish src/SnipasteOcr.csproj -c Release -r win-x64 --self-contained -p:
 ```
 
 ```powershell
-# 离线自检 (213 项), 无需桌面会话 —— 改完必跑
+# 离线自检 (215 项), 无需桌面会话 —— 改完必跑
 dotnet run --project tests/AnnotationTests              # 期望输出「全部通过」, 退出码 0
 dotnet run --project tests/AnnotationTests -- sample    # 额外输出六种标注样例图
 # 交互自检 (48 项) —— 需要可用的桌面会话
@@ -152,6 +152,10 @@ dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
   不补偿的话文字仍按屏幕坐标落点、被画到裁剪图外 —— 表现为"预览看得见文字、导出/识别结果里没有";
   高 DPI 预览的 `ScaleTransform` 同理(文字错位且字号偏大)。`AnnotationEngine.DrawText` 用 `g.Transform`
   换算锚点、按 `|det|^(1/2)` 缩放字号,`RenderChecks` 有两条断言守着导出平移与预览缩放。
+- **标注文字必须用灰度抗锯齿**:ClearType 的彩色亚像素是按"黑字白底"调校的,用在"彩色文字 + 白描边"上
+  会产生明显的蓝/橙彩边(实测红字白边一处就有 100+ 个偏蓝像素),导出图放大后尤其刺眼。
+  `AnnotationEngine.Draw` 在绘制期间把 `TextRenderingHint` 设为 `AntiAliasGridFit`,结束后还原;
+  `RenderChecks` 断言文字区域没有偏蓝像素。
 - **贴图窗口的尺寸也要换算**:`PinnedImageForm` 收到的是**物理像素**位图,而 `ClientSize` 是
   **逻辑像素**。必须除以 DPI 因子(与 `OcrResultForm.DpiFactor` 同一套),否则 150% 缩放下贴图被放大
   1.5 倍且只画出左上角一部分。绘制时同样要按 `ClientSize` 尺寸还原,不能直接 `DrawImageUnscaled`。

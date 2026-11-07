@@ -321,6 +321,33 @@ internal static class RenderChecks
                 $"缩放预览下文字跟随变换 (缩放位置像素={atScaled}, 原始位置像素={atRaw})");
         }
 
+        // ===== 文字不得出现 ClearType 彩色边缘 =====
+        // 回归: 红字 + 白描边在 ClearType(彩色亚像素)下会泛蓝 —— 实测一处文字有 100+ 个偏蓝像素,
+        // 导出图放大后非常刺眼。引擎现在统一改用灰度抗锯齿 (AntiAliasGridFit)。
+        {
+            var bmp = Blank(200, 60);
+            using (var g = Graphics.FromImage(bmp))
+            {
+                g.Clear(Color.Black);   // 深色底更容易看出彩边
+                AnnotationEngine.Draw(g, [
+                    new Annotation
+                    {
+                        Tool = AnnotationTool.Text,
+                        Start = new PointF(10, 10),
+                        Text = "测试ABC",
+                        Color = Color.FromArgb(255, 235, 59, 36),
+                        FontSize = 18,
+                    }
+                ], bmp);
+            }
+
+            var red = Color.FromArgb(255, 235, 59, 36);
+            int reddish = CountNear(bmp, red, 120, new Rectangle(0, 0, bmp.Width, bmp.Height));
+            int bluish = CountBluish(bmp);
+            Check(reddish > 50, $"文字已绘制 (红色像素={reddish})");
+            Check(bluish == 0, $"文字没有 ClearType 彩色边缘 (偏蓝像素={bluish})");
+        }
+
         return runner.ToResult();
     }
 
@@ -380,6 +407,19 @@ internal static class RenderChecks
         for (int y = area.Top; y < area.Bottom; y++)
             for (int x = area.Left; x < area.Right; x++)
                 if (Close(bmp.GetPixel(x, y), want, tol)) n++;
+        return n;
+    }
+
+    /// <summary>明显偏蓝的像素数 (B 远大于 R) —— ClearType 彩色边缘的特征</summary>
+    private static int CountBluish(Bitmap bmp)
+    {
+        int n = 0;
+        for (int y = 0; y < bmp.Height; y++)
+            for (int x = 0; x < bmp.Width; x++)
+            {
+                var c = bmp.GetPixel(x, y);
+                if (c.B > c.R + 30 && c.B > 90) n++;
+            }
         return n;
     }
 

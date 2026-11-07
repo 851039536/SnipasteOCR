@@ -1,5 +1,6 @@
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
+using System.Drawing.Text;
 using System.Runtime.InteropServices;
 
 namespace SnipasteOcr.Annotations;
@@ -73,6 +74,7 @@ public static class AnnotationEngine
         var oldSmoothing = g.SmoothingMode;
         var oldPixelOffset = g.PixelOffsetMode;
         var oldCompositing = g.CompositingMode;
+        var oldTextHint = g.TextRenderingHint;
 
         try
         {
@@ -81,6 +83,11 @@ public static class AnnotationEngine
 
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            // 标注文字一律用灰度抗锯齿。
+            // 默认的 ClearType 是按"黑字白底"调校的彩色亚像素渲染: 在"彩色文字 + 白描边"上
+            // 会产生明显的蓝/橙彩边 (实测红字白边一处就有一百多个偏蓝像素), 导出图里尤其刺眼。
+            // 灰度 AA 没有色相偏移, 也仍保留平滑边缘。
+            g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
 
             foreach (var a in annotations)
             {
@@ -96,6 +103,7 @@ public static class AnnotationEngine
             g.SmoothingMode = oldSmoothing;
             g.PixelOffsetMode = oldPixelOffset;
             g.CompositingMode = oldCompositing;
+            g.TextRenderingHint = oldTextHint;
         }
     }
 
