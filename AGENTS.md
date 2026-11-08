@@ -34,8 +34,8 @@ src/                       产品代码 (唯一的出货工程, 也是唯一的 
   SnipSizeBadge.cs         框选实时尺寸徽标 (宽 × 高, 物理像素; 纯函数布局 + 自绘)
   UiTheme.cs               界面配色唯一来源 (强调蓝/深色底; 改主题只改这里)
   NativeMethods.cs         Win32 P/Invoke (消息/热键/窗口/菜单/托盘/输入模拟)
-tests/AnnotationTests/     离线自检, 286 项 (几何/命中/历史/渲染/工具栏/尺寸徽标/多屏定位/设置迁移/编辑框/OCR 后处理/选词几何/CTC 字符框)
-tests/InteractiveTests/    交互自检, 78 项 (真实窗口 + 真实按键 + 拖拽实时尺寸 + 多屏定位 + 工具栏 tooltip + 提示文案 + 状态栏省略号 + 托盘菜单文案 + 结果窗口单击复制 + DPI 基准 + CTC 选词 + IME, 需要桌面会话)
+tests/AnnotationTests/     离线自检, 290 项 (几何/命中/历史/渲染/工具栏/尺寸徽标/多屏定位/设置迁移/编辑框/OCR 后处理/选词几何/CTC 字符框)
+tests/InteractiveTests/    交互自检, 79 项 (真实窗口 + 真实按键 + 拖拽实时尺寸 + 多屏定位 + 工具栏 tooltip + 提示文案 + 状态栏省略号 + 托盘菜单文案 + 结果窗口单击复制 + DPI 基准 + CTC 选词 + 拖出收尾 + IME, 需要桌面会话)
 tools/DriveTest/           端到端驱动实际 exe (真实鼠标键盘事件 + 抓屏取证 + 校验导出图)
 ```
 

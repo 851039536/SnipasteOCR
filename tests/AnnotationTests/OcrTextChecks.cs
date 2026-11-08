@@ -222,6 +222,24 @@ internal static class OcrTextChecks
                 Ln("。", 200, 20),
             };
             Check(OcrText.ToPlainText(punct) == "你好。", $"句号前不插空格 (实得 \"{OcrText.ToPlainText(punct)}\")");
+
+            // 开括号后、连字符/斜杠两侧也不插空格 (旧实现只把闭标点列为例外)
+            var open = new[] { Ln("(", 10, 20), Ln("中文", 200, 20) };
+            Check(OcrText.ToPlainText(open) == "(中文",
+                $"开括号后不插空格 (实得 \"{OcrText.ToPlainText(open)}\")");
+
+            var hyphen = new[] { Ln("well", 10, 20), Ln("-known", 200, 20) };
+            Check(OcrText.ToPlainText(hyphen) == "well-known",
+                $"连字符两侧不插空格 (实得 \"{OcrText.ToPlainText(hyphen)}\")");
+
+            var slash = new[] { Ln("A", 10, 20), Ln("/B", 200, 20) };
+            Check(OcrText.ToPlainText(slash) == "A/B",
+                $"斜杠两侧不插空格 (实得 \"{OcrText.ToPlainText(slash)}\")");
+
+            // 英文单词之间仍要空格, 不能因收紧标点规则把正常词间距也吃掉
+            var words = new[] { Ln("Hello", 10, 20), Ln("world", 200, 20) };
+            Check(OcrText.ToPlainText(words) == "Hello world",
+                $"普通英文单词之间仍补空格 (实得 \"{OcrText.ToPlainText(words)}\")");
         }
 
         // ===== 13. ToMarkdown: 段落之间空行 =====

@@ -118,18 +118,25 @@ public sealed class OcrResultForm : Form
         Shown += (_, _) => StartOcr();
     }
 
-    /// <summary>把引擎状态切回 UI 线程; 句柄已销毁时静默丢弃 (后台线程仍在识别的收尾阶段)</summary>
-    private void OnServiceStatus(string text)
+    /// <summary>
+    /// 后台线程安全地切回 UI 线程: 句柄已销毁/正在销毁时静默丢弃。
+    /// 单独检查 IsHandleCreated 不够 —— 检查与 BeginInvoke 之间句柄仍可能被销毁。
+    /// </summary>
+    private bool TryBeginInvoke(Action action)
     {
         if (IsDisposed || !IsHandleCreated)
-            return;
+            return false;
         try
         {
-            BeginInvoke(() => SetStatus(text));
+            BeginInvoke(action);
+            return true;
         }
-        catch (ObjectDisposedException) { }
-        catch (InvalidOperationException) { } // 检查与调用之间句柄被销毁的竞态
+        catch (ObjectDisposedException) { return false; }
+        catch (InvalidOperationException) { return false; }
     }
+
+    /// <summary>把引擎状态切回 UI 线程; 句柄已销毁时静默丢弃 (后台线程仍在识别的收尾阶段)</summary>
+    private void OnServiceStatus(string text) => TryBeginInvoke(() => SetStatus(text));
 
     /// <summary>构建工具栏: 缩放 / 全选 / 复制 / 保存 / 关闭</summary>
     private void BuildToolStrip()
@@ -786,7 +793,11 @@ public sealed class OcrResultForm : Form
                 {
                     if (!IsInBox(_lines[_dragLine].Box, (e.X * DpiFactor() - ImageRect().X) / _scale, (e.Y * DpiFactor() - ImageRect().Y) / _scale))
                     {
-                        _charDrag = false; // 拖出文本块结束拖选
+                        // 拖出文本块: 保留最后一次 _partial 作为定格高亮, 但复位拖选状态,
+                        // 否则行号与"已移动"标记会留到下一次点击, 让 MouseUp 误判。
+                        _charDrag = false;
+                        _dragLine = -1;
+                        _charDragMoved = false;
                         return;
                     }
                     if (Math.Abs(e.X - _dragAnchorClient.X) + Math.Abs(e.Y - _dragAnchorClient.Y) >= 3)
@@ -1043,8 +1054,15 @@ public sealed class OcrResultForm : Form
         }
         try
         {
-            Clipboard.SetText(text);
-            SetStatus($"已复制 {text.Length} 字符");
+            // Windows 剪贴板文本约定用 CRLF; 选区/全选内部用 \n 拼接, 段落导出用 Environment.NewLine,
+            // 不统一的话同一份内容从不同入口复制出去换行不一致 (粘进旧版记事本可能断行丢失)。
+            string clipboardText = text
+                .Replace("\r\n", "\n")
+                .Replace('\r', '\n')
+                .Replace("\n", Environment.NewLine);
+            int charCount = text.Count(c => c != '\r');
+            Clipboard.SetText(clipboardText);
+            SetStatus($"已复制 {charCount} 字符");
         }
         catch
         {
@@ -1090,9 +1108,9 @@ public sealed class OcrResultForm : Form
             try
             {
                 var result = service.Recognize(img, token);
-                if (token.IsCancellationRequested || !this.IsHandleCreated)
+                if (token.IsCancellationRequested)
                     return;
-                this.BeginInvoke(() =>
+                this.TryBeginInvoke(() =>
                 {
                     if (token.IsCancellationRequested)
                         return;
@@ -1114,9 +1132,7 @@ public sealed class OcrResultForm : Form
             catch (OperationCanceledException) { }
             catch (Exception ex)
             {
-                if (!this.IsHandleCreated)
-                    return;
-                this.BeginInvoke(() =>
+                this.TryBeginInvoke(() =>
                 {
                     SetStatus("识别失败：" + ex.Message);
                     _ocrDone = true;

@@ -401,4 +401,22 @@
   然后复跑 `dotnet publish src/SnipasteOcr.csproj -c Release -r win-x64 --self-contained -p:PublishAot=true`
   并运行产物。
 
-剩余未做：O-8 置信度可视化、O-9 高倍缩放平移、O-10 状态栏长文本、P3 的 O-11～O-14。
+后续实施见第九节。
+
+---
+
+## 九、第三批（2026-11-08）
+
+- **O-10**：随 UI 审查 P2-4 修复 —— 状态栏改用 `ComputeStatusLayout` + `Rectangle` 重载 +
+  `SingleLine | EndEllipsis`，超长错误信息不再被硬裁。
+- **O-11**：`NeedsSpace` 拆成「开括号后不补 / 闭标点前不补 / 连字符与斜杠两侧不补」三类规则；
+  `(中文`、`well-known`、`A/B` 不再被插空格，普通英文词间距保持不变。
+- **O-12**：`CopyText` 统一把换行规范化为 `Environment.NewLine`（Windows 即 CRLF），
+  选区/全选/CSV/段落/Markdown 从任何入口复制出去的换行一致；状态栏字数不计 `\r`。
+- **O-14**：拖出文本块时保留最后一次 `_partial` 作为定格高亮，同时复位 `_dragLine`/`_charDragMoved`；
+  后台回调统一走 `TryBeginInvoke`，句柄在检查与调用之间销毁时静默丢弃。
+- **AOT 环境**：C++ 工作负载已安装，`vcvarsall.bat` 存在，`dotnet publish -p:PublishAot=true`
+  已通过（2026-11-08，exit 0）；产物运行冒烟因已有实例占用单实例 Mutex 未执行。
+- **测试**：`AnnotationTests` 290 项、`InteractiveTests` 79 项（78 通过 + 既有输入法失败 1 项）。
+
+剩余未做：O-8 置信度可视化、O-9 高倍缩放平移、O-13 每帧开销；扩展项 F-2/F-6/F-7。

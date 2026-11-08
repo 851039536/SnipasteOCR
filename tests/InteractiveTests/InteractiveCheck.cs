@@ -513,8 +513,10 @@ internal static class InteractiveCheck
                 InvokeCmdKey(resultForm, Keys.Control | Keys.A);
                 InvokeCmdKey(resultForm, Keys.Control | Keys.C);
                 string? copied = GetClipboardTextSafe();
-                Check(copied == "Top\nMiddle\nBottom",
-                    $"Ctrl+A / Ctrl+C 按阅读顺序输出 (实得 \"{copied?.Replace("\n", "\\n")}\")");
+                // 剪贴板文本统一为 CRLF (Windows 约定), 同一份内容从不同入口复制出去换行必须一致
+                string expectedAll = string.Join(Environment.NewLine, ["Top", "Middle", "Bottom"]);
+                Check(copied == expectedAll,
+                    $"Ctrl+A / Ctrl+C 按阅读顺序输出且换行为 CRLF (实得 \"{copied?.Replace("\r\n", "\\r\\n").Replace("\n", "\\n")}\")");
 
                 resultForm.Close();
                 Check(StatusSubscribers() == subscribersBefore, "关闭结果窗口后退订引擎状态事件");
@@ -590,6 +592,16 @@ internal static class InteractiveCheck
                 InvokeCmdKey(resultForm, Keys.Control | Keys.C);
                 Check(GetClipboardTextSafe() == "abc",
                     $"CTC 下行尾拖选包含全部字符 (实得 \"{GetClipboardTextSafe()}\")");
+
+                // 14.4 拖出文本块: 结束拖选并复位行号, 不能把状态留到下一次点击
+                var inBox = BoxPointAt(resultForm, line.Box, 0.2f);
+                mouseDown.Invoke(resultForm, [new MouseEventArgs(MouseButtons.Left, 1, inBox.X, inBox.Y, 0)]);
+                mouseMove.Invoke(resultForm, [new MouseEventArgs(MouseButtons.Left, 1,
+                    resultForm.ClientSize.Width - 2, resultForm.ClientSize.Height - 2, 0)]);
+                bool charDragging = (bool)typeof(OcrResultForm).GetField("_charDrag", Priv)!.GetValue(resultForm)!;
+                int dragLine = (int)typeof(OcrResultForm).GetField("_dragLine", Priv)!.GetValue(resultForm)!;
+                Check(!charDragging && dragLine == -1,
+                    $"拖出文本块后结束拖选并复位行号 (charDrag={charDragging}, dragLine={dragLine})");
 
                 resultForm.Close();
             }

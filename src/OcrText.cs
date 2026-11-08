@@ -321,15 +321,19 @@ public static class OcrText
     /// 相邻两字符之间是否需要补空格。
     /// 规则: 两侧都是 CJK 时不补 (中文没有词间空格); 其余情况补一个,
     /// 避免中英混排被粘成 "OCR识别" 或英文单词被并到数字上。
+    /// 开括号/连字符/斜杠两侧也不补 —— 旧实现只把闭标点列为例外, 结果 "(中文" 变成 "( 中文",
+    /// "well-known" / "A/B" 被拆成 "well - known" / "A / B"。
     /// </summary>
     private static bool NeedsSpace(char left, char right)
     {
-        // 已有空白/标点则不再补, 避免 "，" 前多出空格
+        // 已有空白则不再补
         if (char.IsWhiteSpace(left) || char.IsWhiteSpace(right))
             return false;
         if (IsCjk(left) && IsCjk(right))
             return false;
-        if (IsNoSpacePunctuation(right) || IsNoSpacePunctuation(left))
+        // 不在闭标点/连字符前加空格; 不在开括号/连字符/闭标点后加空格。
+        // 闭标点后同样不补, 保持 "。ABC" 这类原有行为不变。
+        if (IsNoSpaceBefore(right) || IsNoSpaceAfter(left))
             return false;
         return true;
     }
@@ -342,8 +346,20 @@ public static class OcrText
         (c >= 0xFF00 && c <= 0xFFEF) ||     // 全角字符
         (c >= 0x3040 && c <= 0x30FF);       // 日文假名
 
+    /// <summary>连字符/斜杠/破折号: 两侧都不插空格 ("well-known"、"A/B"、"2024-01")</summary>
+    private static bool IsTightPunctuation(char c) =>
+        c is '-' or '/' or '\\' or '\u2013' or '\u2014';
+
     /// <summary>右侧为闭口标点时不该在其前插空格 (如 "。" "，" ")" ":")</summary>
-    private static bool IsNoSpacePunctuation(char c) =>
+    private static bool IsNoSpaceBefore(char c) =>
+        IsTightPunctuation(c) ||
         c is '。' or '，' or '、' or '；' or '：' or '？' or '！' or '）' or '》' or '」'
+          or '.' or ',' or ';' or ':' or '?' or '!' or ')' or ']' or '}' or '%';
+
+    /// <summary>左侧为开括号/连字符/闭标点时, 其后不该插空格</summary>
+    private static bool IsNoSpaceAfter(char c) =>
+        IsTightPunctuation(c) ||
+        c is '(' or '[' or '{' or '（' or '【' or '《' or '「' or '『'
+          or '。' or '，' or '、' or '；' or '：' or '？' or '！' or '）' or '》' or '」'
           or '.' or ',' or ';' or ':' or '?' or '!' or ')' or ']' or '}' or '%';
 }
