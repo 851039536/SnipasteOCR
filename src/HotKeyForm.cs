@@ -39,7 +39,7 @@ public sealed class HotKeyForm : Form
         {
             Text = "点击下方输入框后，直接按下想用的组合键。\n" +
                    "支持 F1-F12、字母、数字，可组合 Ctrl / Alt / Shift。\n" +
-                   "仅功能键 (F1-F12) 可不加修饰键，其余需带修饰键。",
+                   "仅功能键（F1-F12）可不加修饰键，其余需带修饰键。",
             Location = new Point(18, 14),
             Size = new Size(395, 64),
             ForeColor = Color.FromArgb(60, 60, 60),
@@ -47,7 +47,7 @@ public sealed class HotKeyForm : Form
 
         var ocrLabel = new Label
         {
-            Text = "截图识别:",
+            Text = "截图识别：",
             Location = new Point(18, 92),
             Size = new Size(75, 26),
             TextAlign = ContentAlignment.MiddleLeft,
@@ -61,7 +61,7 @@ public sealed class HotKeyForm : Form
 
         var imageLabel = new Label
         {
-            Text = "截图标注:",
+            Text = "截图标注：",
             Location = new Point(18, 130),
             Size = new Size(75, 26),
             TextAlign = ContentAlignment.MiddleLeft,

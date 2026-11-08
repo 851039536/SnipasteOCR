@@ -42,7 +42,7 @@ public sealed class AnnotationToolbar : Control
         Color.FromArgb(255, 255, 152, 0),    // 橙
         Color.FromArgb(255, 255, 214, 0),    // 黄
         Color.FromArgb(255, 76, 175, 80),    // 绿
-        Color.FromArgb(255, 33, 150, 243),   // 蓝
+        UiTheme.Accent,                      // 蓝
         Color.FromArgb(255, 156, 39, 176),   // 紫
         Color.FromArgb(255, 255, 255, 255),  // 白
         Color.FromArgb(255, 24, 24, 24),     // 黑
@@ -168,7 +168,7 @@ public sealed class AnnotationToolbar : Control
             ControlStyles.OptimizedDoubleBuffer |
             ControlStyles.SupportsTransparentBackColor,
             true);
-        BackColor = Color.FromArgb(240, 38, 40, 44);
+        BackColor = UiTheme.FloatingBar;
         Size = new Size(MeasurePreferredWidth(_showPin), ToolbarHeight);
         Cursor = Cursors.Hand;
 
@@ -394,7 +394,7 @@ public sealed class AnnotationToolbar : Control
         DrawTextButton(g, _saveRect, "保存", Color.FromArgb(70, 72, 78), _hoverActionKey == "save");
 
         _confirmRect = CenterY(L.Confirm, TextButtonHeight, cy);
-        DrawTextButton(g, _confirmRect, "确认", Color.FromArgb(33, 150, 243), _hoverActionKey == "confirm");
+        DrawTextButton(g, _confirmRect, "确认", UiTheme.Accent, _hoverActionKey == "confirm");
 
         _cancelRect = CenterY(L.Cancel, TextButtonHeight, cy);
         DrawTextButton(g, _cancelRect, "取消", Color.FromArgb(70, 72, 78), _hoverActionKey == "cancel");
@@ -791,7 +791,7 @@ public sealed class AnnotationToolbar : Control
     private static void DrawButtonBackdrop(Graphics g, Rectangle rect, bool active, bool hover)
     {
         Color? fill = active
-            ? Color.FromArgb(255, 33, 150, 243)
+            ? UiTheme.Accent
             : hover ? Color.FromArgb(60, 255, 255, 255) : null;
         if (fill is not { } color)
             return;

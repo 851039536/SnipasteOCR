@@ -62,7 +62,7 @@ public sealed class OcrResultForm : Form
     private readonly ToolStripButton _copyMarkdown = new();
     private readonly ToolStripButton _copySelection = new();
     private readonly ToolStripButton _saveImage = new();
-    private readonly ToolStripButton _colsebtn = new();
+    private readonly ToolStripButton _closeButton = new();
 
     /// <summary>
     /// 工具栏字号 (逻辑像素, 非 pt)。
@@ -74,7 +74,7 @@ public sealed class OcrResultForm : Form
     /// </summary>
     private const float UiFontSize = 10f;
 
-    /// <summary>「复制」下拉: 把 5 种导出格式收进一个按钮, 避免工具栏被 5 个按钮撑满</summary>
+    /// <summary>「导出」下拉: 把 5 种导出格式收进一个按钮, 避免工具栏被 5 个按钮撑满</summary>
     private readonly ToolStripDropDownButton _copyMenu = new();
 
     private string _statusText = string.Empty; // 右下角状态提示
@@ -92,7 +92,7 @@ public sealed class OcrResultForm : Form
         Text = "SnipasteOCR";
         StartPosition = FormStartPosition.Manual;
         FormBorderStyle = FormBorderStyle.None; // 无标题栏, 边缘细边框可缩放
-        BackColor = Color.FromArgb(24, 26, 30);
+        BackColor = UiTheme.Canvas;
         DoubleBuffered = true;
         SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer, true);
 
@@ -137,7 +137,7 @@ public sealed class OcrResultForm : Form
         _toolStrip.GripStyle = ToolStripGripStyle.Hidden;
         _toolStrip.RenderMode = ToolStripRenderMode.Professional;
         _toolStrip.Renderer = new DarkToolStripRenderer();
-        _toolStrip.BackColor = Color.FromArgb(38, 41, 47);
+        _toolStrip.BackColor = UiTheme.Surface;
         _toolStrip.ForeColor = Color.FromArgb(226, 230, 236);
 
         // 字体必须显式指定, 不能用 ToolStrip 的系统默认字体:
@@ -157,7 +157,7 @@ public sealed class OcrResultForm : Form
         _toolStrip.CanOverflow = false;
 
         _zoomOut.Text = "-";
-        _zoomOut.ToolTipText = "缩小 ( - )";
+        _zoomOut.ToolTipText = "缩小（-）";
         _zoomOut.Click += (_, _) => Zoom(1f / 1.25f);
 
         _zoomLabel.Text = "100%";
@@ -166,19 +166,19 @@ public sealed class OcrResultForm : Form
         _zoomLabel.TextAlign = ContentAlignment.MiddleCenter;
 
         _zoomIn.Text = "+";
-        _zoomIn.ToolTipText = "放大 ( + )";
+        _zoomIn.ToolTipText = "放大（+）";
         _zoomIn.Click += (_, _) => Zoom(1.25f);
 
         _zoomReset.Text = "适应";
-        _zoomReset.ToolTipText = "适应窗口 ( 0 )";
+        _zoomReset.ToolTipText = "适应窗口（0）";
         _zoomReset.Click += (_, _) => { _scale = _minScale; FitWindowToImage(); UpdateZoomLabel(); Invalidate(); };
 
         _selectAll.Text = "全选";
-        _selectAll.ToolTipText = "选择全部识别结果 ( Ctrl+A )";
+        _selectAll.ToolTipText = "选择全部识别结果（Ctrl+A）";
         _selectAll.Click += (_, _) => SelectAll();
 
         _copySelection.Text = "复制选中";
-        _copySelection.ToolTipText = "复制选中文本 ( Ctrl+C )";
+        _copySelection.ToolTipText = "复制选中文本（Ctrl+C）";
         _copySelection.Click += (_, _) => CopyText(GetSelectedText());
 
         _copyAll.Text = "复制全部";
@@ -187,25 +187,26 @@ public sealed class OcrResultForm : Form
 
         // 5 种导出格式收进下拉: 原先一字排开 5 个按钮, 工具栏宽达 639px,
         // 小截图时窗口最小宽度被撑到 655px, 观感很挤。收进下拉后只占 1 个按钮位。
-        _copyMenu.Text = "复制";
-        _copyMenu.ToolTipText = "选择复制格式";
+        // 下拉按钮不能也叫「复制」: 首项是「复制全部」, 两个"复制"并排容易误读
+        _copyMenu.Text = "导出";
+        _copyMenu.ToolTipText = "选择导出格式";
         _copyMenu.DropDownDirection = ToolStripDropDownDirection.BelowRight;
 
-        _copyCsv.Text = "表格 (制表符)";
-        _copyCsv.ToolTipText = "按坐标重建为表格, 可直接粘贴到 Excel";
+        _copyCsv.Text = "表格（制表符）";
+        _copyCsv.ToolTipText = "按坐标重建为表格，可直接粘贴到 Excel";
         _copyCsv.Click += (_, _) => CopyText(OcrText.ToCsv(CurrentLines(), '\t'));
 
-        _copyCsvComma.Text = "CSV (逗号)";
+        _copyCsvComma.Text = "CSV（逗号）";
         _copyCsvComma.ToolTipText = "导出为逗号分隔 CSV 文本";
         _copyCsvComma.Click += (_, _) => CopyText(OcrText.ToCsv(CurrentLines(), ','));
 
         // 去硬换行的连贯文本: 屏幕上换行多是排版, 粘进文档/聊天时不想要这些断行
-        _copyPlain.Text = "段落 (去换行)";
-        _copyPlain.ToolTipText = "合并为连贯段落 (去掉排版造成的硬换行)";
+        _copyPlain.Text = "段落（去换行）";
+        _copyPlain.ToolTipText = "合并为连贯段落（去掉排版造成的硬换行）";
         _copyPlain.Click += (_, _) => CopyText(OcrText.ToPlainText(CurrentLines()));
 
         _copyMarkdown.Text = "Markdown";
-        _copyMarkdown.ToolTipText = "导出为 Markdown (段落间空行分隔)";
+        _copyMarkdown.ToolTipText = "导出为 Markdown（段落间空行分隔）";
         _copyMarkdown.Click += (_, _) => CopyText(OcrText.ToMarkdown(CurrentLines()));
 
         _copyMenu.DropDownItems.AddRange(
@@ -222,14 +223,14 @@ public sealed class OcrResultForm : Form
         _saveImage.ToolTipText = "保存截图为 PNG";
         _saveImage.Click += (_, _) => SaveImage();
 
-        _colsebtn.Text = "关闭";
-        _colsebtn.ToolTipText = "关闭当前窗口";
-        _colsebtn.Click += (_, _) => this.Close();
+        _closeButton.Text = "关闭";
+        _closeButton.ToolTipText = "关闭当前窗口";
+        _closeButton.Click += (_, _) => this.Close();
 
         // 「关闭」推到工具栏最右端: ToolStrip 默认是左对齐流式布局,
         // 把该项(及其前面的分隔线)标记为 Alignment.Right 后, 布局引擎会把它贴到右边缘,
         // 窗口变宽时它跟着走 —— 比手工塞一个空白弹簧可靠 (弹簧宽度需自己算, 易漂移)。
-        _colsebtn.Alignment = ToolStripItemAlignment.Right;
+        _closeButton.Alignment = ToolStripItemAlignment.Right;
 
         var closeSep = new ToolStripSeparator { Alignment = ToolStripItemAlignment.Right };
 
@@ -245,7 +246,7 @@ public sealed class OcrResultForm : Form
         _toolStrip.Items.Add(_saveImage);
         // 右侧组: 分隔线在最左, 因此按"右对齐项从右往左依次排布"的顺序加入,
         // 先加关闭、再加分隔线, 视觉上才是 [保存图片] | [关闭]
-        _toolStrip.Items.Add(_colsebtn);
+        _toolStrip.Items.Add(_closeButton);
         _toolStrip.Items.Add(closeSep);
 
     }
@@ -436,7 +437,7 @@ public sealed class OcrResultForm : Form
         float dpi = DpiFactor();
         var ir = ImageRect();
         var cr = new RectangleF(ir.X / dpi, ir.Y / dpi, ir.Width / dpi, ir.Height / dpi);
-        using (var br = new SolidBrush(Color.FromArgb(255, 38, 41, 47)))
+        using (var br = new SolidBrush(UiTheme.Surface))
             g.FillRectangle(br, cr);
         using (var pen = new Pen(Color.FromArgb(255, 70, 74, 82)))
             g.DrawRectangle(pen, cr.X - 0.5f, cr.Y - 0.5f, cr.Width + 1f, cr.Height + 1f);
@@ -454,10 +455,10 @@ public sealed class OcrResultForm : Form
 
         if (_ocrDone)
         {
-            using var selBrush = new SolidBrush(Color.FromArgb(90, 33, 150, 243));
-            using var selPen = new Pen(Color.FromArgb(255, 33, 150, 243), 2f);
+            using var selBrush = new SolidBrush(Color.FromArgb(90, UiTheme.Accent));
+            using var selPen = new Pen(UiTheme.Accent, 2f);
             using var hoverPen = new Pen(Color.FromArgb(255, 255, 193, 7), 1.6f) { DashStyle = DashStyle.Dash };
-            using var idlePen = new Pen(Color.FromArgb(160, 33, 150, 243), 1.2f);
+            using var idlePen = new Pen(Color.FromArgb(160, UiTheme.Accent), 1.2f);
 
             for (int i = 0; i < _lines.Length; i++)
             {
@@ -475,8 +476,8 @@ public sealed class OcrResultForm : Form
                     // 部分选中: 再高亮行内的字符范围
                     if (_partial is { } p && p.Line == i)
                     {
-                        using var strongBrush = new SolidBrush(Color.FromArgb(160, 33, 150, 243));
-                        using var strongPen = new Pen(Color.FromArgb(255, 33, 150, 243), 1.4f);
+                        using var strongBrush = new SolidBrush(Color.FromArgb(160, UiTheme.Accent));
+                        using var strongPen = new Pen(UiTheme.Accent, 1.4f);
                         var quads = CharRangeQuads(i, p.Start, p.End);
                         if (quads is not null)
                         {
@@ -542,7 +543,7 @@ public sealed class OcrResultForm : Form
             TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
         var (box, textRect) = ComputeStatusLayout(ts, ClientSize);
 
-        using var bg = new SolidBrush(Color.FromArgb(190, 30, 33, 38));
+        using var bg = new SolidBrush(UiTheme.StatusSurface);
         g.FillRectangle(bg, box);
         TextRenderer.DrawText(g, _statusText, font, textRect, Color.FromArgb(226, 230, 236),
             TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine |
@@ -1025,7 +1026,7 @@ public sealed class OcrResultForm : Form
         if (!_ocrDone)
             return;
         if (HasSelection())
-            SetStatus($"已选 {SelectedCharCount()} 字符 (Ctrl+C 复制)");
+            SetStatus($"已选 {SelectedCharCount()} 字符（Ctrl+C 复制）");
         else
             SetStatus(SettingsStore.Current.ClickToCopy
                 ? $"{_lines.Length} 个文本块 · 单击复制 · 拖选 · Shift 多选 · Ctrl+滚轮缩放"
@@ -1047,7 +1048,7 @@ public sealed class OcrResultForm : Form
         }
         catch
         {
-            SetStatus("复制失败 (剪贴板被占用?)");
+            SetStatus("复制失败（剪贴板被占用？）");
         }
     }
 
@@ -1068,7 +1069,7 @@ public sealed class OcrResultForm : Form
             }
             catch (Exception ex)
             {
-                SetStatus("保存失败: " + ex.Message);
+                SetStatus("保存失败：" + ex.Message);
             }
         }
     }
@@ -1117,7 +1118,7 @@ public sealed class OcrResultForm : Form
                     return;
                 this.BeginInvoke(() =>
                 {
-                    SetStatus("识别失败: " + ex.Message);
+                    SetStatus("识别失败：" + ex.Message);
                     _ocrDone = true;
                 });
             }
@@ -1167,7 +1168,7 @@ internal sealed class DarkToolStripRenderer : ToolStripProfessionalRenderer
 
 internal sealed class DarkColorTable : ProfessionalColorTable
 {
-    private static readonly Color Bg = Color.FromArgb(38, 41, 47);
+    private static readonly Color Bg = UiTheme.Surface;
     private static readonly Color Hover = Color.FromArgb(50, 54, 62);
     private static readonly Color Active = Color.FromArgb(28, 74, 128);
 
@@ -1186,6 +1187,6 @@ internal sealed class DarkColorTable : ProfessionalColorTable
     public override Color ButtonSelectedGradientEnd => Hover;
     public override Color ButtonPressedGradientBegin => Active;
     public override Color ButtonPressedGradientEnd => Active;
-    public override Color ButtonSelectedBorder => Color.FromArgb(255, 33, 150, 243);
-    public override Color ButtonPressedBorder => Color.FromArgb(255, 33, 150, 243);
+    public override Color ButtonSelectedBorder => UiTheme.Accent;
+    public override Color ButtonPressedBorder => UiTheme.Accent;
 }

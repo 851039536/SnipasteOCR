@@ -33,7 +33,6 @@ internal static class SnipSizeBadge
 
     private const TextFormatFlags TextFlags = TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix;
 
-    private static readonly Color Accent = Color.FromArgb(255, 33, 150, 243);
     private static readonly Color Muted = Color.FromArgb(255, 156, 166, 180);
 
     /// <summary>
@@ -44,7 +43,7 @@ internal static class SnipSizeBadge
     private static (string Text, Color Color, int GapBefore)[] Segments(Size physical) =>
     [
         (physical.Width.ToString(CultureInfo.InvariantCulture), Color.White, 0),
-        ("\u00d7", Accent, CrossGap),
+        ("\u00d7", UiTheme.Accent, CrossGap),
         (physical.Height.ToString(CultureInfo.InvariantCulture), Color.White, CrossGap),
         ("px", Muted, UnitGap),
     ];
@@ -122,11 +121,11 @@ internal static class SnipSizeBadge
             using (var sp = RoundRect(new Rectangle(box.X, box.Y + 1, box.Width, box.Height), Radius))
                 g.FillPath(shadow, sp);
 
-            using (var bg = new SolidBrush(Color.FromArgb(235, 20, 22, 26)))
+            using (var bg = new SolidBrush(UiTheme.BadgeSurface))
             using (var path = RoundRect(box, Radius))
             {
                 g.FillPath(bg, path);
-                using var border = new Pen(Color.FromArgb(150, Accent), 1f);
+                using var border = new Pen(Color.FromArgb(150, UiTheme.Accent), 1f);
                 g.DrawPath(border, path);
             }
         }

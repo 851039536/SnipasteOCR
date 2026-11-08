@@ -26,7 +26,7 @@ internal static class Program
             // 命名 Mutex 防多开: 已存在则提示后退出
             if (!createdNew)
             {
-                MessageBox.Show("SnipasteOCR 已在运行 (请查看系统托盘)。", "SnipasteOCR", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show("SnipasteOCR 已在运行（请查看系统托盘）。", "SnipasteOCR", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return 0;
             }
 
@@ -62,7 +62,7 @@ internal static class Program
                 if (!SnipCoordinator.StartFromClipboard())
                 {
                     MessageBox.Show(
-                        "剪贴板里没有图片。\n\n请先复制一张图片 (或用 F3 截图), 再试。",
+                        "剪贴板里没有图片。\n\n请先复制一张图片（或用 F3 截图），再试。",
                         "SnipasteOCR", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
             };
@@ -118,10 +118,10 @@ internal static class Program
             if (failures.Count > 0)
             {
                 string hint = settings.HotKeyModifiers == 0
-                    ? "\n\n提示: 可右键托盘图标 → 热键设置, 改绑到其它按键 (如 Ctrl+Alt+Q)。"
+                    ? "\n\n提示：可右键托盘图标 → 热键设置，改绑到其它按键（如 Ctrl+Alt+Q）。"
                     : "\n\n可右键托盘图标 → 热键设置 改绑其它组合键。";
                 MessageBox.Show(
-                    "以下热键注册失败 (可能被浏览器/IDE/其它截图工具占用):\n  " +
+                    "以下热键注册失败（可能被浏览器/IDE/其它截图工具占用）：\n  " +
                     string.Join("\n  ", failures) + hint +
                     "\n\n仍可右键系统托盘图标操作。",
                     "SnipasteOCR - 热键冲突", MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -141,7 +141,7 @@ internal static class Program
                 if (newFailures.Count > 0)
                 {
                     MessageBox.Show(
-                        "新热键注册失败, 已保留原热键:\n  " + string.Join("\n  ", newFailures),
+                        "新热键注册失败，已保留原热键：\n  " + string.Join("\n  ", newFailures),
                         "SnipasteOCR", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return;
                 }
@@ -158,7 +158,7 @@ internal static class Program
                     settings.HotKeyImage, settings.HotKeyImageModifiers);
 
                 MessageBox.Show(
-                    $"热键已更新:\n  截图识别 = {HotKeyManager.Describe((uint)dlg.OcrModifiers, (uint)dlg.OcrKey)}\n" +
+                    $"热键已更新：\n  截图识别 = {HotKeyManager.Describe((uint)dlg.OcrModifiers, (uint)dlg.OcrKey)}\n" +
                     $"  截图标注 = {HotKeyManager.Describe((uint)dlg.ImageModifiers, (uint)dlg.ImageKey)}",
                     "SnipasteOCR", MessageBoxButtons.OK, MessageBoxIcon.Information);
             };
@@ -193,7 +193,7 @@ internal static class Program
         }
         catch (Exception ex)
         {
-            MessageBox.Show("启动失败:\n" + ex, "SnipasteOCR", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show("启动失败：\n" + ex, "SnipasteOCR", MessageBoxButtons.OK, MessageBoxIcon.Error);
             return 1;
         }
         finally

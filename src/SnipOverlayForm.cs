@@ -230,7 +230,7 @@ public sealed class SnipOverlayForm : Form
             // 边框 + 尺寸标签
             using (var pen = new Pen(Color.White, 2f))
                 g.DrawRectangle(pen, sel);
-            using (var pen2 = new Pen(Color.FromArgb(255, 33, 150, 243), 2f))
+            using (var pen2 = new Pen(UiTheme.Accent, 2f))
                 g.DrawRectangle(pen2, new Rectangle(sel.X + 1, sel.Y + 1, Math.Max(0, sel.Width - 2), Math.Max(0, sel.Height - 2)));
 
             // 实时尺寸: 与导出共用 ExportRect, 保证"标签写的 = 实际裁出来的";

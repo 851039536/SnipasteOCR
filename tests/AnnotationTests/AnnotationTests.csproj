@@ -26,6 +26,8 @@
     <Compile Include="..\..\src\Annotations\AnnotationToolbar.cs" Link="Engine\AnnotationToolbar.cs" />
     <Compile Include="..\..\src\Annotations\TextEditorOverlay.cs" Link="Engine\TextEditorOverlay.cs" />
     <Compile Include="..\..\src\Annotations\UiFont.cs" Link="Engine\UiFont.cs" />
+    <!-- 界面配色唯一来源 (标注工具栏/尺寸徽标引用) -->
+    <Compile Include="..\..\src\UiTheme.cs" Link="Engine\UiTheme.cs" />
     <!-- 框选尺寸徽标与「逻辑选区 → 导出物理矩形」的单一来源 -->
     <Compile Include="..\..\src\SnipGeometry.cs" Link="Engine\SnipGeometry.cs" />
     <Compile Include="..\..\src\SnipSizeBadge.cs" Link="Engine\SnipSizeBadge.cs" />

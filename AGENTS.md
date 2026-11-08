@@ -32,6 +32,7 @@ src/                       产品代码 (唯一的出货工程, 也是唯一的 
   SleepPreventer.cs        防休眠 (SetThreadExecutionState; 不移动鼠标)
   PinnedImageForm.cs       贴图窗口 (钉在屏幕上的置顶小窗, 可拖动/右键关闭)
   SnipSizeBadge.cs         框选实时尺寸徽标 (宽 × 高, 物理像素; 纯函数布局 + 自绘)
+  UiTheme.cs               界面配色唯一来源 (强调蓝/深色底; 改主题只改这里)
   NativeMethods.cs         Win32 P/Invoke (消息/热键/窗口/菜单/托盘/输入模拟)
 tests/AnnotationTests/     离线自检, 286 项 (几何/命中/历史/渲染/工具栏/尺寸徽标/多屏定位/设置迁移/编辑框/OCR 后处理/选词几何/CTC 字符框)
 tests/InteractiveTests/    交互自检, 78 项 (真实窗口 + 真实按键 + 拖拽实时尺寸 + 多屏定位 + 工具栏 tooltip + 提示文案 + 状态栏省略号 + 托盘菜单文案 + 结果窗口单击复制 + DPI 基准 + CTC 选词 + IME, 需要桌面会话)
@@ -150,6 +151,7 @@ dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
 | `AnnotationToolbar.ComputeLayout`(私有,内部共用) | 工具栏绘制 **和** 宽度测量(`MeasurePreferredWidth`) |
 | `SnipGeometry.ExportRect` | 实时尺寸徽标 **和** `RenderResult` 裁剪导出 **和** 无效选区兜底 **和** 结果窗口的屏幕锚点 |
 | `SnipGeometry.PickScreen` / `ToolbarLocation` | 覆盖层工具栏定位 **和** 多屏离线断言(夹紧边界必须是选区所在屏, 不是虚拟屏) |
+| `UiTheme` | 覆盖层/标注工具栏/尺寸徽标/结果窗口/菜单的强调色与深色底(只收拢相同 ARGB, 不合并相近色) |
 | `SnipGeometry.MinDragSide` / `IsValidSelection` | 拖拽/松手判定 **和** 遮罩绘制 **和** 导出判据 |
 | `SnipSizeBadge.Segments`(私有,内部共用) | 徽标文本度量 **和** 分段绘制 |
 | `OcrSelection.CharIndexFromU` | 字符级拖选的光标索引 **和** 离线断言(唯一的中线判定实现) |

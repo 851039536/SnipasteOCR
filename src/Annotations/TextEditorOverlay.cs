@@ -125,7 +125,7 @@ public sealed class TextEditorOverlay : Control
         using (var bg = new SolidBrush(Color.FromArgb(70, 0, 0, 0)))
             g.FillRectangle(bg, ClientRectangle);
 
-        using (var border = new Pen(Color.FromArgb(180, 33, 150, 243), 1f))
+        using (var border = new Pen(Color.FromArgb(180, UiTheme.Accent), 1f))
             g.DrawRectangle(border, 0, 0, Width - 1, Height - 1);
 
         var flags = TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix;

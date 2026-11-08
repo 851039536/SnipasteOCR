@@ -38,9 +38,9 @@ public sealed class HotKeyManager : IDisposable
     {
         var failures = new List<string>();
         if (!TryRegister(Action.SnipOcr, (uint)ocrModifiers, (uint)ocrVk, out string e1))
-            failures.Add($"截图识别热键 ({Describe((uint)ocrModifiers, (uint)ocrVk)}) 注册失败: {e1}");
+            failures.Add($"截图识别热键（{Describe((uint)ocrModifiers, (uint)ocrVk)}）注册失败：{e1}");
         if (!TryRegister(Action.SnipImage, (uint)imageModifiers, (uint)imageVk, out string e2))
-            failures.Add($"截图标注热键 ({Describe((uint)imageModifiers, (uint)imageVk)}) 注册失败: {e2}");
+            failures.Add($"截图标注热键（{Describe((uint)imageModifiers, (uint)imageVk)}）注册失败：{e2}");
         return failures;
     }
 
