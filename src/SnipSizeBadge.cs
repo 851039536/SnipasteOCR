@@ -33,8 +33,6 @@ internal static class SnipSizeBadge
 
     private const TextFormatFlags TextFlags = TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix;
 
-    private static readonly Color Muted = Color.FromArgb(255, 156, 166, 180);
-
     /// <summary>
     /// 徽标的分段内容 (文本 / 颜色 / 与前一段的间距)。
     /// 分段而非整串: 数字要用白色、× 用选区同色、单位用弱色, 而带空格的整串在
@@ -45,7 +43,7 @@ internal static class SnipSizeBadge
         (physical.Width.ToString(CultureInfo.InvariantCulture), Color.White, 0),
         ("\u00d7", UiTheme.Accent, CrossGap),
         (physical.Height.ToString(CultureInfo.InvariantCulture), Color.White, CrossGap),
-        ("px", Muted, UnitGap),
+        ("px", UiTheme.MutedText, UnitGap),
     ];
 
     /// <summary>文本部分的整体尺寸 (不含面板内边距); 与绘制走同一份分段累加</summary>

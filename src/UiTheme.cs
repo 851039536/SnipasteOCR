@@ -16,8 +16,11 @@ internal static class UiTheme
     /// <summary>结果窗口工具栏 / 图片背景的深色底</summary>
     public static readonly Color Surface = Color.FromArgb(255, 38, 41, 47);
 
-    /// <summary>结果窗口画布底色 (比工具栏深一档)</summary>
+    /// <summary>结果窗口画布底色 (比工具栏深一档); 放大镜网格底也用同一色</summary>
     public static readonly Color Canvas = Color.FromArgb(255, 24, 26, 30);
+
+    /// <summary>弱化文本 (尺寸徽标单位 / 放大镜 RGB 与坐标)</summary>
+    public static readonly Color MutedText = Color.FromArgb(255, 156, 166, 180);
 
     /// <summary>覆盖层标注工具栏底色 (半透明, 浮在截图上)</summary>
     public static readonly Color FloatingBar = Color.FromArgb(240, 38, 40, 44);

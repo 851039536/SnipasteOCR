@@ -32,12 +32,14 @@ src/                       产品代码 (唯一的出货工程, 也是唯一的 
   SleepPreventer.cs        防休眠 (SetThreadExecutionState; 不移动鼠标)
   PinnedImageForm.cs       贴图窗口 (钉在屏幕上的置顶小窗, 可拖动/右键关闭)
   SnipSizeBadge.cs         框选实时尺寸徽标 (宽 × 高, 物理像素; 纯函数布局 + 自绘)
+  SnipMagnifier.cs         放大镜/取色器纯逻辑 (面板定位/底图采样/颜色格式化)
+  SnipMagnifierControl.cs  放大镜子控件 (显示层; 不参与 RenderResult)
   UiTheme.cs               界面配色唯一来源 (强调蓝/深色底; 改主题只改这里)
   OcrPan.cs                结果窗口高倍缩放的平移夹紧 (纯函数; 图片覆盖视口, 小图居中)
   OcrConfidence.cs         置信度展示规则 (低分阈值/百分比格式; 只提示不过滤)
   NativeMethods.cs         Win32 P/Invoke (消息/热键/窗口/菜单/托盘/输入模拟)
-tests/AnnotationTests/     离线自检, 319 项 (几何/命中/历史/渲染/工具栏/尺寸徽标/多屏定位/缩放平移/置信度展示/设置迁移/编辑框/OCR 后处理/选词几何/双击选词/CTC 字符框)
-tests/InteractiveTests/    交互自检, 94 项 (真实窗口 + 真实按键 + 拖拽实时尺寸 + 多屏定位 + 工具栏 tooltip + 提示文案 + 状态栏省略号 + 托盘菜单文案 + 结果窗口单击复制 + 双击选词/三击选行 + DPI 基准 + CTC 选词 + 拖出收尾 + 缩放平移 + 置信度可视化 + 绘制缓存失效 + IME, 需要桌面会话)
+tests/AnnotationTests/     离线自检, 344 项 (几何/命中/历史/渲染/工具栏/尺寸徽标/放大镜取色/多屏定位/缩放平移/置信度展示/设置迁移/编辑框/OCR 后处理/选词几何/双击选词/CTC 字符框)
+tests/InteractiveTests/    交互自检, 约 119 项 (真实窗口 + 真实按键 + 拖拽实时尺寸 + 多屏定位 + 工具栏 tooltip + 提示文案 + 状态栏省略号 + 托盘菜单文案 + 结果窗口单击复制 + 双击选词/三击选行 + 放大镜/取色 + DPI 基准 + CTC 选词 + 拖出收尾 + 缩放平移 + 置信度可视化 + 绘制缓存失效 + IME, 需要桌面会话)
 tools/DriveTest/           端到端驱动实际 exe (真实鼠标键盘事件 + 抓屏取证 + 校验导出图)
 ```
 
@@ -153,7 +155,7 @@ dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
 | `AnnotationToolbar.ComputeLayout`(私有,内部共用) | 工具栏绘制 **和** 宽度测量(`MeasurePreferredWidth`) |
 | `SnipGeometry.ExportRect` | 实时尺寸徽标 **和** `RenderResult` 裁剪导出 **和** 无效选区兜底 **和** 结果窗口的屏幕锚点 |
 | `SnipGeometry.PickScreen` / `ToolbarLocation` | 覆盖层工具栏定位 **和** 多屏离线断言(夹紧边界必须是选区所在屏, 不是虚拟屏) |
-| `UiTheme` | 覆盖层/标注工具栏/尺寸徽标/结果窗口/菜单的强调色与深色底(只收拢相同 ARGB, 不合并相近色) |
+| `UiTheme` | 覆盖层/标注工具栏/尺寸徽标/放大镜/结果窗口/菜单的强调色、深色底与弱化文本颜色(只收拢相同 ARGB, 不合并相近色) |
 | `OcrPan` | 结果窗口平移偏移夹紧 **和** 离线断言; 缩放锚点反推也用它夹紧, 手写第二份范围公式会拖出背景空白 |
 | `OcrConfidence` | 低置信度框标橙 **和** 悬停状态栏百分比; 阈值/格式化只写一份 |
 | `SnipGeometry.MinDragSide` / `IsValidSelection` | 拖拽/松手判定 **和** 遮罩绘制 **和** 导出判据 |
@@ -161,6 +163,8 @@ dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
 | `OcrSelection.CharIndexFromU` | 字符级拖选的光标索引 **和** 离线断言(唯一的中线判定实现) |
 | `OcrSelection.BuildReadingRanks` | 多选/全选复制顺序 **和** 离线断言(内部复用 `OcrText.SortReadingOrder`) |
 | `OcrGlyphLayout` | 结果窗口字符命中/高亮 **和** 离线断言; 不可用时统一回退 `OcrSelection.CharIndexFromU` + `_lineCumW` |
+| `SnipMagnifier.ComputeLayout` | 放大镜定位 **和** 离线断言(贴边翻转/夹紧/不盖住光标) |
+| `SnipMagnifier.Sample` / `FormatHex` / `FormatRgb` | 放大镜显示 **和** `C` 键剪贴板 **和** 离线断言 |
 
 - `OcrBox.TopEdge` 与 `BottomEdge` 的取点顺序必须**同向**(`X1→X2` 与 `X4→X3`),
   否则按同一参数 `u` 插值出的高亮四边形会自交。
@@ -179,6 +183,13 @@ dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
 - **徽标还要避开工具栏**:`PositionToolbar` 在选区贴底时会把工具栏翻转到选区上方,而工具栏是子控件,
   会整块盖住窗体自绘内容 —— 早期徽标正好落在同一位置,只剩 2px 可见。因此 `OnPaint` 必须把
   `_toolbar.Bounds` 传给 `ComputeLayout`,重叠时依次让到工具栏上方 → 选区内侧 → 工具栏下方。
+- **放大镜/取色器必须共用 `_screen` 与 `SnipMagnifier`**:取色读取覆盖层启动时抓取的底图,
+  **不能**在覆盖层显示后重新 `CopyFromScreen` —— 那时屏幕上已有遮罩/放大镜,会把界面自己取进去。
+  放大镜是覆盖层子控件,只负责显示,不得画进 `_screen`/`RenderResult`;定位只走
+  `SnipMagnifier.ComputeLayout`(夹紧到光标所在屏并避开光标),否则贴边时会盖住光标或越界。
+- **放大镜子控件必须对鼠标返回 `HTTRANSPARENT`**:否则光标一旦落到它上面,框选/取色事件就被
+  子控件吞掉,表现为鼠标卡住。框选完成、画标注、文字编辑时必须隐藏放大镜;它和底部提示条
+  都只是覆盖层 UI,不参与导出。
 - **字符光标索引必须允许等于文本长度**:`OcrSelection.CharIndexFromU` 返回 `0..n`(`n` = 行尾光标),
   按字符中线判定左右半格。踩过的坑:旧实现循环只推到 `n-1`,拖到行尾永远少选最后一个字符,
   且 `cur == t.Length` 的贴边收尾分支成了死代码。拖选复制与高亮共用 `_partial`,修一处两者同步修好。

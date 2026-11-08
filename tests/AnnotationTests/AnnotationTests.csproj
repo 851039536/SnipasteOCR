@@ -35,6 +35,8 @@
     <!-- 框选尺寸徽标与「逻辑选区 → 导出物理矩形」的单一来源 -->
     <Compile Include="..\..\src\SnipGeometry.cs" Link="Engine\SnipGeometry.cs" />
     <Compile Include="..\..\src\SnipSizeBadge.cs" Link="Engine\SnipSizeBadge.cs" />
+    <!-- 放大镜/取色器纯逻辑 (布局/采样/格式化) -->
+    <Compile Include="..\..\src\SnipMagnifier.cs" Link="Engine\SnipMagnifier.cs" />
     <!-- 设置模型与迁移 (不依赖 OCR 引擎, 故枚举单独成文件) -->
     <Compile Include="..\..\src\AppSettings.cs" Link="Engine\AppSettings.cs" />
     <Compile Include="..\..\src\OcrModelProfile.cs" Link="Engine\OcrModelProfile.cs" />

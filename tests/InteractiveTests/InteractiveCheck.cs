@@ -961,6 +961,89 @@ internal static class InteractiveCheck
             tinyOverlay.Close();
         }
 
+        // 20. 放大镜与取色器: 真实窗口下验证可见性、C 键与文字编辑让行
+        {
+            using var magnifierOverlay = new SnipOverlayForm(SnipMode.Image);
+            string? originalClip = GetClipboardTextSafe();
+            Point originalCursor = Cursor.Position;
+            try
+            {
+                var overlayMagnifier = (SnipMagnifierControl)typeof(SnipOverlayForm)
+                    .GetField("_magnifier", Priv)!.GetValue(magnifierOverlay)!;
+                var overlayToolbar = (AnnotationToolbar)typeof(SnipOverlayForm)
+                    .GetField("_toolbar", Priv)!.GetValue(magnifierOverlay)!;
+                var overlaySelection = typeof(SnipOverlayForm).GetField("_selection", Priv)!;
+                var overlayHasSelection = typeof(SnipOverlayForm).GetField("_hasSelection", Priv)!;
+                var overlaySelectionChanged = typeof(SnipOverlayForm).GetMethod("OnSelectionChanged", Priv)!;
+                var overlayScreenToClient = typeof(SnipOverlayForm).GetMethod("ScreenRectToClient", Priv)!;
+                var overlayMove = typeof(SnipOverlayForm).GetMethod("OnMouseMove", Priv)!;
+
+                magnifierOverlay.Show();
+                Application.DoEvents();
+
+                overlaySelection.SetValue(magnifierOverlay, null);
+                overlayHasSelection.SetValue(magnifierOverlay, false);
+                overlayToolbar.SetTool(AnnotationTool.None);
+                overlayToolbar.Visible = false;
+
+                Cursor.Position = magnifierOverlay.PointToScreen(new Point(300, 300));
+                Application.DoEvents();
+
+                Point cursorClient = magnifierOverlay.PointToClient(Cursor.Position);
+                overlayMove.Invoke(magnifierOverlay,
+                    [new MouseEventArgs(MouseButtons.None, 0, cursorClient.X, cursorClient.Y, 0)]);
+                Application.DoEvents();
+
+                Check(overlayMagnifier.Visible, "未框选时鼠标移动后放大镜可见");
+                Check(magnifierOverlay.ClientRectangle.Contains(overlayMagnifier.Bounds),
+                    $"放大镜完整落在覆盖层客户区内 (实得 {overlayMagnifier.Bounds})");
+                var screenClient = (Rectangle)overlayScreenToClient.Invoke(
+                    magnifierOverlay, [Screen.FromPoint(Cursor.Position).Bounds])!;
+                Check(screenClient.Contains(overlayMagnifier.Bounds),
+                    $"放大镜留在光标所在屏内 (实得 {overlayMagnifier.Bounds}, 屏 {screenClient})");
+                Check(!overlayMagnifier.Bounds.Contains(cursorClient), "放大镜不盖住光标");
+
+                float sf = (float)typeof(SnipOverlayForm).GetProperty("ScaleFactor", Priv)!.GetValue(magnifierOverlay)!;
+                var screenBmp = (Bitmap)typeof(SnipOverlayForm).GetField("_screen", Priv)!.GetValue(magnifierOverlay)!;
+                var physical = new Point(
+                    (int)Math.Floor(cursorClient.X * sf),
+                    (int)Math.Floor(cursorClient.Y * sf));
+                Color expected = SnipMagnifier.Sample(screenBmp, physical);
+
+                SetClipboardTextSafe("--marker--");
+                typeof(SnipOverlayForm).GetMethod("OnKeyDown", Priv)!
+                    .Invoke(magnifierOverlay, [new KeyEventArgs(Keys.C)]);
+                Application.DoEvents();
+                Check(GetClipboardTextSafe() == SnipMagnifier.FormatHex(expected),
+                    $"C 复制光标像素颜色 (期望 {SnipMagnifier.FormatHex(expected)}, 实得 {GetClipboardTextSafe()})");
+
+                // 文字编辑期间必须整体让行, C 不能被当成取色快捷键
+                using (var editorForColor = new TextEditorOverlay(14f))
+                {
+                    var overlayEditor = typeof(SnipOverlayForm).GetField("_editor", Priv)!;
+                    overlayEditor.SetValue(magnifierOverlay, editorForColor);
+                    SetClipboardTextSafe("--marker--");
+                    typeof(SnipOverlayForm).GetMethod("OnKeyDown", Priv)!
+                        .Invoke(magnifierOverlay, [new KeyEventArgs(Keys.C)]);
+                    Check(GetClipboardTextSafe() == "--marker--", "文字编辑期间 C 不触发取色");
+                    overlayEditor.SetValue(magnifierOverlay, null);
+                }
+
+                // 框选完成后放大镜让位给工具栏与选区内容
+                overlaySelection.SetValue(magnifierOverlay, new Rectangle(100, 100, 300, 200));
+                overlaySelectionChanged.Invoke(magnifierOverlay, null);
+                Application.DoEvents();
+                Check(!overlayMagnifier.Visible, "框选完成后放大镜隐藏");
+            }
+            finally
+            {
+                Cursor.Position = originalCursor;
+                RestoreClipboard(originalClip);
+                if (!magnifierOverlay.IsDisposed)
+                    magnifierOverlay.Close();
+            }
+        }
+
         return runner.ToResult();
     }
 

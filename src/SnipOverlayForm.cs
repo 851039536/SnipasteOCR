@@ -43,6 +43,14 @@ public sealed class SnipOverlayForm : Form
     private bool _hasSelection;
 
     private readonly AnnotationToolbar _toolbar = new();
+
+    /// <summary>跟随光标的 15×15 像素放大镜; 只显示, 不参与导出合成</summary>
+    private readonly SnipMagnifierControl _magnifier;
+
+    /// <summary>取色成功/失败后的短暂提示 (会替换底部提示条)</summary>
+    private readonly System.Windows.Forms.Timer _toastTimer = new() { Interval = 1400 };
+    private string? _toast;
+
     private TextEditorOverlay? _editor;
     private PointF _textAnchorPhysical;
 
@@ -97,6 +105,18 @@ public sealed class SnipOverlayForm : Form
         _toolbar.PinRequested += PinToScreen;
         Controls.Add(_toolbar);
 
+        // 放大镜放在工具栏之后加入: 未框选时它浮在底层控件之上; 框选完成后隐藏,
+        // 不会盖住工具栏。鼠标命中由控件的 HTTRANSPARENT 交还给覆盖层。
+        _magnifier = new SnipMagnifierControl(_screen, vs.Location);
+        Controls.Add(_magnifier);
+
+        _toastTimer.Tick += (_, _) =>
+        {
+            _toastTimer.Stop();
+            _toast = null;
+            Invalidate();
+        };
+
         SyncToolbarState();
     }
 
@@ -114,6 +134,7 @@ public sealed class SnipOverlayForm : Form
     {
         base.OnShown(e);
         ForceActivate();
+        UpdateMagnifierAtCursor();
     }
 
     /// <summary>把本窗口强行置为前台并取得键盘焦点</summary>
@@ -156,8 +177,8 @@ public sealed class SnipOverlayForm : Form
     /// 识别模式已改为松手即识别, 因此不再提"双击/回车"。
     /// </summary>
     private string HintText => _mode == SnipMode.Ocr
-        ? "拖拽选择区域  ·  松开鼠标立即识别  ·  右键/Esc 取消"
-        : "拖拽选择区域  ·  双击 复制图片  ·  右键/Esc 取消";
+        ? "拖拽选择区域  ·  松开鼠标立即识别  ·  C 复制颜色  ·  右键/Esc 取消"
+        : "拖拽选择区域  ·  双击 复制图片  ·  C 复制颜色  ·  右键/Esc 取消";
 
     /// <summary>物理像素/逻辑像素比例 (处理多显示器 DPI 缩放)</summary>
     private float ScaleFactor => _screen.Width / (float)ClientSize.Width;
@@ -204,6 +225,37 @@ public sealed class SnipOverlayForm : Form
             ? SnipGeometry.ExportRect(_selection, ScaleFactor, _screen.Size)
             : null;
 
+    /// <summary>
+    /// 放大镜跟随光标: 未框选时、以及重新框选的过程中显示;
+    /// 框选完成 (F3 出现工具栏) 或正在画标注时隐藏 —— 此时继续显示会挡住选区内容。
+    /// 取色器本身不受这个可见性限制, C 键始终可用。
+    /// </summary>
+    private void UpdateMagnifier(Point client)
+    {
+        bool visible = _editingText is null && (!_hasSelection || (_dragging && _pending is null));
+        if (!visible)
+        {
+            _magnifier.Visible = false;
+            return;
+        }
+
+        PointF physical = ToPhysical(client);
+        var center = new Point((int)Math.Floor(physical.X), (int)Math.Floor(physical.Y));
+        Rectangle screen = ScreenRectToClient(Screen.FromPoint(PointToScreen(client)).Bounds);
+        _magnifier.UpdateAt(client, center, screen);
+    }
+
+    /// <summary>窗口刚显示、鼠标还没移动时也要先把放大镜放到当前光标旁</summary>
+    private void UpdateMagnifierAtCursor()
+    {
+        if (!IsHandleCreated)
+            return;
+
+        Point client = PointToClient(Cursor.Position);
+        if (ClientRectangle.Contains(client))
+            UpdateMagnifier(client);
+    }
+
     /// <summary>当前选中工具的画笔 (从工具栏同步)</summary>
     private Annotation CreateShape(AnnotationTool tool, PointF start) => new()
     {
@@ -249,22 +301,47 @@ public sealed class SnipOverlayForm : Form
             // 同时让开工具栏 —— 选区贴底时工具栏会翻转到选区上方压住徽标
             SnipSizeBadge.Draw(g, sel, export.Size, ClientSize,
                 _toolbar.Visible ? _toolbar.Bounds : null);
+
+            // 取色提示可以出现在已框选状态 (工具栏已显示), 这时底部提示条本来不画,
+            // 仍要把短暂反馈画在最上层。
+            if (_toast is { } toast)
+                DrawStatusBar(g, toast);
         }
         else
         {
-            // 未框选时底部提示: 居中于光标所在屏, 不能按整个虚拟屏居中 ——
-            // 双屏下会横跨接缝, 文字正好被切成两半。
-            using var font = UiFont.Create(14f);
-            string hint = HintText;
-            Size ts = TextRenderer.MeasureText(hint, font);
-            _hintScreen = ScreenRectToClient(Screen.FromPoint(Cursor.Position).Bounds);
-            Point pt = new(
-                _hintScreen.Left + (_hintScreen.Width - ts.Width) / 2,
-                _hintScreen.Bottom - ts.Height - 18);
-            using var bg = new SolidBrush(Color.FromArgb(190, 30, 30, 30));
-            g.FillRectangle(bg, pt.X - 12, pt.Y - 4, ts.Width + 24, ts.Height + 8);
-            TextRenderer.DrawText(g, hint, font, pt, Color.White);
+            DrawStatusBar(g, _toast ?? HintText);
         }
+    }
+
+    /// <summary>
+    /// 底部状态条: 未框选时显示操作提示, 取色后显示短暂结果。
+    /// 居中于光标所在屏, 不能按整个虚拟屏居中 —— 双屏下会横跨接缝, 文字正好被切成两半。
+    /// 工具栏可见时若状态条与它重叠, 就移到工具栏上方, 避免被这个不透明子控件整块盖住。
+    /// </summary>
+    private void DrawStatusBar(Graphics g, string text)
+    {
+        using var font = UiFont.Create(14f);
+        Size ts = TextRenderer.MeasureText(text, font);
+        Rectangle screen = ScreenRectToClient(Screen.FromPoint(Cursor.Position).Bounds);
+        _hintScreen = screen;
+
+        int x = screen.Left + (screen.Width - ts.Width) / 2;
+        int y = screen.Bottom - ts.Height - 18;
+        var box = new Rectangle(x - 12, y - 4, ts.Width + 24, ts.Height + 8);
+
+        if (_toolbar.Visible && box.IntersectsWith(_toolbar.Bounds))
+        {
+            int above = _toolbar.Bounds.Top - ts.Height - 16;
+            if (above > screen.Top + 4)
+            {
+                y = above;
+                box = new Rectangle(x - 12, y - 4, ts.Width + 24, ts.Height + 8);
+            }
+        }
+
+        using var bg = new SolidBrush(UiTheme.StatusSurface);
+        g.FillRectangle(bg, box);
+        TextRenderer.DrawText(g, text, font, new Point(x, y), Color.White);
     }
 
     /// <summary>
@@ -417,6 +494,9 @@ public sealed class SnipOverlayForm : Form
     {
         base.OnMouseMove(e);
 
+        // 放大镜是独立子控件, 更新它只重绘自己那一小块, 不会触发整屏底图重绘
+        UpdateMagnifier(e.Location);
+
         // 提示条跟随光标所在屏: 只有跨屏时才重绘一次 (全屏底图重绘很贵, 不能每个鼠标移动都刷)
         if (!_dragging && !SnipGeometry.IsValidSelection(_selection))
         {
@@ -535,6 +615,7 @@ public sealed class SnipOverlayForm : Form
             return;
 
         _hasSelection = true;
+        _magnifier.Visible = false;   // 框选完成, 放大镜让位给工具栏与选区内容
         PositionToolbar();
         SyncToolbarState();
     }
@@ -611,6 +692,11 @@ public sealed class SnipOverlayForm : Form
                 Close();
                 return;
 
+            case Keys.C when !e.Control && !e.Alt:
+                CopyColorAtCursor();
+                e.Handled = true;
+                return;
+
             case Keys.Enter:
                 Confirm();
                 return;
@@ -659,10 +745,52 @@ public sealed class SnipOverlayForm : Form
         }
     }
 
+    /// <summary>
+    /// 取色: 读取覆盖层启动时抓取的 <see cref="_screen"/>, 不能重新 CopyFromScreen ——
+    /// 那时屏幕上已经有覆盖层/遮罩/放大镜, 会把界面自己的颜色取走。
+    /// </summary>
+    private void CopyColorAtCursor()
+    {
+        if (!IsHandleCreated)
+            return;
+
+        Point client = PointToClient(Cursor.Position);
+        if (!ClientRectangle.Contains(client))
+            return;
+        if (_toolbar.Visible && _toolbar.Bounds.Contains(client))
+            return;   // 工具栏是不透明子控件, 它盖住的位置不是用户看到的屏幕内容
+
+        PointF physical = ToPhysical(client);
+        var point = new Point((int)Math.Floor(physical.X), (int)Math.Floor(physical.Y));
+        Color color = SnipMagnifier.Sample(_screen, point);
+        string hex = SnipMagnifier.FormatHex(color);
+
+        try
+        {
+            Clipboard.SetText(hex);
+            ShowToast($"已复制 {hex}  {SnipMagnifier.FormatRgb(color)}");
+        }
+        catch
+        {
+            // 剪贴板被其它进程占用: 不打断截图流程, 但必须让用户知道没复制成功
+            ShowToast("颜色复制失败");
+        }
+    }
+
+    /// <summary>短暂显示底部状态, 由 <see cref="_toastTimer"/> 恢复为常规提示</summary>
+    private void ShowToast(string text)
+    {
+        _toast = text;
+        _toastTimer.Stop();
+        _toastTimer.Start();
+        Invalidate();
+    }
+
     /// <summary>工具切换: 更新光标并取消未完成的绘制</summary>
     private void OnToolChanged()
     {
         _pending = null;
+        _magnifier.Visible = false;
 
         Cursor = _toolbar.Tool switch
         {
@@ -967,8 +1095,11 @@ public sealed class SnipOverlayForm : Form
     /// <summary>释放全屏位图与子控件</summary>
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
+        _toastTimer.Stop();
+        _toastTimer.Dispose();
         _editor?.Dispose();
         _editor = null;
+        _magnifier.Dispose();   // 它读取 _screen, 必须先于底图释放
         _toolbar.Dispose();
         _screen.Dispose();
         base.OnFormClosed(e);
