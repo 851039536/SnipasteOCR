@@ -38,6 +38,14 @@ public sealed class OcrResultForm : Form
     private Point _dragStartScreen; // 按下时的鼠标屏幕坐标
     private Point _dragStartLoc;    // 按下时的窗口位置
 
+    // ===== 高倍缩放平移 =====
+    /// <summary>相对"图片居中"位置的平移偏移 (物理像素), 由 <see cref="OcrPan"/> 夹紧</summary>
+    private PointF _panOffset;
+    private bool _panning;
+    private Point _panAnchorClient;
+    private PointF _panAnchorOffset;
+    private bool _spaceHeld;
+
     // ===== 字符级拖选 =====
     private bool _charDrag;                              // 正在文本块内拖选
     private bool _charDragMoved;                         // 拖选是否已移动
@@ -306,10 +314,39 @@ public sealed class OcrResultForm : Form
             Math.Clamp(y, wa.Top, Math.Max(wa.Top, wa.Bottom - Height)));
     }
 
-    private void Zoom(float factor)
+    private void Zoom(float factor) => Zoom(factor, null);
+
+    /// <summary>
+    /// 缩放并保持 <paramref name="anchorClient"/> 处的原图内容不动。
+    /// 不锚定的话, 高倍放大时视口总是回到图片中心, 用户刚对准的小字会跑掉。
+    /// </summary>
+    private void Zoom(float factor, Point? anchorClient)
     {
+        float oldScale = _scale;
+        float dpi = DpiFactor();
+        var oldRect = ImageRect();
+        // 默认锚点 = 图片区中心 (工具栏按钮 / 键盘)
+        Point anchor = anchorClient ?? new Point(
+            ClientSize.Width / 2,
+            _toolStrip.Height + Math.Max(0, ClientSize.Height - _toolStrip.Height) / 2);
+        float imageX = (anchor.X * dpi - oldRect.X) / oldScale;
+        float imageY = (anchor.Y * dpi - oldRect.Y) / oldScale;
+
         _scale = Math.Clamp(_scale * factor, _minScale, 8f);
         FitWindowToImage();
+
+        // 反推平移量, 让同一个原图点在新的视口中仍落在锚点位置
+        // (FitWindowToImage 调整窗口尺寸时也会触发 OnClientSizeChanged 的夹紧; 这里再按新比例算一次)
+        float newDpi = DpiFactor();
+        float newW = _src.Width * _scale;
+        float newH = _src.Height * _scale;
+        float baseX = (ClientSize.Width * newDpi - newW) / 2f;
+        float viewH = Math.Max(0, (ClientSize.Height - _toolStrip.Height) * newDpi);
+        float baseY = _toolStrip.Height * newDpi + (viewH - newH) / 2f;
+        _panOffset = new PointF(
+            anchor.X * newDpi - baseX - imageX * _scale,
+            anchor.Y * newDpi - baseY - imageY * _scale);
+        ClampPan();
         UpdateZoomLabel();
         Invalidate();
     }
@@ -349,6 +386,7 @@ public sealed class OcrResultForm : Form
             _scale = fit;
             UpdateZoomLabel();
         }
+        ClampPan();
         Invalidate();
     }
 
@@ -374,6 +412,7 @@ public sealed class OcrResultForm : Form
             _minScale = ComputeFitScale();
             if (_scale < _minScale) _scale = _minScale;
         }
+        ClampPan();
         UpdateZoomLabel();
         Invalidate();
     }
@@ -385,6 +424,7 @@ public sealed class OcrResultForm : Form
         _dpi = e.DeviceDpiNew / 96f;
         _minScale = ComputeFitScale();
         if (_scale < _minScale) _scale = _minScale;
+        ClampPan();
         UpdateZoomLabel();
         Invalidate();
     }
@@ -398,6 +438,7 @@ public sealed class OcrResultForm : Form
         _dpi = dpi;
         _minScale = ComputeFitScale();
         _scale = _minScale;
+        ClampPan();
         UpdateZoomLabel();
         Invalidate();
     }
@@ -417,10 +458,23 @@ public sealed class OcrResultForm : Form
         float dpi = DpiFactor();
         float w = _src.Width * _scale;
         float h = _src.Height * _scale;
-        float x = (ClientSize.Width * dpi - w) / 2f;
-        float y = _toolStrip.Height * dpi + (ClientSize.Height * dpi - _toolStrip.Height * dpi - h) / 2f;
+        float x = (ClientSize.Width * dpi - w) / 2f + _panOffset.X;
+        float y = _toolStrip.Height * dpi + (ClientSize.Height * dpi - _toolStrip.Height * dpi - h) / 2f + _panOffset.Y;
         return new RectangleF(x, y, w, h);
     }
+
+    /// <summary>图片可用视口 (物理像素): 客户区减去顶部工具栏</summary>
+    private SizeF ImageViewport()
+    {
+        float dpi = DpiFactor();
+        return new SizeF(
+            Math.Max(0f, ClientSize.Width * dpi),
+            Math.Max(0f, (ClientSize.Height - _toolStrip.Height) * dpi));
+    }
+
+    /// <summary>夹紧平移偏移: 图片边缘不能进入视口内侧, 小图保持居中</summary>
+    private void ClampPan() => _panOffset = OcrPan.Clamp(
+        _panOffset, new SizeF(_src.Width * _scale, _src.Height * _scale), ImageViewport());
 
     // 4 点多边形 (原图坐标 -> 客户区坐标)
     private PointF[] BoxToClientPoints(PaddleOcrDetectionBox box)
@@ -723,6 +777,20 @@ public sealed class OcrResultForm : Form
     protected override void OnMouseDown(MouseEventArgs e)
     {
         base.OnMouseDown(e);
+
+        // 中键拖动, 或按住空格 + 左键: 平移放大后的图片, 不进入选词/拖窗口逻辑
+        if (e.Button == MouseButtons.Middle || (e.Button == MouseButtons.Left && _spaceHeld))
+        {
+            if (OcrPan.CanPan(new SizeF(_src.Width * _scale, _src.Height * _scale), ImageViewport()))
+            {
+                _panning = true;
+                _panAnchorClient = e.Location;
+                _panAnchorOffset = _panOffset;
+                Cursor = Cursors.SizeAll;
+            }
+            return;
+        }
+
         if (e.Button != MouseButtons.Left)
             return;
 
@@ -769,6 +837,25 @@ public sealed class OcrResultForm : Form
     protected override void OnMouseMove(MouseEventArgs e)
     {
         base.OnMouseMove(e);
+        if (_panning)
+        {
+            if (e.Button is MouseButtons.Middle or MouseButtons.Left)
+            {
+                // 鼠标坐标是逻辑像素, 平移偏移是物理像素, 需乘 DPI 因子
+                float dpi = DpiFactor();
+                _panOffset = new PointF(
+                    _panAnchorOffset.X + (e.X - _panAnchorClient.X) * dpi,
+                    _panAnchorOffset.Y + (e.Y - _panAnchorClient.Y) * dpi);
+                ClampPan();
+                Invalidate();
+            }
+            else
+            {
+                _panning = false;
+                Cursor = Cursors.Default;
+            }
+            return;
+        }
         if (_draggingMove)
         {
             if (e.Button == MouseButtons.Left)
@@ -843,13 +930,55 @@ public sealed class OcrResultForm : Form
         }
     }
 
-    /// <summary>Ctrl+滚轮以 1.15 倍步长缩放</summary>
+    /// <summary>
+    /// Ctrl+滚轮缩放 (以鼠标为锚点); 未按 Ctrl 时滚轮纵向平移 (Shift 横向),
+    /// 高倍放大后不必寻找中键就能看到四周内容。
+    /// </summary>
     protected override void OnMouseWheel(MouseEventArgs e)
     {
         base.OnMouseWheel(e);
-        if ((Control.ModifierKeys & Keys.Control) == 0)
+        if ((Control.ModifierKeys & Keys.Control) != 0)
+        {
+            Zoom(e.Delta > 0 ? 1.15f : 1f / 1.15f, e.Location);
             return;
-        Zoom(e.Delta > 0 ? 1.15f : 1f / 1.15f);
+        }
+
+        float dpi = DpiFactor();
+        float step = e.Delta / 120f * 80f * dpi;
+        var shift = (Control.ModifierKeys & Keys.Shift) != 0
+            ? new PointF(step, 0)
+            : new PointF(0, step);
+        _panOffset = OcrPan.Clamp(
+            new PointF(_panOffset.X + shift.X, _panOffset.Y + shift.Y),
+            new SizeF(_src.Width * _scale, _src.Height * _scale), ImageViewport());
+        Invalidate();
+    }
+
+    // 空格 + 左键拖动也可平移 (没有中键的笔记本)
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        base.OnKeyDown(e);
+        if (e.KeyCode == Keys.Space)
+            _spaceHeld = true;
+    }
+
+    protected override void OnKeyUp(KeyEventArgs e)
+    {
+        base.OnKeyUp(e);
+        if (e.KeyCode == Keys.Space)
+            _spaceHeld = false;
+    }
+
+    /// <summary>窗口失焦时清掉空格状态, 避免回来后的第一次左键被误判为平移</summary>
+    protected override void OnDeactivate(EventArgs e)
+    {
+        base.OnDeactivate(e);
+        _spaceHeld = false;
+        if (_panning)
+        {
+            _panning = false;
+            Cursor = Cursors.Default;
+        }
     }
 
     /// <summary>
@@ -859,6 +988,12 @@ public sealed class OcrResultForm : Form
     protected override void OnMouseUp(MouseEventArgs e)
     {
         base.OnMouseUp(e);
+        if (_panning && (e.Button is MouseButtons.Middle or MouseButtons.Left))
+        {
+            _panning = false;
+            Cursor = Cursors.Default;
+            return;
+        }
         if (e.Button == MouseButtons.Left)
             _draggingMove = false;
         if (!_charDrag || e.Button != MouseButtons.Left)
@@ -1039,9 +1174,13 @@ public sealed class OcrResultForm : Form
         if (HasSelection())
             SetStatus($"已选 {SelectedCharCount()} 字符（Ctrl+C 复制）");
         else
-            SetStatus(SettingsStore.Current.ClickToCopy
+        {
+            // 只有放大到超出视口时才提示平移, 平时不占用状态栏
+            string panHint = _scale > _minScale + 0.001f ? " · 中键平移" : string.Empty;
+            SetStatus((SettingsStore.Current.ClickToCopy
                 ? $"{_lines.Length} 个文本块 · 单击复制 · 拖选 · Shift 多选 · Ctrl+滚轮缩放"
-                : $"{_lines.Length} 个文本块 · 单击/拖选 · Shift 多选 · Ctrl+滚轮缩放");
+                : $"{_lines.Length} 个文本块 · 单击/拖选 · Shift 多选 · Ctrl+滚轮缩放") + panHint);
+        }
     }
 
     /// <summary>文本写入剪贴板并在状态栏反馈结果</summary>

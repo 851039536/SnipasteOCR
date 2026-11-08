@@ -415,8 +415,11 @@
   选区/全选/CSV/段落/Markdown 从任何入口复制出去的换行一致；状态栏字数不计 `\r`。
 - **O-14**：拖出文本块时保留最后一次 `_partial` 作为定格高亮，同时复位 `_dragLine`/`_charDragMoved`；
   后台回调统一走 `TryBeginInvoke`，句柄在检查与调用之间销毁时静默丢弃。
+- **O-9**：新增 `OcrPan` 纯函数负责偏移夹紧（图片始终覆盖视口、小图居中）；结果窗口支持
+  中键拖动、空格+左键、未按 Ctrl 的滚轮（Shift 横向）平移；缩放以鼠标位置为锚点，
+  放大后不再总是回到图片中心。状态栏在放大时提示「中键平移」。
 - **AOT 环境**：C++ 工作负载已安装，`vcvarsall.bat` 存在，`dotnet publish -p:PublishAot=true`
   已通过（2026-11-08，exit 0）；产物运行冒烟因已有实例占用单实例 Mutex 未执行。
-- **测试**：`AnnotationTests` 290 项、`InteractiveTests` 79 项（78 通过 + 既有输入法失败 1 项）。
+- **测试**：`AnnotationTests` 300 项、`InteractiveTests` 83 项（82 通过 + 既有输入法失败 1 项）。
 
-剩余未做：O-8 置信度可视化、O-9 高倍缩放平移、O-13 每帧开销；扩展项 F-2/F-6/F-7。
+剩余未做：O-8 置信度可视化、O-13 每帧开销；扩展项 F-2/F-6/F-7。

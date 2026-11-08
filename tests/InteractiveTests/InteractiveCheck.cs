@@ -630,6 +630,70 @@ internal static class InteractiveCheck
             anchored.Close();
         }
 
+        // 16. O-9: 高倍缩放平移与鼠标锚点缩放
+        {
+            using var panSrc = new Bitmap(600, 300);
+            using var panForm = new OcrResultForm(panSrc);
+            try
+            {
+                _ = panForm.Handle;
+                var zoom = typeof(OcrResultForm).GetMethod("Zoom",
+                    BindingFlags.NonPublic | BindingFlags.Instance, null,
+                    [typeof(float), typeof(Point?)], null)!;
+                var imageRect = typeof(OcrResultForm).GetMethod("ImageRect", Priv)!;
+                var mouseDown = typeof(OcrResultForm).GetMethod("OnMouseDown", Priv)!;
+                var mouseMove = typeof(OcrResultForm).GetMethod("OnMouseMove", Priv)!;
+                var mouseUp = typeof(OcrResultForm).GetMethod("OnMouseUp", Priv)!;
+                var wheel = typeof(OcrResultForm).GetMethod("OnMouseWheel", Priv)!;
+                var scaleField = typeof(OcrResultForm).GetField("_scale", Priv)!;
+                var panField = typeof(OcrResultForm).GetField("_panOffset", Priv)!;
+
+                RectangleF Rect() => (RectangleF)imageRect.Invoke(panForm, null)!;
+                var center = new Point(panForm.ClientSize.Width / 2, panForm.ClientSize.Height / 2);
+
+                // 限制窗口最大尺寸: 否则大屏上 FitWindowToImage 会把窗口长到装下整张图, 平移无从触发
+                panForm.MaximumSize = new Size(700, 500);
+
+                // 放大到超出视口, 图片只能居中显示一部分; 此时中键拖动应能移动视口
+                zoom.Invoke(panForm, [4f, null]);
+                var before = Rect();
+                mouseDown.Invoke(panForm, [new MouseEventArgs(MouseButtons.Middle, 1, center.X, center.Y, 0)]);
+                mouseMove.Invoke(panForm, [new MouseEventArgs(MouseButtons.Middle, 0, center.X + 100, center.Y + 50, 0)]);
+                mouseUp.Invoke(panForm, [new MouseEventArgs(MouseButtons.Middle, 1, center.X + 100, center.Y + 50, 0)]);
+                var after = Rect();
+                Check(Math.Abs(after.X - before.X - 100f) <= 1f && Math.Abs(after.Y - before.Y - 50f) <= 1f,
+                    $"中键拖动平移图片 (dx={after.X - before.X:F1}, dy={after.Y - before.Y:F1})");
+
+                // 未按 Ctrl 的滚轮纵向平移 (向上滚看上方内容, 图片下移)
+                float beforeWheelY = Rect().Y;
+                wheel.Invoke(panForm, [new MouseEventArgs(MouseButtons.None, 0, center.X, center.Y, 120)]);
+                Check(Math.Abs(Rect().Y - beforeWheelY - 80f) <= 1f,
+                    $"滚轮纵向平移 (dy={Rect().Y - beforeWheelY:F1})");
+
+                // 缩放锚点: 鼠标下的原图内容在缩放后仍应落在同一客户区位置
+                var anchor = new Point(panForm.ClientSize.Width / 3, panForm.ClientSize.Height / 4);
+                var r0 = Rect();
+                float s0 = (float)scaleField.GetValue(panForm)!;
+                float imageX = (anchor.X - r0.X) / s0;
+                float imageY = (anchor.Y - r0.Y) / s0;
+                zoom.Invoke(panForm, [1.25f, anchor]);
+                var r1 = Rect();
+                float s1 = (float)scaleField.GetValue(panForm)!;
+                Check(Math.Abs((anchor.X - r1.X) / s1 - imageX) <= 2f &&
+                      Math.Abs((anchor.Y - r1.Y) / s1 - imageY) <= 2f,
+                    "缩放以鼠标位置为锚点 (原图点不跑偏)");
+
+                // 缩回适应窗口后平移必须归零, 图片重新居中
+                panForm.SetDpiFactorForTest(1f);
+                var pan = (PointF)panField.GetValue(panForm)!;
+                Check(pan == PointF.Empty, $"缩放到适应窗口后平移归零 (实得 {pan})");
+            }
+            finally
+            {
+                panForm.Close();
+            }
+        }
+
         return runner.ToResult();
     }
 
