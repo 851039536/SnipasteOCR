@@ -694,6 +694,79 @@ internal static class InteractiveCheck
             }
         }
 
+        // 17. O-8: 低置信度可视化 (橙色虚线框 + 悬停状态栏百分比)
+        {
+            using var confSrc = new Bitmap(600, 300);
+            using var confForm = new OcrResultForm(confSrc);
+            try
+            {
+                _ = confForm.Handle;
+
+                PaddleOcrLine ConfDet(string text, float left, float top, float score) => new()
+                {
+                    Text = text,
+                    Box = new PaddleOcrDetectionBox(
+                        left, top, left + 100, top, left + 100, top + 24, left, top + 24, 1f),
+                    RecognitionScore = score,
+                    ClassificationScore = 1f,
+                    ClassificationLabel = 0,
+                    AppliedRotationDegrees = 0,
+                    EmittedCount = 0,
+                };
+
+                var low = ConfDet("Low", 10, 10, 0.62f);
+                var high = ConfDet("High", 10, 90, 0.95f);
+                typeof(OcrResultForm).GetField("_lines", Priv)!.SetValue(confForm, new[] { low, high });
+                typeof(OcrResultForm).GetField("_ocrDone", Priv)!.SetValue(confForm, true);
+
+                using var frame = new Bitmap(confForm.ClientSize.Width, confForm.ClientSize.Height);
+                using (var g = Graphics.FromImage(frame))
+                using (var pea = new PaintEventArgs(g, new Rectangle(Point.Empty, frame.Size)))
+                    typeof(OcrResultForm).GetMethod("OnPaint", Priv)!.Invoke(confForm, [pea]);
+
+                var boxToPoints = typeof(OcrResultForm).GetMethod("BoxToClientPoints", Priv)!;
+                RectangleF BoundsOf(PointF[] pts) => new(
+                    pts.Min(p => p.X), pts.Min(p => p.Y),
+                    pts.Max(p => p.X) - pts.Min(p => p.X), pts.Max(p => p.Y) - pts.Min(p => p.Y));
+
+                int OrangePixels(RectangleF box)
+                {
+                    int n = 0;
+                    int l = Math.Max(0, (int)Math.Floor(box.Left) - 2);
+                    int r = Math.Min(frame.Width, (int)Math.Ceiling(box.Right) + 2);
+                    int t = Math.Max(0, (int)Math.Floor(box.Top) - 2);
+                    int bottom = Math.Min(frame.Height, (int)Math.Ceiling(box.Bottom) + 2);
+                    for (int y = t; y < bottom; y++)
+                        for (int x = l; x < r; x++)
+                        {
+                            var c = frame.GetPixel(x, y);
+                            if (c.R > 200 && c.G is > 90 and < 190 && c.B < 80)
+                                n++;
+                        }
+                    return n;
+                }
+
+                var lowPts = (PointF[])boxToPoints.Invoke(confForm, [low.Box])!;
+                var highPts = (PointF[])boxToPoints.Invoke(confForm, [high.Box])!;
+                int lowOrange = OrangePixels(BoundsOf(lowPts));
+                int highOrange = OrangePixels(BoundsOf(highPts));
+                Check(lowOrange > 10, $"低置信度框画成橙色虚线 (橙色像素={lowOrange})");
+                Check(highOrange == 0, $"高置信度框不画橙色 (橙色像素={highOrange})");
+
+                // 悬停状态栏: 行文本 + 置信度百分比
+                var center = new Point((int)lowPts.Average(p => p.X), (int)lowPts.Average(p => p.Y));
+                typeof(OcrResultForm).GetMethod("OnMouseMove", Priv)!
+                    .Invoke(confForm, [new MouseEventArgs(MouseButtons.None, 0, center.X, center.Y, 0)]);
+                string confStatus = (string)typeof(OcrResultForm).GetField("_statusText", Priv)!.GetValue(confForm)!;
+                Check(confStatus.Contains("置信度 62%") && confStatus.Contains("Low"),
+                    $"悬停状态栏合并文本与置信度 (实得 \"{confStatus}\")");
+            }
+            finally
+            {
+                confForm.Close();
+            }
+        }
+
         return runner.ToResult();
     }
 

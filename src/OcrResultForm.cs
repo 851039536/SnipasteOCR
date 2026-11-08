@@ -520,6 +520,8 @@ public sealed class OcrResultForm : Form
             using var selPen = new Pen(UiTheme.Accent, 2f);
             using var hoverPen = new Pen(Color.FromArgb(255, 255, 193, 7), 1.6f) { DashStyle = DashStyle.Dash };
             using var idlePen = new Pen(Color.FromArgb(160, UiTheme.Accent), 1.2f);
+            // 低置信度用橙色虚线, 与悬停的黄色虚线区分; 只提示, 不过滤
+            using var lowPen = new Pen(Color.FromArgb(255, 152, 0), 1.8f) { DashStyle = DashStyle.Dash };
 
             for (int i = 0; i < _lines.Length; i++)
             {
@@ -560,6 +562,8 @@ public sealed class OcrResultForm : Form
                 }
                 else if (hover)
                     g.DrawPolygon(hoverPen, pts);
+                else if (OcrConfidence.IsLow(_lines[i].RecognitionScore))
+                    g.DrawPolygon(lowPen, pts);
                 else
                     g.DrawPolygon(idlePen, pts);
             }
@@ -919,7 +923,8 @@ public sealed class OcrResultForm : Form
             if (hit >= 0)
             {
                 Cursor = Cursors.Hand;
-                SetStatus(_lines[hit].Text);
+                // 悬停时把置信度与行文本合并展示, 方便快速定位可能识别错的块
+                SetStatus($"{_lines[hit].Text} · {OcrConfidence.Describe(_lines[hit].RecognitionScore)}");
             }
             else
             {
