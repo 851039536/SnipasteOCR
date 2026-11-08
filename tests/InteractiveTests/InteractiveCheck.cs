@@ -729,17 +729,17 @@ internal static class InteractiveCheck
                     pts.Min(p => p.X), pts.Min(p => p.Y),
                     pts.Max(p => p.X) - pts.Min(p => p.X), pts.Max(p => p.Y) - pts.Min(p => p.Y));
 
-                int OrangePixels(RectangleF box)
+                int OrangePixels(Bitmap target, RectangleF box)
                 {
                     int n = 0;
                     int l = Math.Max(0, (int)Math.Floor(box.Left) - 2);
-                    int r = Math.Min(frame.Width, (int)Math.Ceiling(box.Right) + 2);
+                    int r = Math.Min(target.Width, (int)Math.Ceiling(box.Right) + 2);
                     int t = Math.Max(0, (int)Math.Floor(box.Top) - 2);
-                    int bottom = Math.Min(frame.Height, (int)Math.Ceiling(box.Bottom) + 2);
+                    int bottom = Math.Min(target.Height, (int)Math.Ceiling(box.Bottom) + 2);
                     for (int y = t; y < bottom; y++)
                         for (int x = l; x < r; x++)
                         {
-                            var c = frame.GetPixel(x, y);
+                            var c = target.GetPixel(x, y);
                             if (c.R > 200 && c.G is > 90 and < 190 && c.B < 80)
                                 n++;
                         }
@@ -748,8 +748,8 @@ internal static class InteractiveCheck
 
                 var lowPts = (PointF[])boxToPoints.Invoke(confForm, [low.Box])!;
                 var highPts = (PointF[])boxToPoints.Invoke(confForm, [high.Box])!;
-                int lowOrange = OrangePixels(BoundsOf(lowPts));
-                int highOrange = OrangePixels(BoundsOf(highPts));
+                int lowOrange = OrangePixels(frame, BoundsOf(lowPts));
+                int highOrange = OrangePixels(frame, BoundsOf(highPts));
                 Check(lowOrange > 10, $"低置信度框画成橙色虚线 (橙色像素={lowOrange})");
                 Check(highOrange == 0, $"高置信度框不画橙色 (橙色像素={highOrange})");
 
@@ -760,6 +760,21 @@ internal static class InteractiveCheck
                 string confStatus = (string)typeof(OcrResultForm).GetField("_statusText", Priv)!.GetValue(confForm)!;
                 Check(confStatus.Contains("置信度 62%") && confStatus.Contains("Low"),
                     $"悬停状态栏合并文本与置信度 (实得 \"{confStatus}\")");
+
+                // 换一批识别结果后, 四角缓存必须按新数组重建 (重新识别/注入结果都走这条路径)
+                typeof(OcrResultForm).GetField("_hover", Priv)!.SetValue(confForm, -1);
+                var moved = ConfDet("Low", 10, 160, 0.62f);
+                typeof(OcrResultForm).GetField("_lines", Priv)!.SetValue(confForm, new[] { moved });
+                using var movedFrame = new Bitmap(confForm.ClientSize.Width, confForm.ClientSize.Height);
+                using (var g = Graphics.FromImage(movedFrame))
+                using (var pea = new PaintEventArgs(g, new Rectangle(Point.Empty, movedFrame.Size)))
+                    typeof(OcrResultForm).GetMethod("OnPaint", Priv)!.Invoke(confForm, [pea]);
+
+                var movedPts = (PointF[])boxToPoints.Invoke(confForm, [moved.Box])!;
+                Check(OrangePixels(movedFrame, BoundsOf(movedPts)) > 10,
+                    "更换识别结果后框画到新位置 (缓存已失效)");
+                Check(OrangePixels(movedFrame, BoundsOf(lowPts)) == 0,
+                    "旧位置不再残留低置信度框");
             }
             finally
             {

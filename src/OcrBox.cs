@@ -36,18 +36,23 @@ internal static class OcrBox
          Math.Max(Math.Max(box.X1, box.X2), Math.Max(box.X3, box.X4)),
          Math.Max(Math.Max(box.Y1, box.Y2), Math.Max(box.Y3, box.Y4)));
 
-    /// <summary>点在四边形内判定 (射线法), 用于命中测试</summary>
+    /// <summary>
+    /// 点在四边形内判定 (射线法), 用于命中测试。
+    /// 鼠标每移动一次会按行调用, 不能在这里分配四角数组 —— 用栈上的坐标表直接遍历。
+    /// </summary>
     public static bool Contains(PaddleOcrDetectionBox box, float x, float y)
     {
-        PointF[] pts = Corners(box);
+        Span<float> xs = stackalloc float[4] { box.X1, box.X2, box.X3, box.X4 };
+        Span<float> ys = stackalloc float[4] { box.Y1, box.Y2, box.Y3, box.Y4 };
+
         bool inside = false;
         for (int i = 0, j = 3; i < 4; j = i++)
         {
-            float yi = pts[i].Y, yj = pts[j].Y;
+            float yi = ys[i], yj = ys[j];
             if ((yi > y) != (yj > y))
             {
                 float t = (y - yj) / (yi - yj);
-                float xi = pts[j].X + t * (pts[i].X - pts[j].X);
+                float xi = xs[j] + t * (xs[i] - xs[j]);
                 if (x < xi)
                     inside = !inside;
             }

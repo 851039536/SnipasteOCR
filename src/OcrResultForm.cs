@@ -57,6 +57,12 @@ public sealed class OcrResultForm : Form
     private OcrGlyphLayout?[] _lineGlyphs = [];          // 每行 CTC 真实字符框布局 (不支持时为 null)
     private int[] _lineRank = [];                        // _lines 索引 -> 阅读顺序名次
 
+    // 绘制缓存: 每行检测框的原始四角 (图像坐标) 只随 OCR 结果重建;
+    // 每帧按当前缩放/平移映射到客户区, 避免每行重新 LINQ + 新数组。
+    private PointF[][] _lineCorners = [];
+    private PaddleOcrLine[]? _lineCornersSource;
+    private readonly PointF[] _quadScratch = new PointF[4];
+
     private readonly ToolStrip _toolStrip = new();
     private readonly ToolStripButton _zoomOut = new();
     private readonly ToolStripButton _zoomIn = new();
@@ -476,13 +482,41 @@ public sealed class OcrResultForm : Form
     private void ClampPan() => _panOffset = OcrPan.Clamp(
         _panOffset, new SizeF(_src.Width * _scale, _src.Height * _scale), ImageViewport());
 
-    // 4 点多边形 (原图坐标 -> 客户区坐标)
+    // 4 点多边形 (原图坐标 -> 客户区坐标); 保留给命中/字符高亮与离线交互断言使用
     private PointF[] BoxToClientPoints(PaddleOcrDetectionBox box)
     {
         var ir = ImageRect();
         float dpi = DpiFactor();
         return [.. OcrBox.Corners(box).Select(p =>
             new PointF((p.X * _scale + ir.X) / dpi, (p.Y * _scale + ir.Y) / dpi))];
+    }
+
+    /// <summary>每行检测框的原始四角只在 _lines 换新数组时重建 (OCR 完成一次)</summary>
+    private void EnsureLineCorners()
+    {
+        if (ReferenceEquals(_lineCornersSource, _lines))
+            return;
+
+        var corners = new PointF[_lines.Length][];
+        for (int i = 0; i < corners.Length; i++)
+            corners[i] = OcrBox.Corners(_lines[i].Box);
+        _lineCorners = corners;
+        _lineCornersSource = _lines;
+    }
+
+    /// <summary>
+    /// 把图像坐标的四角映射到客户区。复用同一个 4 点缓冲 —— DrawPolygon 同步消费,
+    /// 不会保留引用, 因此每帧不再为每行分配一个新数组。
+    /// </summary>
+    private PointF[] MapCorners(PointF[] imageCorners, RectangleF ir, float dpi)
+    {
+        for (int i = 0; i < 4; i++)
+        {
+            _quadScratch[i] = new PointF(
+                (imageCorners[i].X * _scale + ir.X) / dpi,
+                (imageCorners[i].Y * _scale + ir.Y) / dpi);
+        }
+        return _quadScratch;
     }
 
     // ===== 绘制 =====
@@ -523,12 +557,13 @@ public sealed class OcrResultForm : Form
             // 低置信度用橙色虚线, 与悬停的黄色虚线区分; 只提示, 不过滤
             using var lowPen = new Pen(Color.FromArgb(255, 152, 0), 1.8f) { DashStyle = DashStyle.Dash };
 
+            EnsureLineCorners();
             for (int i = 0; i < _lines.Length; i++)
             {
                 if (string.IsNullOrEmpty(_lines[i].Text))
                     continue;
 
-                var pts = BoxToClientPoints(_lines[i].Box);
+                var pts = MapCorners(_lineCorners[i], ir, dpi);
                 bool selected = _selected.Contains(i);
                 bool hover = i == _hover;
 
