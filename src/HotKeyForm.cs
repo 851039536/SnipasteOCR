@@ -4,7 +4,7 @@ using SnipasteOcr.Native;
 namespace SnipasteOcr;
 
 /// <summary>
-/// 热键设置对话框: 两个按键录制框, 分别捕获"截图识别"和"仅截图"的热键组合。
+/// 热键设置对话框: 两个按键录制框, 分别捕获"截图识别"和"截图标注"的热键组合。
 /// 录制方式: 用户点进输入框后直接按下想要的组合键 (如 Ctrl+Alt+Q), 自动解析修饰符。
 /// </summary>
 public sealed class HotKeyForm : Form

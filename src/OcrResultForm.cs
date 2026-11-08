@@ -107,7 +107,9 @@ public sealed class OcrResultForm : Form
         _minScale = ComputeFitScale();
         _scale = _minScale;
         UpdateZoomLabel();
-        SetStatus("正在识别\u2026");
+        // 无边框窗口没有标题栏可抓, 移动方式不写出来用户很难发现;
+        // 只在识别期间显示 (识别完成后回落到常驻操作提示, 不长期占用状态栏)
+        SetStatus("正在识别\u2026 · 拖动空白处移动窗口");
 
         // 单例事件链会随窗口打开次数增长: 必须用具名方法订阅, 并在 OnFormClosed 退订,
         // 否则每次打开结果窗口都会留下一个捕获 this 的委托, 窗体无法回收。
@@ -505,21 +507,46 @@ public sealed class OcrResultForm : Form
 
     protected override void OnPaintBackground(PaintEventArgs e) { /* OnPaint 内已填充背景 */ }
 
+    private const int StatusPadX = 10;
+    private const int StatusPadY = 4;
+    private const int StatusMargin = 8;
+
+    /// <summary>
+    /// 状态栏面板与文字框 (唯一来源)。文字比可用宽度长时必须限制面板宽度,
+    /// 再用 <see cref="TextFormatFlags.EndEllipsis"/> 收敛 —— 旧实现按文字实际宽度铺面板,
+    /// 超长的错误信息会整条伸出窗口被硬裁, 而且绘制用的是 Point 重载, 省略号根本不生效。
+    /// </summary>
+    private static (Rectangle Box, Rectangle Text) ComputeStatusLayout(Size textSize, Size client)
+    {
+        int maxWidth = Math.Max(1, client.Width - StatusMargin - 4);
+        int boxW = Math.Min(textSize.Width + StatusPadX * 2, maxWidth);
+        int boxH = textSize.Height + StatusPadY * 2;
+        var box = new Rectangle(
+            Math.Max(4, client.Width - boxW - StatusMargin),
+            Math.Max(4, client.Height - boxH - StatusMargin),
+            boxW, boxH);
+        var text = new Rectangle(
+            box.X + StatusPadX, box.Y + StatusPadY,
+            Math.Max(1, box.Width - StatusPadX * 2),
+            Math.Max(1, box.Height - StatusPadY * 2));
+        return (box, text);
+    }
+
     // 右下角状态提示 (半透明底 + 浅色文字)
     private void DrawStatus(Graphics g)
     {
         if (string.IsNullOrEmpty(_statusText))
             return;
         using var font = UiFont.Create(12f);
-        Size ts = TextRenderer.MeasureText(_statusText, font);
-        int padX = 10, padY = 4;
-        int bw = ts.Width + padX * 2, bh = ts.Height + padY * 2;
-        int bx = ClientSize.Width - bw - 8;
-        int by = ClientSize.Height - bh - 8;
-        if (bx < 4) bx = 4;
+        Size ts = TextRenderer.MeasureText(_statusText, font, new Size(int.MaxValue, int.MaxValue),
+            TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
+        var (box, textRect) = ComputeStatusLayout(ts, ClientSize);
+
         using var bg = new SolidBrush(Color.FromArgb(190, 30, 33, 38));
-        g.FillRectangle(bg, bx, by, bw, bh);
-        TextRenderer.DrawText(g, _statusText, font, new Point(bx + padX, by + padY), Color.FromArgb(226, 230, 236), Color.FromArgb(190, 30, 33, 38), TextFormatFlags.EndEllipsis);
+        g.FillRectangle(bg, box);
+        TextRenderer.DrawText(g, _statusText, font, textRect, Color.FromArgb(226, 230, 236),
+            TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine |
+            TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
     }
 
     private void SetStatus(string text)
@@ -1001,7 +1028,7 @@ public sealed class OcrResultForm : Form
             SetStatus($"已选 {SelectedCharCount()} 字符 (Ctrl+C 复制)");
         else
             SetStatus(SettingsStore.Current.ClickToCopy
-                ? $"{_lines.Length} 个文本块 · 单击复制 · 拖选文字 · Shift 多选 · Ctrl+滚轮缩放"
+                ? $"{_lines.Length} 个文本块 · 单击复制 · 拖选 · Shift 多选 · Ctrl+滚轮缩放"
                 : $"{_lines.Length} 个文本块 · 单击/拖选 · Shift 多选 · Ctrl+滚轮缩放");
     }
 

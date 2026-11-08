@@ -141,6 +141,22 @@ public sealed class AnnotationToolbar : Control
     private int _hoverWidth = -1;
     private string _hoverActionKey = string.Empty;
 
+    /// <summary>
+    /// 悬停提示。工具栏只有图标, 快捷键 (1-6 / Ctrl+Z / 回车 / Esc) 只写在 README 里,
+    /// 不悬停说明一遍用户无从发现。整个控件共用一个 ToolTip, 悬停项变化时更新文本。
+    /// </summary>
+    private readonly ToolTip _toolTip = new()
+    {
+        InitialDelay = 450,
+        ReshowDelay = 100,
+        AutoPopDelay = 5000,
+    };
+    private string _hoverTip = string.Empty;
+
+    /// <summary>悬停停留计时: 划过工具栏时不连续弹提示, 停在同一按钮上才显示</summary>
+    private readonly System.Windows.Forms.Timer _tipTimer = new() { Interval = 450 };
+    private Point _tipPoint;
+
     /// <summary>构造工具栏</summary>
     public AnnotationToolbar()
     {
@@ -155,6 +171,24 @@ public sealed class AnnotationToolbar : Control
         BackColor = Color.FromArgb(240, 38, 40, 44);
         Size = new Size(MeasurePreferredWidth(_showPin), ToolbarHeight);
         Cursor = Cursors.Hand;
+
+        _tipTimer.Tick += (_, _) =>
+        {
+            _tipTimer.Stop();
+            if (_hoverTip.Length > 0)
+                _toolTip.Show(_hoverTip, this, _tipPoint.X, _tipPoint.Y, 4000);
+        };
+    }
+
+    /// <summary>释放悬停提示与计时器 (不释放会留下原生窗口/消息循环引用)</summary>
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _tipTimer.Dispose();
+            _toolTip.Dispose();
+        }
+        base.Dispose(disposing);
     }
 
     /// <summary>
@@ -503,9 +537,7 @@ public sealed class AnnotationToolbar : Control
 
     /// <summary>
     /// 用矢量绘制各工具图标 (不依赖任何图片资源, AOT 友好且任意 DPI 都清晰)。
-    ///
-    /// 图标不再垂直居中于整个按钮: 按钮下半部分留给了名称标签, 因此图标中心上移到
-    /// 按钮的图标区 (高度约 <c>ButtonSize - 3</c>), 否则图标会压在文字上。
+    /// 图标垂直居中于按钮; 名称标签早已移除, 只通过悬停 tooltip 说明。
     /// </summary>
     private static void DrawToolIcon(Graphics g, AnnotationTool tool, Rectangle rect, Color color)
     {
@@ -596,6 +628,21 @@ public sealed class AnnotationToolbar : Control
             _hoverActionKey = ha;
             Invalidate();
         }
+
+        // 悬停项变了就换提示文本; 同一项内移动不重复设置, 避免 ToolTip 闪烁
+        string tip = TipText(ht, hc, hw, ha);
+        if (tip != _hoverTip)
+        {
+            _hoverTip = tip;
+            _tipTimer.Stop();
+            _toolTip.Hide(this);
+            _toolTip.SetToolTip(this, tip);
+            if (tip.Length > 0)
+            {
+                _tipPoint = new Point(e.X + 12, e.Y + 22);
+                _tipTimer.Start();
+            }
+        }
     }
 
     /// <summary>离开控件时清空悬停态</summary>
@@ -610,6 +657,36 @@ public sealed class AnnotationToolbar : Control
             _hoverActionKey = string.Empty;
             Invalidate();
         }
+
+        _hoverTip = string.Empty;
+        _tipTimer.Stop();
+        _toolTip.Hide(this);
+        _toolTip.SetToolTip(this, string.Empty);
+    }
+
+    /// <summary>当前悬停区域对应的提示文本 (无悬停返回空串)</summary>
+    private string TipText(int toolIndex, int colorIndex, int widthIndex, string action)
+    {
+        if (toolIndex >= 0)
+        {
+            var tool = AnnotationToolInfo.AllTools[toolIndex];
+            return $"{AnnotationToolInfo.DisplayName(tool)} ({AnnotationToolInfo.ShortcutDigit(tool)})";
+        }
+        if (colorIndex >= 0)
+            return "颜色: 点击循环切换";
+        if (widthIndex >= 0)
+            return $"线宽: {Widths[widthIndex]:0.#} px";
+
+        return action switch
+        {
+            "undo" => "撤销 (Ctrl+Z)",
+            "redo" => "重做 (Ctrl+Y)",
+            "pin" => "贴图: 钉在屏幕上",
+            "save" => "保存为 PNG",
+            "confirm" => "确认 (回车)",
+            "cancel" => "取消 (Esc)",
+            _ => string.Empty,
+        };
     }
 
     /// <summary>点击: 分派到工具/颜色/线宽/操作</summary>

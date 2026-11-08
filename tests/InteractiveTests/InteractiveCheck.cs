@@ -78,6 +78,33 @@ internal static class InteractiveCheck
             onSelectionChanged.Invoke(form, null);
             Application.DoEvents();
 
+            // 1c. 悬停提示: 工具栏只有图标, 工具名与快捷键必须靠 tooltip 说明
+            toolbar.Refresh();
+            Application.DoEvents();
+            var toolTip = (ToolTip)typeof(AnnotationToolbar).GetField("_toolTip", Priv)!.GetValue(toolbar)!;
+            var toolRects = (List<(Rectangle Rect, AnnotationTool Tool)>)typeof(AnnotationToolbar)
+                .GetField("_toolRects", Priv)!.GetValue(toolbar)!;
+            var hover = typeof(AnnotationToolbar).GetMethod("OnMouseMove", Priv)!;
+            Check(toolRects.Count == 6, $"工具栏建立 6 个工具命中区 (实得 {toolRects.Count})");
+            if (toolRects.Count > 0)
+            {
+                var r = toolRects[0].Rect;
+                hover.Invoke(toolbar, [new MouseEventArgs(MouseButtons.None, 0, r.Left + r.Width / 2, r.Top + r.Height / 2, 0)]);
+                string tipText = toolTip.GetToolTip(toolbar) ?? string.Empty;
+                Check(tipText.Contains("矩形 (1)"),
+                    $"工具提示包含名称与快捷键 (实得 \"{tipText}\")");
+            }
+            var cancelRect = (Rectangle)typeof(AnnotationToolbar).GetField("_cancelRect", Priv)!.GetValue(toolbar)!;
+            if (!cancelRect.IsEmpty)
+            {
+                hover.Invoke(toolbar, [new MouseEventArgs(MouseButtons.None, 0, cancelRect.Left + 2, cancelRect.Top + 2, 0)]);
+                string cancelTip = toolTip.GetToolTip(toolbar) ?? string.Empty;
+                Check(cancelTip.Contains("Esc"),
+                    $"取消按钮提示带 Esc (实得 \"{cancelTip}\")");
+            }
+            hover.Invoke(toolbar, [new MouseEventArgs(MouseButtons.None, 0, 1, 1, 0)]);
+            Check(string.IsNullOrEmpty(toolTip.GetToolTip(toolbar)), "移出可点区域后清空提示");
+
             // 2. 切到文字工具
             toolbar.SetTool(AnnotationTool.Text);
             Application.DoEvents();
@@ -295,6 +322,15 @@ internal static class InteractiveCheck
                 Check(!ocrToolbar.ShowPin, "识别模式隐藏贴图按钮");
                 Check(ocrToolbar.Width < toolbar.Width,
                     $"识别模式工具栏更窄 (识别={ocrToolbar.Width}, 图片={toolbar.Width})");
+
+                // 未框选提示必须写明确认动作与右键取消
+                var hintProp = typeof(SnipOverlayForm).GetProperty("HintText", Priv)!;
+                string ocrHint = (string)hintProp.GetValue(ocrOverlay)!;
+                Check(ocrHint.Contains("识别") && ocrHint.Contains("右键"),
+                    $"识别模式提示写明识别与右键取消 (实得 \"{ocrHint}\")");
+                string imageHint = (string)hintProp.GetValue(form)!;
+                Check(imageHint.Contains("复制图片") && imageHint.Contains("右键"),
+                    $"图片模式提示写明复制图片与右键取消 (实得 \"{imageHint}\")");
             }
 
             // 10. 两个热键的修饰键必须各自独立 (旧实现只保存第一个框的, 第二个框的显示会骗人)
@@ -383,6 +419,25 @@ internal static class InteractiveCheck
             {
                 _ = resultForm.Handle; // 建句柄但不 Show: Show 会触发 Shown -> 真的开始 OCR
                 Check(StatusSubscribers() == subscribersBefore + 1, "结果窗口订阅引擎状态事件");
+
+                // 无边框窗口的移动方式: 识别期间的状态栏必须提示, 不能只靠用户猜
+                string initialStatus = (string)typeof(OcrResultForm).GetField("_statusText", Priv)!.GetValue(resultForm)!;
+                Check(initialStatus.Contains("拖动空白处移动"),
+                    $"初始状态提示拖动空白处移动窗口 (实得 \"{initialStatus}\")");
+
+                // 状态栏长文本: 面板夹在窗口内, 文字框宽度有限, EndEllipsis 才会生效
+                var statusLayout = typeof(OcrResultForm)
+                    .GetMethod("ComputeStatusLayout", BindingFlags.NonPublic | BindingFlags.Static)!;
+                var (longBox, longText) = ((Rectangle Box, Rectangle Text))statusLayout.Invoke(
+                    null, [new Size(2000, 20), resultForm.ClientSize])!;
+                Check(longBox.Right <= resultForm.ClientSize.Width - 8 && longBox.Left >= 4,
+                    $"超长状态文本的面板不越出窗口 (box={longBox}, client={resultForm.ClientSize})");
+                Check(longText.Width < 2000,
+                    $"超长状态文本获得有限绘制宽度, 省略号可生效 (text={longText})");
+                var (shortBox, _) = ((Rectangle Box, Rectangle Text))statusLayout.Invoke(
+                    null, [new Size(100, 20), resultForm.ClientSize])!;
+                Check(shortBox.Right == resultForm.ClientSize.Width - 8,
+                    $"短状态文本仍贴右侧 (box={shortBox})");
 
                 // 检测顺序故意与阅读顺序不同: 输入 Bottom, Top, Middle
                 var lines = new[]

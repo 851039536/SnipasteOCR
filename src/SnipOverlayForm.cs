@@ -139,6 +139,14 @@ public sealed class SnipOverlayForm : Form
         Select();
     }
 
+    /// <summary>
+    /// 未框选时的底部提示。必须写明确认后做什么 (识别 / 复制图片) 以及右键也能取消 ——
+    /// 旧文案只写"确认"和 Esc, 用户不知道 F1 会识别文字, 也不知道右键可以先清标注再退出。
+    /// </summary>
+    private string HintText => _mode == SnipMode.Ocr
+        ? "拖拽选择区域  ·  双击/回车 识别  ·  右键/Esc 取消"
+        : "拖拽选择区域  ·  双击 复制图片  ·  右键/Esc 取消";
+
     /// <summary>物理像素/逻辑像素比例 (处理多显示器 DPI 缩放)</summary>
     private float ScaleFactor => _screen.Width / (float)ClientSize.Width;
 
@@ -235,9 +243,7 @@ public sealed class SnipOverlayForm : Form
             // 未框选时底部提示: 居中于光标所在屏, 不能按整个虚拟屏居中 ——
             // 双屏下会横跨接缝, 文字正好被切成两半。
             using var font = UiFont.Create(14f);
-            string hint = _mode == SnipMode.Ocr
-                ? "拖拽选择区域  ·  双击/回车 确认  ·  Esc 取消"
-                : "拖拽选择区域  ·  双击 确认复制图片  ·  Esc 取消";
+            string hint = HintText;
             Size ts = TextRenderer.MeasureText(hint, font);
             _hintScreen = ScreenRectToClient(Screen.FromPoint(Cursor.Position).Bounds);
             Point pt = new(

@@ -266,7 +266,7 @@ dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 的完整路径>
 src/                      # 产品代码 (唯一的出货工程)
 ├── Program.cs            # 入口: 手动消息循环 + 热键注册 + 配置恢复
 ├── SnipCoordinator.cs    # 截图流程调度
-├── SnipMode.cs           # 截图模式枚举 (OCR / 仅截图)
+├── SnipMode.cs           # 截图模式枚举 (截图识别 / 截图标注)
 ├── SnipOverlayForm.cs    # 全屏截图覆盖层: 框选、遮罩、标注交互、结果合成
 ├── Annotations/          # 标注引擎
 │   ├── Annotation.cs         # 单条标注模型 (几何/命中测试/克隆)

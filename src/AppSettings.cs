@@ -16,7 +16,7 @@ public sealed class AppSettings
     public int HotKeyOcr { get; set; } = 0x70;
 
     /// <summary>
-    /// 仅截图热键的虚拟键码 (默认 F3 = 0x72)。
+    /// 截图标注热键的虚拟键码 (默认 F3 = 0x72)。
     /// 注意 VK_F1=0x70 起算, 所以 VK_F3 = 0x72 而不是 0x73 —— 0x73 是 F4。
     /// 踩过的坑: 早期版本把 0x73 写成 F3, 于是"F3"实际注册成了 F4:
     /// 用户按 F3 毫无反应, 按 F4 反而触发截图, 且设置界面显示"F3"让人完全摸不着头脑。
