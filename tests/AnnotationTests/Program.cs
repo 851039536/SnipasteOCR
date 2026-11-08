@@ -169,6 +169,7 @@ Check(s2.Width == 0 && s2.Height == 0, "空文字度量返回 0");
 RunGroup("渲染校验", RenderChecks.Run);
 RunGroup("工具栏校验", ToolbarCheck.Run);
 RunGroup("尺寸徽标校验", SnipSizeCheck.Run);
+RunGroup("多屏定位校验", MultiScreenCheck.Run);
 RunGroup("设置迁移校验", SettingsCheck.Run);
 RunGroup("文字编辑框校验", TextEditorChecks.Run);
 RunGroup("OCR 后处理校验", OcrTextChecks.Run);

@@ -21,6 +21,12 @@ public sealed class SnipOverlayForm : Form
     private bool _dragging;
     private Rectangle? _selection; // 客户区 (逻辑) 坐标
 
+    /// <summary>覆盖层客户区对应的物理屏幕矩形 (截图与屏幕坐标换算的基准)</summary>
+    private readonly Rectangle _virtualScreen;
+
+    /// <summary>上次绘制底部提示条时所在的屏幕 (客户区坐标), 跨屏移动时用于触发重绘</summary>
+    private Rectangle _hintScreen;
+
     /// <summary>已完成的标注 (物理像素坐标)</summary>
     private readonly List<Annotation> _annotations = [];
 
@@ -50,6 +56,7 @@ public sealed class SnipOverlayForm : Form
 
         // 先抓取屏幕 (必须在本窗体显示之前)
         Rectangle vs = SystemInformation.VirtualScreen;
+        _virtualScreen = vs;
         _screen = new Bitmap(vs.Width, vs.Height);
         using (var g = Graphics.FromImage(_screen))
             g.CopyFromScreen(vs.Left, vs.Top, 0, 0, _screen.Size, CopyPixelOperation.SourceCopy);
@@ -135,6 +142,20 @@ public sealed class SnipOverlayForm : Form
     /// <summary>物理像素/逻辑像素比例 (处理多显示器 DPI 缩放)</summary>
     private float ScaleFactor => _screen.Width / (float)ClientSize.Width;
 
+    /// <summary>
+    /// 屏幕物理矩形 → 覆盖层客户区逻辑矩形。
+    /// 必须除以 <see cref="ScaleFactor"/>: 覆盖层客户区等于整块虚拟屏, 但客户区单位是逻辑像素。
+    /// </summary>
+    private Rectangle ScreenRectToClient(Rectangle screen)
+    {
+        float sf = ScaleFactor;
+        return new Rectangle(
+            (int)Math.Floor((screen.Left - _virtualScreen.Left) / sf),
+            (int)Math.Floor((screen.Top - _virtualScreen.Top) / sf),
+            (int)Math.Round(screen.Width / sf),
+            (int)Math.Round(screen.Height / sf));
+    }
+
     // ===== 坐标换算 =====
 
     /// <summary>逻辑 (客户区) 坐标 → 物理像素</summary>
@@ -211,13 +232,17 @@ public sealed class SnipOverlayForm : Form
         }
         else
         {
-            // 未框选时底部提示
+            // 未框选时底部提示: 居中于光标所在屏, 不能按整个虚拟屏居中 ——
+            // 双屏下会横跨接缝, 文字正好被切成两半。
             using var font = UiFont.Create(14f);
             string hint = _mode == SnipMode.Ocr
                 ? "拖拽选择区域  ·  双击/回车 确认  ·  Esc 取消"
                 : "拖拽选择区域  ·  双击 确认复制图片  ·  Esc 取消";
             Size ts = TextRenderer.MeasureText(hint, font);
-            Point pt = new((ClientSize.Width - ts.Width) / 2, ClientSize.Height - ts.Height - 18);
+            _hintScreen = ScreenRectToClient(Screen.FromPoint(Cursor.Position).Bounds);
+            Point pt = new(
+                _hintScreen.Left + (_hintScreen.Width - ts.Width) / 2,
+                _hintScreen.Bottom - ts.Height - 18);
             using var bg = new SolidBrush(Color.FromArgb(190, 30, 30, 30));
             g.FillRectangle(bg, pt.X - 12, pt.Y - 4, ts.Width + 24, ts.Height + 8);
             TextRenderer.DrawText(g, hint, font, pt, Color.White);
@@ -370,6 +395,17 @@ public sealed class SnipOverlayForm : Form
     {
         base.OnMouseMove(e);
 
+        // 提示条跟随光标所在屏: 只有跨屏时才重绘一次 (全屏底图重绘很贵, 不能每个鼠标移动都刷)
+        if (!_dragging && !SnipGeometry.IsValidSelection(_selection))
+        {
+            Rectangle screen = ScreenRectToClient(Screen.FromPoint(Cursor.Position).Bounds);
+            if (screen != _hintScreen)
+            {
+                _hintScreen = screen;
+                Invalidate();
+            }
+        }
+
         if (!_dragging)
             return;
 
@@ -469,6 +505,7 @@ public sealed class SnipOverlayForm : Form
 
     /// <summary>
     /// 把工具栏放到选区下方; 空间不足时翻转到选区上方, 再不行则贴在屏幕底部内侧。
+    /// 夹紧范围是<b>选区所在的那块屏</b>, 不是整个虚拟屏 —— 后者会让贴接缝的选区把工具栏推到另一块屏。
     /// </summary>
     private void PositionToolbar()
     {
@@ -477,32 +514,9 @@ public sealed class SnipOverlayForm : Form
 
         _toolbar.Visible = true;
 
-        int tbW = _toolbar.Width;
-        int tbH = _toolbar.Height;
-        const int margin = 8;
-
-        // 水平: 与选区左对齐, 但不超出屏幕
-        int x = sel.Left;
-        if (x + tbW > ClientSize.Width - margin)
-            x = Math.Max(margin, ClientSize.Width - tbW - margin);
-        if (x < margin)
-            x = margin;
-
-        // 垂直: 优先选区下方
-        int y = sel.Bottom + margin;
-        if (y + tbH > ClientSize.Height - margin)
-        {
-            // 翻转到选区上方
-            y = sel.Top - tbH - margin;
-            if (y < margin)
-            {
-                // 都不够: 贴在屏幕底部内侧
-                y = ClientSize.Height - tbH - margin;
-                if (y < margin) y = margin;
-            }
-        }
-
-        _toolbar.Location = new Point(x, y);
+        var screens = Screen.AllScreens.Select(s => ScreenRectToClient(s.Bounds)).ToArray();
+        Rectangle screen = SnipGeometry.PickScreen(sel, screens);
+        _toolbar.Location = SnipGeometry.ToolbarLocation(sel, _toolbar.Size, screen, 8);
         _toolbar.BringToFront();
     }
 
@@ -814,11 +828,17 @@ public sealed class SnipOverlayForm : Form
 
         var crop = RenderResult();
 
+        // 结果窗口要开在截图所在屏: 物理选区相对底图左上角, 加上虚拟屏原点即屏幕坐标
+        Rectangle physical = SnipGeometry.ExportRect(_selection, ScaleFactor, _screen.Size);
+        Rectangle anchor = new(
+            _virtualScreen.Left + physical.X, _virtualScreen.Top + physical.Y,
+            physical.Width, physical.Height);
+
         Close();
 
         if (_mode == SnipMode.Ocr)
         {
-            var form = new OcrResultForm(crop);
+            var form = new OcrResultForm(crop, anchor);
             form.Show();
         }
         else

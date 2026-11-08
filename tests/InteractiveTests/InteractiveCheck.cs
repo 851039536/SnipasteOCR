@@ -56,6 +56,28 @@ internal static class InteractiveCheck
             Check(sel.Contains(toolbar.Left, toolbar.Top) || toolbar.Bottom > sel.Bottom,
                 "工具栏位于选区下方 (或翻转后在上方)");
 
+            // 1b. 多屏: 工具栏必须夹紧在选区所在的那块屏内。
+            //     旧实现按整个虚拟屏夹紧, 贴着接缝框选时工具栏会整条跑到另一块屏上。
+            var selectionField = typeof(SnipOverlayForm).GetField("_selection", Priv)!;
+            var onSelectionChanged = typeof(SnipOverlayForm).GetMethod("OnSelectionChanged", Priv)!;
+            var screenToClient = typeof(SnipOverlayForm).GetMethod("ScreenRectToClient", Priv)!;
+            foreach (var screen in Screen.AllScreens)
+            {
+                var screenClient = (Rectangle)screenToClient.Invoke(form, [screen.Bounds])!;
+                if (screenClient.Width < 800)
+                    continue;
+                var edgeSel = new Rectangle(screenClient.Right - 200, screenClient.Top + 40, 160, 120);
+                selectionField.SetValue(form, edgeSel);
+                onSelectionChanged.Invoke(form, null);
+                Application.DoEvents();
+                Check(screenClient.Contains(toolbar.Bounds),
+                    $"工具栏留在选区所在屏内 ({screen.DeviceName}: toolbar={toolbar.Bounds}, screen={screenClient})");
+            }
+            // 恢复正常选区, 后续用例继续使用
+            selectionField.SetValue(form, sel);
+            onSelectionChanged.Invoke(form, null);
+            Application.DoEvents();
+
             // 2. 切到文字工具
             toolbar.SetTool(AnnotationTool.Text);
             Application.DoEvents();
@@ -154,7 +176,6 @@ internal static class InteractiveCheck
 
             // 8. 框选过程中的实时尺寸徽标: 每一步拖拽都要更新选区并画出徽标,
             //    且徽标里的数值来自导出尺寸 (物理像素), 不是逻辑像素。
-            var selectionField = typeof(SnipOverlayForm).GetField("_selection", Priv)!;
             selectionField.SetValue(form, null);
 
             var mouseDown = typeof(SnipOverlayForm).GetMethod("OnMouseDown", Priv)!;
@@ -524,6 +545,22 @@ internal static class InteractiveCheck
                 resultForm.Dispose();
                 src.Dispose();
             }
+        }
+
+        // 15. 多屏: 结果窗口必须开在截图选区所在屏 (旧实现 CenterScreen 永远主屏)
+        {
+            using var bmp = new Bitmap(240, 120);
+            var target = Screen.AllScreens[^1];
+            using var anchored = new OcrResultForm(bmp, target.Bounds);
+            _ = anchored.Handle; // 建句柄触发 OnHandleCreated 的尺寸校正与居中, 不 Show 以免真的开始 OCR
+            Application.DoEvents();
+            var actual = Screen.FromControl(anchored);
+            Check(actual.DeviceName == target.DeviceName,
+                $"结果窗口开在截图所在屏 (期望 {target.DeviceName}, 实得 {actual.DeviceName})");
+            bool oversized = anchored.Width > target.WorkingArea.Width || anchored.Height > target.WorkingArea.Height;
+            Check(oversized || target.WorkingArea.Contains(anchored.Bounds),
+                $"结果窗口整体落在该屏工作区内 (窗口={anchored.Bounds}, 工作区={target.WorkingArea})");
+            anchored.Close();
         }
 
         return runner.ToResult();

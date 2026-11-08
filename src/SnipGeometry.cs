@@ -41,4 +41,70 @@ internal static class SnipGeometry
         int fh = Math.Max(150, screen.Height / 2);
         return new Rectangle((screen.Width - fw) / 2, (screen.Height - fh) / 2, fw, fh);
     }
+
+    /// <summary>
+    /// 目标矩形所在屏: 取重叠面积最大的一块, 完全不相交时取中心距离最近的一块。
+    ///
+    /// 覆盖层横跨整个虚拟屏, 工具栏/提示条若按虚拟屏夹紧, 贴着接缝框选时会整条跑到另一块屏上。
+    /// 入参与返回值只需处于同一坐标系 (这里统一用覆盖层客户区坐标)。
+    /// </summary>
+    public static Rectangle PickScreen(Rectangle target, IReadOnlyList<Rectangle> screens)
+    {
+        if (screens.Count == 0)
+            return target;
+
+        Rectangle best = screens[0];
+        long bestArea = -1;
+        foreach (var screen in screens)
+        {
+            Rectangle overlap = Rectangle.Intersect(target, screen);
+            long area = (long)overlap.Width * overlap.Height;
+            if (area > bestArea)
+            {
+                bestArea = area;
+                best = screen;
+            }
+        }
+        if (bestArea > 0)
+            return best;
+
+        // 选区完全落在屏幕外 (理论上不会发生): 取中心最近的一块, 保证结果确定
+        long bestDistance = long.MaxValue;
+        foreach (var screen in screens)
+        {
+            long dx = target.Left + target.Width / 2 - (screen.Left + screen.Width / 2);
+            long dy = target.Top + target.Height / 2 - (screen.Top + screen.Height / 2);
+            long distance = dx * dx + dy * dy;
+            if (distance < bestDistance)
+            {
+                bestDistance = distance;
+                best = screen;
+            }
+        }
+        return best;
+    }
+
+    /// <summary>
+    /// 工具栏左上角: 优先选区下方, 放不下翻到选区上方, 再不行贴屏幕底部内侧;
+    /// 水平与垂直都夹紧到 <paramref name="bounds"/> (选区所在屏), 而不是整个虚拟屏。
+    /// </summary>
+    public static Point ToolbarLocation(Rectangle selection, Size toolbar, Rectangle bounds, int margin)
+    {
+        int minX = bounds.Left + margin;
+        int maxX = bounds.Right - toolbar.Width - margin;
+        int x = maxX >= minX ? Math.Clamp(selection.Left, minX, maxX) : minX;
+
+        int y = selection.Bottom + margin;
+        if (y + toolbar.Height > bounds.Bottom - margin)
+        {
+            y = selection.Top - toolbar.Height - margin;
+            if (y < bounds.Top + margin)
+            {
+                y = bounds.Bottom - toolbar.Height - margin;
+                if (y < bounds.Top + margin)
+                    y = bounds.Top + margin;
+            }
+        }
+        return new Point(x, y);
+    }
 }

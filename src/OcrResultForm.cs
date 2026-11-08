@@ -13,6 +13,10 @@ namespace SnipasteOcr;
 public sealed class OcrResultForm : Form
 {
     private readonly Bitmap _src;
+
+    /// <summary>截图选区所在的屏幕矩形 (屏幕坐标); null 表示无截图来源 (如剪贴板识别)</summary>
+    private readonly Rectangle? _anchorScreen;
+
     private float _scale = 1f;
     private float _minScale;
 
@@ -77,13 +81,16 @@ public sealed class OcrResultForm : Form
 
     /// <summary>
     /// 初始化窗口: 无标题栏 (边缘可缩放), 初始按图片 1:1 显示 (超出工作区则收缩),
-    /// 显示后自动开始后台 OCR
+    /// 显示后自动开始后台 OCR。
+    /// <paramref name="anchorScreen"/> 是截图选区所在的屏幕矩形: 窗口必须开在那块屏,
+    /// 传 null (剪贴板识别) 时取光标所在屏, 不能用 CenterScreen (永远主屏)。
     /// </summary>
-    public OcrResultForm(Bitmap source)
+    public OcrResultForm(Bitmap source, Rectangle? anchorScreen = null)
     {
         _src = source;
+        _anchorScreen = anchorScreen;
         Text = "SnipasteOCR";
-        StartPosition = FormStartPosition.CenterScreen;
+        StartPosition = FormStartPosition.Manual;
         FormBorderStyle = FormBorderStyle.None; // 无标题栏, 边缘细边框可缩放
         BackColor = Color.FromArgb(24, 26, 30);
         DoubleBuffered = true;
@@ -95,6 +102,7 @@ public sealed class OcrResultForm : Form
         MinimumSize = new Size(Math.Max(320, _toolStrip.GetPreferredSize(new Size(0, _toolStrip.Height)).Width + 16), 140);
         // 初始大小: 图片原始尺寸 (1:1 显示) + 工具栏
         Size = SizeFromImage();
+        CenterOnTargetScreen();
 
         _minScale = ComputeFitScale();
         _scale = _minScale;
@@ -259,7 +267,9 @@ public sealed class OcrResultForm : Form
         // 物理像素图片 1:1 显示, 客户区逻辑尺寸 = 物理尺寸 / dpi
         int w = (int)Math.Round(_src.Width / dpi) + 8;
         int h = (int)Math.Round(_src.Height / dpi) + _toolStrip.Height + 8;
-        Rectangle wa = SystemInformation.WorkingArea;
+        // 必须用目标屏的工作区: SystemInformation.WorkingArea 永远是主屏,
+        // 在副屏截图时会把窗口尺寸按主屏收缩、位置也拉回主屏。
+        Rectangle wa = TargetWorkingArea;
         float s = Math.Min(1f, Math.Min(wa.Width * 0.95f / w, wa.Height * 0.95f / h));
         if (s < 1f)
         {
@@ -267,6 +277,23 @@ public sealed class OcrResultForm : Form
             h = (int)Math.Round(h * s);
         }
         return new Size(Math.Max(w, MinimumSize.Width), Math.Max(h, MinimumSize.Height));
+    }
+
+    /// <summary>结果窗口应落在哪块屏的工作区: 截图所在屏, 无截图来源 (剪贴板) 时取光标所在屏</summary>
+    private Rectangle TargetWorkingArea =>
+        _anchorScreen is { } anchor
+            ? Screen.FromRectangle(anchor).WorkingArea
+            : Screen.FromPoint(Cursor.Position).WorkingArea;
+
+    /// <summary>在目标屏工作区内居中; 窗口比工作区还大时贴住左上角, 不让窗口整块跑到屏幕外</summary>
+    private void CenterOnTargetScreen()
+    {
+        Rectangle wa = TargetWorkingArea;
+        int x = wa.Left + (wa.Width - Width) / 2;
+        int y = wa.Top + (wa.Height - Height) / 2;
+        Location = new Point(
+            Math.Clamp(x, wa.Left, Math.Max(wa.Left, wa.Right - Width)),
+            Math.Clamp(y, wa.Top, Math.Max(wa.Top, wa.Bottom - Height)));
     }
 
     private void Zoom(float factor)
@@ -327,6 +354,8 @@ public sealed class OcrResultForm : Form
         {
             _dpiInitialized = true;
             Size = SizeFromImage();
+            // 尺寸按真实 DPI 校正后要重新居中, 否则 150% 下会从目标屏中心偏出去
+            CenterOnTargetScreen();
             _minScale = ComputeFitScale();
             _scale = _minScale;
         }

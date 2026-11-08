@@ -33,8 +33,8 @@ src/                       产品代码 (唯一的出货工程, 也是唯一的 
   PinnedImageForm.cs       贴图窗口 (钉在屏幕上的置顶小窗, 可拖动/右键关闭)
   SnipSizeBadge.cs         框选实时尺寸徽标 (宽 × 高, 物理像素; 纯函数布局 + 自绘)
   NativeMethods.cs         Win32 P/Invoke (消息/热键/窗口/菜单/托盘/输入模拟)
-tests/AnnotationTests/     离线自检, 274 项 (几何/命中/历史/渲染/工具栏/尺寸徽标/设置迁移/编辑框/OCR 后处理/选词几何/CTC 字符框)
-tests/InteractiveTests/    交互自检, 65 项 (真实窗口 + 真实按键 + 拖拽实时尺寸 + 托盘菜单文案 + 结果窗口单击复制 + DPI 基准 + CTC 选词 + IME, 需要桌面会话)
+tests/AnnotationTests/     离线自检, 286 项 (几何/命中/历史/渲染/工具栏/尺寸徽标/多屏定位/设置迁移/编辑框/OCR 后处理/选词几何/CTC 字符框)
+tests/InteractiveTests/    交互自检, 68 项 (真实窗口 + 真实按键 + 拖拽实时尺寸 + 多屏定位 + 托盘菜单文案 + 结果窗口单击复制 + DPI 基准 + CTC 选词 + IME, 需要桌面会话)
 tools/DriveTest/           端到端驱动实际 exe (真实鼠标键盘事件 + 抓屏取证 + 校验导出图)
 ```
 
@@ -148,7 +148,8 @@ dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
 | `AnnotationEngine.OutlineColorFor` | 文字标注描边 **和** 正在输入的编辑框描边 |
 | `AnnotationEngine.Draw` | 覆盖层实时预览 **和** 最终合成导出 |
 | `AnnotationToolbar.ComputeLayout`(私有,内部共用) | 工具栏绘制 **和** 宽度测量(`MeasurePreferredWidth`) |
-| `SnipGeometry.ExportRect` | 实时尺寸徽标 **和** `RenderResult` 裁剪导出 **和** 无效选区兜底 |
+| `SnipGeometry.ExportRect` | 实时尺寸徽标 **和** `RenderResult` 裁剪导出 **和** 无效选区兜底 **和** 结果窗口的屏幕锚点 |
+| `SnipGeometry.PickScreen` / `ToolbarLocation` | 覆盖层工具栏定位 **和** 多屏离线断言(夹紧边界必须是选区所在屏, 不是虚拟屏) |
 | `SnipGeometry.MinDragSide` / `IsValidSelection` | 拖拽/松手判定 **和** 遮罩绘制 **和** 导出判据 |
 | `SnipSizeBadge.Segments`(私有,内部共用) | 徽标文本度量 **和** 分段绘制 |
 | `OcrSelection.CharIndexFromU` | 字符级拖选的光标索引 **和** 离线断言(唯一的中线判定实现) |
@@ -219,6 +220,12 @@ dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
 - **贴图窗口的尺寸也要换算**:`PinnedImageForm` 收到的是**物理像素**位图,而 `ClientSize` 是
   **逻辑像素**。必须除以 DPI 因子(与 `OcrResultForm.DpiFactor` 同一套),否则 150% 缩放下贴图被放大
   1.5 倍且只画出左上角一部分。绘制时同样要按 `ClientSize` 尺寸还原,不能直接 `DrawImageUnscaled`。
+- **多屏定位必须夹紧到"目标屏",不能按虚拟屏**:覆盖层客户区横跨整个虚拟屏,提示条按 `ClientSize`
+  居中会横跨接缝,工具栏按虚拟屏夹紧则贴着左屏右边缘框选时会整条跑到右屏。统一走
+  `SnipGeometry.PickScreen`(取重叠面积最大的屏) + `ToolbarLocation`;屏幕矩形换算到客户区必须
+  除以 `ScaleFactor`(`ScreenRectToClient`)。结果窗口同理:`StartPosition.CenterScreen` 永远主屏,
+  必须 `Manual` + 在截图选区所在屏的工作区居中(剪贴板路径取光标所在屏),尺寸收缩也不能再用
+  `SystemInformation.WorkingArea`(同样是主屏)。
 
 ### 窗口 / 焦点(WinForms 的坑)
 
