@@ -226,6 +226,8 @@ internal static class InteractiveCheck
             mouseUp.Invoke(form, [MouseArgs(new Point(start.X + 180, start.Y + 120))]);
             Application.DoEvents();
 
+            // 松手即识别只属于识别模式; 图片模式必须停留在「选区 + 工具栏」阶段
+            Check(!form.IsDisposed, "图片模式松手后覆盖层保持打开");
             Check(liveSizes.Count == 3, $"拖拽全程都有选区 (实得 {liveSizes.Count}/3)");
             Check(liveSizes.Count == 3 && liveSizes[0].Width < liveSizes[1].Width && liveSizes[1].Width < liveSizes[2].Width &&
                   liveSizes[0].Height < liveSizes[1].Height && liveSizes[1].Height < liveSizes[2].Height,
@@ -323,14 +325,28 @@ internal static class InteractiveCheck
                 Check(ocrToolbar.Width < toolbar.Width,
                     $"识别模式工具栏更窄 (识别={ocrToolbar.Width}, 图片={toolbar.Width})");
 
-                // 未框选提示必须写明确认动作与右键取消
+                // 未框选提示必须写明松开鼠标后做什么与右键取消
                 var hintProp = typeof(SnipOverlayForm).GetProperty("HintText", Priv)!;
                 string ocrHint = (string)hintProp.GetValue(ocrOverlay)!;
                 Check(ocrHint.Contains("识别") && ocrHint.Contains("右键"),
                     $"识别模式提示写明识别与右键取消 (实得 \"{ocrHint}\")");
+                Check(ocrHint.Contains("松开"),
+                    $"识别模式提示写明松手即识别 (实得 \"{ocrHint}\")");
                 string imageHint = (string)hintProp.GetValue(form)!;
                 Check(imageHint.Contains("复制图片") && imageHint.Contains("右键"),
                     $"图片模式提示写明复制图片与右键取消 (实得 \"{imageHint}\")");
+
+                // 识别模式没有「选区持久化 + 标注」阶段: 即使直接触发选区变化也不能进入
+                typeof(SnipOverlayForm).GetField("_selection", Priv)!
+                    .SetValue(ocrOverlay, new Rectangle(100, 100, 200, 100));
+                typeof(SnipOverlayForm).GetMethod("OnSelectionChanged", Priv)!.Invoke(ocrOverlay, null);
+                Check(!(bool)typeof(SnipOverlayForm).GetField("_hasSelection", Priv)!.GetValue(ocrOverlay)!,
+                    "识别模式不进入选区+工具栏状态");
+
+                // 数字键 1..6 在识别模式不得切换标注工具
+                typeof(SnipOverlayForm).GetMethod("OnKeyDown", Priv)!
+                    .Invoke(ocrOverlay, [new KeyEventArgs(Keys.D1)]);
+                Check(ocrToolbar.Tool == AnnotationTool.None, "识别模式数字键不切换标注工具");
             }
 
             // 10. 两个热键的修饰键必须各自独立 (旧实现只保存第一个框的, 第二个框的显示会骗人)
@@ -833,6 +849,116 @@ internal static class InteractiveCheck
                 RestoreClipboard(originalClip);
                 wordForm.Close();
             }
+        }
+
+        // 19. 识别模式 (F1): 松手即识别, 全程不出现标注工具栏, 但保留尺寸徽标
+        {
+            using var ocrOverlay = new SnipOverlayForm(SnipMode.Ocr);
+            var ocrToolbar = (AnnotationToolbar)typeof(SnipOverlayForm).GetField("_toolbar", Priv)!.GetValue(ocrOverlay)!;
+            var ocrSelection = typeof(SnipOverlayForm).GetField("_selection", Priv)!;
+            var ocrHasSelection = typeof(SnipOverlayForm).GetField("_hasSelection", Priv)!;
+
+            int launches = 0;
+            Size launchedSize = default;
+            Rectangle launchedAnchor = default;
+            ocrOverlay.OcrResultLauncherForTest = (bmp, anchor) =>
+            {
+                launches++;
+                launchedSize = bmp.Size;
+                launchedAnchor = anchor;
+                bmp.Dispose();
+            };
+
+            ocrOverlay.Show();
+            Application.DoEvents();
+
+            // 即使有人直接触发选区变化, 识别模式也不得进入「选区 + 工具栏」状态
+            typeof(SnipOverlayForm).GetMethod("OnSelectionChanged", Priv)!.Invoke(ocrOverlay, null);
+            Application.DoEvents();
+            Check(!(bool)ocrHasSelection.GetValue(ocrOverlay)!,
+                "识别模式不进入选区+工具栏状态");
+            Check(!ocrToolbar.Visible, "识别模式工具栏始终不可见");
+
+            var down = typeof(SnipOverlayForm).GetMethod("OnMouseDown", Priv)!;
+            var move = typeof(SnipOverlayForm).GetMethod("OnMouseMove", Priv)!;
+            var up = typeof(SnipOverlayForm).GetMethod("OnMouseUp", Priv)!;
+
+            down.Invoke(ocrOverlay, [MouseArgs(new Point(200, 150))]);
+            move.Invoke(ocrOverlay, [MouseArgs(new Point(380, 270))]);
+
+            var live = (Rectangle?)ocrSelection.GetValue(ocrOverlay);
+            Check(live == new Rectangle(200, 150, 180, 120),
+                $"识别模式拖拽实时更新选区 (实得 {live})");
+            Check(!ocrToolbar.Visible, "识别模式拖拽中也不显示工具栏");
+            Check(launches == 0, "识别模式松手前不启动识别");
+
+            if (live is { } sel)
+            {
+                var screenBmp = (Bitmap)typeof(SnipOverlayForm).GetField("_screen", Priv)!.GetValue(ocrOverlay)!;
+                float sf = (float)typeof(SnipOverlayForm).GetProperty("ScaleFactor", Priv)!.GetValue(ocrOverlay)!;
+                var export = SnipGeometry.ExportRect(sel, sf, screenBmp.Size);
+
+                // 用户明确要求识别模式拖拽时仍显示「宽 × 高」徽标
+                var badge = SnipSizeBadge.ComputeLayout(
+                    sel, SnipSizeBadge.MeasureText(export.Size), ocrOverlay.ClientSize, null);
+                using var frame = new Bitmap(ocrOverlay.ClientSize.Width, ocrOverlay.ClientSize.Height);
+                using (var g = Graphics.FromImage(frame))
+                using (var pea = new PaintEventArgs(g, new Rectangle(Point.Empty, frame.Size)))
+                {
+                    typeof(SnipOverlayForm).GetMethod("OnPaint", Priv)!.Invoke(ocrOverlay, [pea]);
+                }
+
+                int whites = 0;
+                for (int y = badge.Top + 1; y < Math.Min(frame.Height, badge.Bottom - 1); y++)
+                    for (int x = badge.Left + 1; x < Math.Min(frame.Width, badge.Right - 1); x++)
+                    {
+                        var c = frame.GetPixel(x, y);
+                        if (c.R > 230 && c.G > 230 && c.B > 230) whites++;
+                    }
+                Check(whites > 5, $"识别模式拖拽时仍绘制尺寸徽标 (白色像素={whites})");
+
+                up.Invoke(ocrOverlay, [MouseArgs(new Point(380, 270))]);
+
+                Check(launches == 1, $"识别模式松手立即识别 (实得 {launches} 次)");
+                Check(launchedSize == export.Size,
+                    $"识别裁剪尺寸等于导出尺寸 (实得 {launchedSize}, 期望 {export.Size})");
+                var vs = (Rectangle)typeof(SnipOverlayForm).GetField("_virtualScreen", Priv)!.GetValue(ocrOverlay)!;
+                Check(launchedAnchor == new Rectangle(vs.Left + export.X, vs.Top + export.Y, export.Width, export.Height),
+                    $"识别裁剪锚点落在屏幕坐标 (实得 {launchedAnchor})");
+                Check(ocrOverlay.IsDisposed, "识别模式松手后覆盖层关闭");
+
+                Application.DoEvents();
+                Check(launches == 1, "识别模式松手后不会重复识别");
+            }
+        }
+
+        // 19.1 识别模式: 小于 MinDragSide 的微拖不触发识别, 覆盖层保持打开
+        {
+            using var tinyOverlay = new SnipOverlayForm(SnipMode.Ocr);
+            int launches = 0;
+            tinyOverlay.OcrResultLauncherForTest = (bmp, _) => { launches++; bmp.Dispose(); };
+            tinyOverlay.Show();
+            Application.DoEvents();
+
+            var down = typeof(SnipOverlayForm).GetMethod("OnMouseDown", Priv)!;
+            var move = typeof(SnipOverlayForm).GetMethod("OnMouseMove", Priv)!;
+            var up = typeof(SnipOverlayForm).GetMethod("OnMouseUp", Priv)!;
+            var selection = typeof(SnipOverlayForm).GetField("_selection", Priv)!;
+
+            // 3×1: 两边都小于阈值
+            down.Invoke(tinyOverlay, [MouseArgs(new Point(200, 150))]);
+            up.Invoke(tinyOverlay, [MouseArgs(new Point(203, 151))]);
+
+            // 180×2: 单边小于阈值
+            down.Invoke(tinyOverlay, [MouseArgs(new Point(200, 150))]);
+            move.Invoke(tinyOverlay, [MouseArgs(new Point(380, 152))]);
+            up.Invoke(tinyOverlay, [MouseArgs(new Point(380, 152))]);
+
+            Check(launches == 0, $"微拖不触发识别 (实得 {launches} 次)");
+            Check(!tinyOverlay.IsDisposed, "微拖后覆盖层保持打开");
+            Check(selection.GetValue(tinyOverlay) is null, "微拖不产生选区");
+
+            tinyOverlay.Close();
         }
 
         return runner.ToResult();

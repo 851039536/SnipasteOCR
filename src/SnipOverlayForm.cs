@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Drawing.Drawing2D;
 using SnipasteOcr.Annotations;
 using SnipasteOcr.Native;
@@ -5,8 +6,10 @@ using SnipasteOcr.Native;
 namespace SnipasteOcr;
 
 /// <summary>
-/// 全屏截图覆盖层 (仿 Snipaste): 拖拽框选 → 选区下方浮出标注工具栏 →
-/// 可绘制矩形/椭圆/箭头/画笔/马赛克/文字 → 双击/回车确认, Esc/右键取消。
+/// 全屏截图覆盖层 (仿 Snipaste)。
+/// - 识别模式 (F1): 拖拽框选 → 松开鼠标立即识别, 不出现标注工具栏;
+/// - 图片模式 (F3): 拖拽框选 → 选区下方浮出标注工具栏 →
+///   可绘制矩形/椭圆/箭头/画笔/马赛克/文字 → 双击/回车确认, Esc/右键取消。
 ///
 /// 坐标系约定 (关键):
 /// - <b>物理像素</b>: <see cref="_screen"/> 底图与所有 <see cref="Annotation"/> 几何数据。
@@ -48,6 +51,14 @@ public sealed class SnipOverlayForm : Form
 
     /// <summary>正在输入的文字颜色 (开始编辑时锁定, 避免中途换色导致重影)</summary>
     private Color _editingColor = Color.FromArgb(255, 235, 59, 36);
+
+    /// <summary>
+    /// 仅供交互自检替换识别结果窗口的启动动作, 避免自检触发真实 OCR 引擎。
+    /// 生产路径恒为 null; 位图所有权交给回调。
+    /// </summary>
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    [Browsable(false)]
+    internal Action<Bitmap, Rectangle>? OcrResultLauncherForTest { get; set; }
 
     /// <summary>构造覆盖层并在显示前抓取整屏截图; mode 决定确认后走 OCR 还是复制图片</summary>
     public SnipOverlayForm(SnipMode mode)
@@ -140,11 +151,12 @@ public sealed class SnipOverlayForm : Form
     }
 
     /// <summary>
-    /// 未框选时的底部提示。必须写明确认后做什么 (识别 / 复制图片) 以及右键也能取消 ——
+    /// 未框选时的底部提示。必须写明松开鼠标后做什么 (识别 / 复制图片) 以及右键也能取消 ——
     /// 旧文案只写"确认"和 Esc, 用户不知道 F1 会识别文字, 也不知道右键可以先清标注再退出。
+    /// 识别模式已改为松手即识别, 因此不再提"双击/回车"。
     /// </summary>
     private string HintText => _mode == SnipMode.Ocr
-        ? "拖拽选择区域  ·  双击/回车 识别  ·  右键/Esc 取消"
+        ? "拖拽选择区域  ·  松开鼠标立即识别  ·  右键/Esc 取消"
         : "拖拽选择区域  ·  双击 复制图片  ·  右键/Esc 取消";
 
     /// <summary>物理像素/逻辑像素比例 (处理多显示器 DPI 缩放)</summary>
@@ -374,6 +386,10 @@ public sealed class SnipOverlayForm : Form
     /// <summary>开始一次标注 (拖拽形状或画笔点列); 文字工具走点击即编辑</summary>
     private void BeginAnnotate(Point logical)
     {
+        // 标注只属于图片模式; 识别模式的产物是文字, 标注工具本来就不会出现
+        if (_mode != SnipMode.Image)
+            return;
+
         var phys = ToPhysical(logical);
 
         // 标注需落在选区内才有效
@@ -486,6 +502,15 @@ public sealed class SnipOverlayForm : Form
         if (rect.Width >= SnipGeometry.MinDragSide && rect.Height >= SnipGeometry.MinDragSide)
         {
             _selection = rect;
+
+            // 识别模式: 松手即识别, 不进入「选区 + 标注工具栏」阶段。
+            // Confirm 与双击/工具栏确认走同一条路径 (先 RenderResult 再 Close), 位图安全。
+            if (_mode == SnipMode.Ocr)
+            {
+                Confirm();
+                return;   // 窗体已关闭, 不要再 Invalidate
+            }
+
             OnSelectionChanged();
         }
         Invalidate();
@@ -504,6 +529,11 @@ public sealed class SnipOverlayForm : Form
     /// <summary>选区变化后重新定位工具栏 (工具栏始终贴在选区下方)</summary>
     private void OnSelectionChanged()
     {
+        // 识别模式松手即识别, 没有「选区持久化 + 标注」阶段; 这里守住不变量,
+        // 避免任何调用方 (含测试注入) 让识别模式进入标注状态。
+        if (_mode != SnipMode.Image)
+            return;
+
         _hasSelection = true;
         PositionToolbar();
         SyncToolbarState();
@@ -515,6 +545,10 @@ public sealed class SnipOverlayForm : Form
     /// </summary>
     private void PositionToolbar()
     {
+        // 双保险: 识别模式永远不显示标注工具栏 (工具栏是截图/标注专用)
+        if (_mode != SnipMode.Image)
+            return;
+
         if (_selection is not { } sel)
             return;
 
@@ -601,8 +635,9 @@ public sealed class SnipOverlayForm : Form
                 return;
         }
 
-        // 数字键 1..6 切换工具; 0 退回框选模式
-        if (!e.Control && !e.Alt)
+        // 数字键 1..6 切换工具; 0 退回框选模式。
+        // 识别模式没有标注工具, 不劫持数字键, 也避免把光标切成 IBeam 等无用状态。
+        if (_mode == SnipMode.Image && !e.Control && !e.Alt)
         {
             int digit = e.KeyCode switch
             {
@@ -840,12 +875,17 @@ public sealed class SnipOverlayForm : Form
             _virtualScreen.Left + physical.X, _virtualScreen.Top + physical.Y,
             physical.Width, physical.Height);
 
+        // Close() 会释放本窗体, 测试缝必须先取出
+        Action<Bitmap, Rectangle>? launcher = OcrResultLauncherForTest;
+
         Close();
 
         if (_mode == SnipMode.Ocr)
         {
-            var form = new OcrResultForm(crop, anchor);
-            form.Show();
+            if (launcher is { } launch)
+                launch(crop, anchor);
+            else
+                new OcrResultForm(crop, anchor).Show();
         }
         else
         {
