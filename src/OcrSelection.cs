@@ -34,6 +34,65 @@ public static class OcrSelection
     }
 
     /// <summary>
+    /// 双击选词的字符范围 [Start, End)。按「同类连续段」切分:
+    /// ASCII 字母/数字/下划线、CJK 文字、空白各自成段; 其它标点只选当前字符。
+    /// 中文没有分词词典, 连续汉字整段选中 —— 比只选一个字更接近用户预期, 也不会把
+    /// 中英混排的 "OCR识别" 拆成两段。
+    /// </summary>
+    /// <param name="text">行文本</param>
+    /// <param name="index">双击落点反解出的字符索引 (0..n)</param>
+    /// <returns>无文本时返回 null</returns>
+    public static (int Start, int End)? WordRange(string text, int index)
+    {
+        if (string.IsNullOrEmpty(text))
+            return null;
+
+        int i = Math.Clamp(index, 0, text.Length - 1);
+        // 代理对 (扩展 B 汉字等): 不能把高低代理拆开
+        if (char.IsLowSurrogate(text[i]) && i > 0 && char.IsHighSurrogate(text[i - 1]))
+            i--;
+        if (char.IsHighSurrogate(text[i]) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1]))
+            return (i, i + 2);
+
+        CharClass cls = ClassOf(text[i]);
+        if (cls == CharClass.Other)
+            return (i, i + 1);
+
+        int start = i, end = i + 1;
+        while (start > 0 && ClassOf(text[start - 1]) == cls)
+            start--;
+        while (end < text.Length && ClassOf(text[end]) == cls)
+            end++;
+        return (start, end);
+    }
+
+    private enum CharClass
+    {
+        Word,
+        Cjk,
+        Space,
+        Other,
+    }
+
+    private static CharClass ClassOf(char c)
+    {
+        if (char.IsWhiteSpace(c))
+            return CharClass.Space;
+        if (IsCjkLetter(c))
+            return CharClass.Cjk;
+        if (char.IsLetterOrDigit(c) || c == '_')
+            return CharClass.Word;
+        return CharClass.Other;
+    }
+
+    /// <summary>仅 CJK 文字 (不含全角标点): 标点应作为单字边界, 不能被吞进词里</summary>
+    private static bool IsCjkLetter(char c) =>
+        (c >= 0x4E00 && c <= 0x9FFF) ||     // 基本汉字
+        (c >= 0x3400 && c <= 0x4DBF) ||     // 扩展 A
+        (c >= 0x3040 && c <= 0x30FF) ||     // 日文假名
+        (c >= 0xAC00 && c <= 0xD7AF);       // 韩文
+
+    /// <summary>
     /// 为每个检测行建立「_lines 索引 -> 阅读顺序名次」映射 (空白行排到最后)。
     /// 多选/全选复制按名次排序, 才能与「复制全部」「复制段落」使用同一阅读顺序;
     /// 直接按检测顺序索引排序时, 多栏截图会先复制右栏再复制左栏。

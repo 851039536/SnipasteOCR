@@ -76,6 +76,31 @@ internal static class OcrSelectionChecks
                 $"非空白行仍按阅读顺序编号 (实得 {string.Join(",", ranks)})");
         }
 
+        // ===== 6. 双击选词: 同类连续段, 标点单字边界 =====
+        {
+            Check(OcrSelection.WordRange("", 0) is null, "空文本没有选词范围");
+
+            Check(OcrSelection.WordRange("Hello world", 1) is (0, 5),
+                $"英文单词取到空格前 (实得 {OcrSelection.WordRange("Hello world", 1)})");
+            Check(OcrSelection.WordRange("Hello world", 7) is (6, 11),
+                $"第二个英文单词 (实得 {OcrSelection.WordRange("Hello world", 7)})");
+            Check(OcrSelection.WordRange("foo_bar", 3) is (0, 7),
+                "下划线属于单词字符");
+
+            Check(OcrSelection.WordRange("OCR识别 2024", 1) is (0, 3),
+                $"连续 ASCII 字母成段 (实得 {OcrSelection.WordRange("OCR识别 2024", 1)})");
+            Check(OcrSelection.WordRange("OCR识别 2024", 4) is (3, 5),
+                $"连续汉字成段 (实得 {OcrSelection.WordRange("OCR识别 2024", 4)})");
+            Check(OcrSelection.WordRange("OCR识别 2024", 6) is (6, 10),
+                $"连续数字成段 (实得 {OcrSelection.WordRange("OCR识别 2024", 6)})");
+
+            Check(OcrSelection.WordRange("你好，世界", 2) is (2, 3),
+                $"中文标点只选自身, 不吞并相邻汉字 (实得 {OcrSelection.WordRange("你好，世界", 2)})");
+            Check(OcrSelection.WordRange("a  b", 1) is (1, 3), "连续空白成段");
+            Check(OcrSelection.WordRange("abc", 99) is (0, 3),
+                "越界索引夹到行尾字符后仍取整词");
+        }
+
         return runner.ToResult();
     }
 

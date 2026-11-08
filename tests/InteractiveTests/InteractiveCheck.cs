@@ -782,6 +782,59 @@ internal static class InteractiveCheck
             }
         }
 
+        // 18. F-2: 双击选词 / 三击选行, 不触发单击复制
+        {
+            using var wordSrc = new Bitmap(600, 200);
+            using var wordForm = new OcrResultForm(wordSrc);
+            var wordSettings = SettingsStore.Current;
+            bool savedClickToCopy = wordSettings.ClickToCopy;
+            string? originalClip = GetClipboardTextSafe();
+            try
+            {
+                _ = wordForm.Handle;
+                var line = Det("Hello world", 10, 10);
+                typeof(OcrResultForm).GetField("_lines", Priv)!.SetValue(wordForm, new[] { line });
+                typeof(OcrResultForm).GetField("_ocrDone", Priv)!.SetValue(wordForm, true);
+                var buildWeights = typeof(OcrResultForm).GetMethod("BuildCharWeights",
+                    BindingFlags.NonPublic | BindingFlags.Static)!;
+                typeof(OcrResultForm).GetField("_lineCumW", Priv)!
+                    .SetValue(wordForm, buildWeights.Invoke(null, [new[] { line }]));
+
+                var down = typeof(OcrResultForm).GetMethod("OnMouseDown", Priv)!;
+                var up = typeof(OcrResultForm).GetMethod("OnMouseUp", Priv)!;
+                var partialField = typeof(OcrResultForm).GetField("_partial", Priv)!;
+                var selectedField = typeof(OcrResultForm).GetField("_selected", Priv)!;
+
+                wordSettings.ClickToCopy = true;
+                SetClipboardTextSafe("--marker--");
+
+                var top = BoxPointAt(wordForm, line.Box, 0.05f);
+                var pt = new Point(top.X, top.Y + 10);
+
+                down.Invoke(wordForm, [new MouseEventArgs(MouseButtons.Left, 2, pt.X, pt.Y, 0)]);
+                up.Invoke(wordForm, [new MouseEventArgs(MouseButtons.Left, 2, pt.X, pt.Y, 0)]);
+                var wordRange = ((int Line, int Start, int End)?)partialField.GetValue(wordForm);
+                Check(wordRange is { Line: 0, Start: 0, End: 5 },
+                    $"双击选中英文单词 (实得 {wordRange})");
+                Check(((HashSet<int>)selectedField.GetValue(wordForm)!).SetEquals([0]),
+                    "双击后整行仍保持选中");
+                Check(GetClipboardTextSafe() == "--marker--", "双击第二下松手不写剪贴板");
+                string wordStatus = (string)typeof(OcrResultForm).GetField("_statusText", Priv)!.GetValue(wordForm)!;
+                Check(wordStatus.Contains("已选 5 字符"), $"双击后状态栏显示 5 字符 (实得 \"{wordStatus}\")");
+
+                down.Invoke(wordForm, [new MouseEventArgs(MouseButtons.Left, 3, pt.X, pt.Y, 0)]);
+                up.Invoke(wordForm, [new MouseEventArgs(MouseButtons.Left, 3, pt.X, pt.Y, 0)]);
+                Check(partialField.GetValue(wordForm) is null, "三击切换为整行选中 (无行内范围)");
+                Check(GetClipboardTextSafe() == "--marker--", "三击动作不写剪贴板");
+            }
+            finally
+            {
+                wordSettings.ClickToCopy = savedClickToCopy;
+                RestoreClipboard(originalClip);
+                wordForm.Close();
+            }
+        }
+
         return runner.ToResult();
     }
 

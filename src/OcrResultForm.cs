@@ -803,6 +803,31 @@ public sealed class OcrResultForm : Form
         _partial = null;
     }
 
+    /// <summary>
+    /// 双击选中落点所在的同类连续段 (英文单词/连续汉字/数字), 三击选中整行。
+    /// 不写剪贴板 —— 双击只是建立选区, 需要时按 Ctrl+C 复制。
+    /// </summary>
+    private void SelectWordAt(int line, bool wholeLine, Point client)
+    {
+        _panning = false;
+        _charDrag = false;
+        _charDragMoved = false;
+        _dragLine = -1;
+        _hover = line;
+
+        ClearSelection();
+        _selected.Add(line);
+        if (!wholeLine)
+        {
+            var ir = ImageRect();
+            float dpi = DpiFactor();
+            int index = CharIndexAt(line, (client.X * dpi - ir.X) / _scale, (client.Y * dpi - ir.Y) / _scale);
+            if (OcrSelection.WordRange(_lines[line].Text, index) is { } range)
+                _partial = (line, range.Start, range.End);
+        }
+        UpdateIdleStatus();
+    }
+
     /// <summary>全选所有检测块 (工具栏按钮与 Ctrl+A 共用)</summary>
     private void SelectAll()
     {
@@ -834,6 +859,16 @@ public sealed class OcrResultForm : Form
             return;
 
         int hit = HitTest(e.Location);
+
+        // 双击选词 / 三击选整行。必须在 MouseUp 之前截住: 第二下 MouseDown 若走正常
+        // 单击分支, 松手时会把整行当"单击"自动复制, 覆盖掉刚选好的词。
+        if (hit >= 0 && e.Clicks >= 2)
+        {
+            SelectWordAt(hit, e.Clicks >= 3, e.Location);
+            Invalidate();
+            return;
+        }
+
         if (hit < 0)
         {
             if ((Control.ModifierKeys & Keys.Shift) == 0)
