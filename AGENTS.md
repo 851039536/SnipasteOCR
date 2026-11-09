@@ -386,7 +386,7 @@ dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
   与系统"缺字自动补字体"不同。中文由 `UiFont` 选定的字体覆盖,不受影响。
 - 扩展项 F-2 跨行拖选、F-4 低分重试、F-5 多栏/竖排、F-6 隐藏识别框、F-7 保存文本/复制原图/
   重新识别、F-8 右键菜单已归档; 热键对话框高 DPI 布局 (ui-review P1-4) 因缺 150% 实机环境归档。
-  详见 `docs/ocr-review.md` 第十节与 `docs/ui-review.md`，不要重复排期。
+  详见 `docs/archive/ocr-review.md` 第十节与 `docs/archive/ui-review.md`，不要重复排期。
 - **不要尝试加离线截屏翻译**:已在 README 记录评估结论 —— 当前技术栈不可行。
   `Sdcb.SimdPaddleOCR.OnnxSharp` 的 `DType` 不支持 INT8 量化张量,算子表缺 `LayerNormalization`
   与 `Attention`;主流可离线分发的 NMT 模型要么体积过大、要么依赖原生 DLL 破坏单文件、要么仅限非商业。
