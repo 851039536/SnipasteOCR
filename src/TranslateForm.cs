@@ -41,8 +41,9 @@ internal sealed class TranslateForm : Form
         StartPosition = FormStartPosition.CenterParent;
         MinimizeBox = false;
         ShowInTaskbar = false;
-        ClientSize = new Size(760, 520);
-        MinimumSize = new Size(420, 300);
+        // 结果窗口常贴着截图尺寸收缩, 译文窗口过大会盖住它甚至越出屏幕; 默认给一个紧凑尺寸
+        ClientSize = new Size(560, 400);
+        MinimumSize = new Size(380, 260);
         BackColor = UiTheme.Canvas;
         ForeColor = TextColor;
         Font = UiFont.Create(UiFontSize);
@@ -55,15 +56,15 @@ internal sealed class TranslateForm : Form
             Dock = DockStyle.Fill,
             ColumnCount = 1,
             RowCount = 5,
-            Padding = new Padding(10, 8, 10, 8),
+            Padding = new Padding(8, 6, 8, 6),
             BackColor = UiTheme.Canvas,
         };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 22f));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 20f));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 42f));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 22f));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 20f));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 58f));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32f));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 30f));
 
         var sourceLabel = MakeLabel(truncated
             ? $"原文（已截断，仅翻译前 {TranslateClient.MaxInputChars} 字）"
@@ -125,7 +126,7 @@ internal sealed class TranslateForm : Form
         _toolStrip.BackColor = UiTheme.Surface;
         _toolStrip.ForeColor = TextColor;
         _toolStrip.Font = UiFont.Create(UiFontSize);
-        _toolStrip.Padding = new Padding(6, 2, 6, 2);
+        _toolStrip.Padding = new Padding(4, 1, 4, 1);
         _toolStrip.CanOverflow = false;
 
         _copy.Text = "复制译文";
