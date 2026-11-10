@@ -82,6 +82,20 @@ public sealed class OcrResultForm : Form
     /// <summary>当前打开的译文窗口; 再次点「翻译」时先关旧窗, 避免多个窗口显示不同选区</summary>
     private TranslateForm? _translateForm;
 
+    // ===== 底部译文条 (单击翻译) =====
+    /// <summary>单击翻译的进行中请求; 连点别的块时取消上一次, 避免旧译文后到覆盖新译文</summary>
+    private CancellationTokenSource? _clickTranslateCts;
+    private string _barTitle = "";
+    private string _barText = "";
+    private bool _barError;
+    /// <summary>译文条当前对应的检测行: 同一块连点不重复发请求 (失败后允许重点重试)</summary>
+    private int _barLine = -1;
+    private bool _barPending;
+    private bool _barCopyHover;
+
+    /// <summary>译文条上的命中区域; 关闭/复制必须先于"整条拖动"判定</summary>
+    private enum TranslationBarHit { None, Body, Copy, Close }
+
     /// <summary>
     /// 工具栏字号 (逻辑像素, 非 pt)。
     ///
@@ -447,6 +461,15 @@ public sealed class OcrResultForm : Form
     }
 
     /// <summary>
+    /// 测试钩子: 非 null 时单击翻译走该回调, 不联网、不弹知情同意/Key 设置框。
+    /// 生产路径必须保持 null。
+    /// </summary>
+    [System.ComponentModel.Browsable(false)]
+    [System.ComponentModel.DesignerSerializationVisibility(
+        System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    internal Func<string, CancellationToken, Task<TranslateResult>>? TranslateForTest { get; set; }
+
+    /// <summary>
     /// 仅供交互自检注入 DPI 因子, 用于在没有混合 DPI 屏幕的机器上断言坐标换算。
     /// 生产路径只由句柄创建/跨屏事件维护 <see cref="_dpi"/>。
     /// </summary>
@@ -614,6 +637,7 @@ public sealed class OcrResultForm : Form
                     g.DrawPolygon(idlePen, pts);
             }
         }
+        DrawTranslationBar(g);
         DrawStatus(g);
     }
 
@@ -627,15 +651,18 @@ public sealed class OcrResultForm : Form
     /// 状态栏面板与文字框 (唯一来源)。文字比可用宽度长时必须限制面板宽度,
     /// 再用 <see cref="TextFormatFlags.EndEllipsis"/> 收敛 —— 旧实现按文字实际宽度铺面板,
     /// 超长的错误信息会整条伸出窗口被硬裁, 而且绘制用的是 Point 重载, 省略号根本不生效。
+    /// <paramref name="bottomInset"/> 是底部被译文条占掉的高度: 状态栏必须抬到译文条上方,
+    /// 否则后绘制的状态栏会直接压在译文上。
     /// </summary>
-    private static (Rectangle Box, Rectangle Text) ComputeStatusLayout(Size textSize, Size client)
+    private static (Rectangle Box, Rectangle Text) ComputeStatusLayout(
+        Size textSize, Size client, int bottomInset)
     {
         int maxWidth = Math.Max(1, client.Width - StatusMargin - 4);
         int boxW = Math.Min(textSize.Width + StatusPadX * 2, maxWidth);
         int boxH = textSize.Height + StatusPadY * 2;
         var box = new Rectangle(
             Math.Max(4, client.Width - boxW - StatusMargin),
-            Math.Max(4, client.Height - boxH - StatusMargin),
+            Math.Max(4, client.Height - Math.Max(0, bottomInset) - boxH - StatusMargin),
             boxW, boxH);
         var text = new Rectangle(
             box.X + StatusPadX, box.Y + StatusPadY,
@@ -652,7 +679,11 @@ public sealed class OcrResultForm : Form
         using var font = UiFont.Create(12f);
         Size ts = TextRenderer.MeasureText(_statusText, font, new Size(int.MaxValue, int.MaxValue),
             TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
-        var (box, textRect) = ComputeStatusLayout(ts, ClientSize);
+        // 译文条可见时, 状态栏让到它上方 (二者都在底部右侧, 否则会叠在一起)
+        int bottomInset = _barText.Length == 0
+            ? 0
+            : Math.Max(0, ClientSize.Height - MeasureTranslationBar().Box.Top + 4);
+        var (box, textRect) = ComputeStatusLayout(ts, ClientSize, bottomInset);
 
         using var bg = new SolidBrush(UiTheme.StatusSurface);
         g.FillRectangle(bg, box);
@@ -667,6 +698,122 @@ public sealed class OcrResultForm : Form
             return;
         _statusText = text;
         Invalidate(); // 右下角状态需重绘
+    }
+
+    // ===== 底部译文条 (单击翻译) =====
+
+    private static readonly Color BarTextColor = Color.FromArgb(226, 230, 236);
+    private static readonly Color BarErrorColor = Color.FromArgb(255, 196, 120);
+
+    /// <summary>
+    /// 量出译文条布局。绘制、命中、状态栏避让都从这里取, 不各自算一份。
+    /// 译文条只在可见时参与测量, 且文本很短, 直接量比维护缓存的失效逻辑更可靠。
+    /// </summary>
+    private TranslationBarLayout.Layout MeasureTranslationBar()
+    {
+        using var titleFont = UiFont.Create(10f);
+        using var bodyFont = UiFont.Create(12f);
+        Size titleSize = TextRenderer.MeasureText(_barTitle, titleFont, new Size(int.MaxValue, int.MaxValue),
+            TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
+        Size copySize = TextRenderer.MeasureText("复制", titleFont, new Size(int.MaxValue, int.MaxValue),
+            TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
+        // 正文必须按"扣掉内边距后的实际宽度"换行: 按 int.MaxValue 量会得到一行, 高度就永远不增高
+        Size bodySize = TextRenderer.MeasureText(_barText, bodyFont,
+            new Size(TranslationBarLayout.ContentWidth(ClientSize.Width), int.MaxValue),
+            TextFormatFlags.WordBreak | TextFormatFlags.NoPadding);
+
+        return TranslationBarLayout.Compute(
+            ClientSize, titleSize, copySize, bodySize,
+            TranslationBarLayout.MaxHeight(ClientSize.Height, _toolStrip.Height));
+    }
+
+    private void DrawTranslationBar(Graphics g)
+    {
+        if (_barText.Length == 0)
+            return;
+
+        var lay = MeasureTranslationBar();
+        using (var bg = new SolidBrush(UiTheme.FloatingBar))
+            g.FillRectangle(bg, lay.Box);
+        // 左侧强调条: 与深色底形成边界, 不额外引入新配色
+        using (var strip = new SolidBrush(UiTheme.Accent))
+            g.FillRectangle(strip, lay.Box.X, lay.Box.Y, 3, lay.Box.Height);
+
+        using var titleFont = UiFont.Create(10f);
+        using var bodyFont = UiFont.Create(12f);
+        TextRenderer.DrawText(g, _barTitle, titleFont, lay.Title, UiTheme.MutedText,
+            TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis |
+            TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
+
+        // 复制按钮: 只有拿到可复制的译文时才点亮; 加载中/失败态置灰, 避免复制走错误文字
+        Color copyColor = !CanCopyBarTranslation
+            ? Color.FromArgb(110, UiTheme.MutedText)
+            : _barCopyHover ? UiTheme.Accent : UiTheme.MutedText;
+        TextRenderer.DrawText(g, "复制", titleFont, lay.Copy, copyColor,
+            TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter |
+            TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
+
+        // 正文高度被条高夹紧, 超出的部分必须裁掉: 否则长译文会压到状态栏和窗口边缘
+        GraphicsState state = g.Save();
+        g.SetClip(lay.Text);
+        TextRenderer.DrawText(g, _barText, bodyFont, lay.Text,
+            _barError ? BarErrorColor : BarTextColor,
+            TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
+        g.Restore(state);
+
+        // 关闭图标用矢量线而不是字体字形: 缺字体时字形会画出 0 像素且不报错 (工具栏图标踩过)
+        using var closePen = new Pen(UiTheme.MutedText, 1.6f);
+        const int pad = 5;
+        g.DrawLine(closePen, lay.Close.Left + pad, lay.Close.Top + pad,
+            lay.Close.Right - pad, lay.Close.Bottom - pad);
+        g.DrawLine(closePen, lay.Close.Right - pad, lay.Close.Top + pad,
+            lay.Close.Left + pad, lay.Close.Bottom - pad);
+    }
+
+    /// <summary>只有成功拿到译文时才允许复制; 加载中/失败态的"复制"按钮置灰</summary>
+    private bool CanCopyBarTranslation => _barText.Length > 0 && !_barError && !_barPending;
+
+    private void SetTranslationBar(string title, string text, bool error)
+    {
+        _barTitle = title;
+        _barText = text;
+        _barError = error;
+        _barCopyHover = false;
+        Invalidate();
+    }
+
+    private void HideTranslationBar()
+    {
+        if (_barText.Length == 0)
+            return;
+        _barTitle = "";
+        _barText = "";
+        _barError = false;
+        _barLine = -1;
+        _barPending = false;
+        _barCopyHover = false;
+        // 用户主动收起时取消进行中的请求: 否则结果回来后又会把条弹出来
+        _clickTranslateCts?.Cancel();
+        Invalidate();
+    }
+
+    /// <summary>
+    /// 译文条命中: 关闭图标与「复制」优先于整条拖动。
+    /// 复制按钮在不可复制时退化为普通条内区域 (拖动窗口), 不会静默复制错误内容。
+    /// </summary>
+    private TranslationBarHit HitTranslationBar(Point clientPoint)
+    {
+        if (_barText.Length == 0)
+            return TranslationBarHit.None;
+
+        var lay = MeasureTranslationBar();
+        if (!lay.Box.Contains(clientPoint))
+            return TranslationBarHit.None;
+        if (lay.Close.Contains(clientPoint))
+            return TranslationBarHit.Close;
+        if (lay.Copy.Contains(clientPoint) && CanCopyBarTranslation)
+            return TranslationBarHit.Copy;
+        return TranslationBarHit.Body;
     }
 
     // ===== 鼠标交互 =====
@@ -869,6 +1016,24 @@ public sealed class OcrResultForm : Form
         if (e.Button != MouseButtons.Left)
             return;
 
+        // 译文条盖在图片上方: 命中必须先于文字块, 否则点关闭/复制会选中它背后的文字
+        switch (HitTranslationBar(e.Location))
+        {
+            case TranslationBarHit.Close:
+                HideTranslationBar();
+                UpdateIdleStatus();
+                return;
+            case TranslationBarHit.Copy:
+                CopyText(_barText);
+                return;
+            case TranslationBarHit.Body:
+                // 条内其它位置按住可拖动窗口, 与点空白处一致
+                _draggingMove = true;
+                _dragStartScreen = Cursor.Position;
+                _dragStartLoc = Location;
+                return;
+        }
+
         int hit = HitTest(e.Location);
 
         // 双击选词 / 三击选整行。必须在 MouseUp 之前截住: 第二下 MouseDown 若走正常
@@ -885,6 +1050,8 @@ public sealed class OcrResultForm : Form
             if ((Control.ModifierKeys & Keys.Shift) == 0)
             {
                 ClearSelection();
+                // 选区已清空, 译文条再留着就与画面不一致了
+                HideTranslationBar();
                 Invalidate();
             }
             // 无边框窗体: 按住空白处拖动可移动窗口
@@ -997,6 +1164,32 @@ public sealed class OcrResultForm : Form
             _charDrag = false;
             return;
         }
+        // 译文条覆盖下的文字块不参与 hover: 否则光标停在译文上会误报背后的识别文本
+        TranslationBarHit barHit = HitTranslationBar(e.Location);
+        if (barHit != TranslationBarHit.None)
+        {
+            bool copyHover = barHit == TranslationBarHit.Copy;
+            if (_barCopyHover != copyHover)
+            {
+                _barCopyHover = copyHover;
+                Invalidate();
+            }
+            Cursor = barHit is TranslationBarHit.Copy or TranslationBarHit.Close
+                ? Cursors.Hand
+                : Cursors.Default;
+            if (_hover != -1)
+            {
+                _hover = -1;
+                Invalidate();
+            }
+            return;
+        }
+        if (_barCopyHover)
+        {
+            _barCopyHover = false;
+            Invalidate();
+        }
+
         int hit = HitTest(e.Location);
         if (hit != _hover)
         {
@@ -1096,6 +1289,14 @@ public sealed class OcrResultForm : Form
             ClearSelection();
             _selected.Add(clickedLine);
             Invalidate();
+
+            // 单击翻译优先于单击复制: 开启后单击只翻译, 不再自动写剪贴板
+            // (每次单击都冲掉用户剪贴板代价太大); 复制仍可用 Ctrl+C 或工具栏。
+            if (SettingsStore.Current.ClickToTranslate)
+            {
+                TranslateLine(clickedLine);
+                return;
+            }
 
             // 只在"单击检测块"时复制: 拖选、Shift 多选、空白单击都不复制。
             // 复制后不要调用 UpdateIdleStatus, 否则"已复制 N 字符"会立刻被"已选 N 字符"覆盖;
@@ -1263,9 +1464,11 @@ public sealed class OcrResultForm : Form
         {
             // 只有放大到超出视口时才提示平移, 平时不占用状态栏
             string panHint = _scale > _minScale + 0.001f ? " · 中键平移" : string.Empty;
-            SetStatus((SettingsStore.Current.ClickToCopy
-                ? $"{_lines.Length} 个文本块 · 单击复制 · 拖选 · Shift 多选 · Ctrl+滚轮缩放"
-                : $"{_lines.Length} 个文本块 · 单击/拖选 · Shift 多选 · Ctrl+滚轮缩放") + panHint);
+            // 单击的行为随设置变化: 提示必须如实反映当前开关, 否则用户不知道单击会发生什么
+            string clickHint = SettingsStore.Current.ClickToTranslate
+                ? "单击翻译"
+                : SettingsStore.Current.ClickToCopy ? "单击复制" : "单击/拖选";
+            SetStatus($"{_lines.Length} 个文本块 · {clickHint} · 拖选 · Shift 多选 · Ctrl+滚轮缩放" + panHint);
         }
     }
 
@@ -1288,39 +1491,10 @@ public sealed class OcrResultForm : Form
             return;
         }
 
+        if (!EnsureTranslationReady(out string apiKey))
+            return;
+
         var settings = SettingsStore.Current;
-        if (!settings.TranslateConsentGiven)
-        {
-            // 只在第一次点翻译时询问; 同意状态会落盘, 用户可在翻译设置里撤销
-            var choice = MessageBox.Show(
-                this,
-                "翻译需要联网：本次会把识别出的文字发送到 DeepSeek（api.deepseek.com）进行翻译，不会上传截图。\n\n" +
-                "识别本身仍然全程离线。是否继续？",
-                "翻译需要联网",
-                MessageBoxButtons.OKCancel,
-                MessageBoxIcon.Information,
-                MessageBoxDefaultButton.Button1);
-            if (choice != DialogResult.OK)
-                return;
-
-            SettingsStore.Update(s => s.TranslateConsentGiven = true);
-        }
-
-        if (!ProtectedKey.TryUnprotect(settings.TranslateApiKeyProtected, out string apiKey) ||
-            string.IsNullOrWhiteSpace(apiKey))
-        {
-            using var dlg = new TranslateSettingsForm();
-            dlg.ShowDialog(this);
-
-            settings = SettingsStore.Current;
-            if (!ProtectedKey.TryUnprotect(settings.TranslateApiKeyProtected, out apiKey) ||
-                string.IsNullOrWhiteSpace(apiKey))
-            {
-                SetStatus("未配置 API Key，已打开翻译设置");
-                return;
-            }
-        }
-
         string limited = TranslateClient.LimitInput(text, out bool truncated);
         string model = string.IsNullOrWhiteSpace(settings.TranslateModel)
             ? TranslateClient.DefaultModel
@@ -1355,6 +1529,148 @@ public sealed class OcrResultForm : Form
 
         if (truncated)
             SetStatus($"文本过长，仅翻译前 {TranslateClient.MaxInputChars} 字");
+    }
+
+    /// <summary>
+    /// 翻译前的两道门: 首次知情同意 + 可用的 API Key。
+    /// 任一不满足都返回 false 并已在界面给出提示, 调用方直接停止。
+    /// </summary>
+    private bool EnsureTranslationReady(out string apiKey)
+    {
+        apiKey = "";
+        var settings = SettingsStore.Current;
+        if (!settings.TranslateConsentGiven)
+        {
+            // 只在第一次点翻译时询问; 同意状态会落盘, 用户可在翻译设置里撤销
+            var choice = MessageBox.Show(
+                this,
+                "翻译需要联网：本次会把识别出的文字发送到 DeepSeek（api.deepseek.com）进行翻译，不会上传截图。\n\n" +
+                "识别本身仍然全程离线。是否继续？",
+                "翻译需要联网",
+                MessageBoxButtons.OKCancel,
+                MessageBoxIcon.Information,
+                MessageBoxDefaultButton.Button1);
+            if (choice != DialogResult.OK)
+                return false;
+
+            SettingsStore.Update(s => s.TranslateConsentGiven = true);
+        }
+
+        if (ProtectedKey.TryUnprotect(settings.TranslateApiKeyProtected, out apiKey) &&
+            !string.IsNullOrWhiteSpace(apiKey))
+            return true;
+
+        using var dlg = new TranslateSettingsForm();
+        dlg.ShowDialog(this);
+
+        settings = SettingsStore.Current;
+        if (ProtectedKey.TryUnprotect(settings.TranslateApiKeyProtected, out apiKey) &&
+            !string.IsNullOrWhiteSpace(apiKey))
+            return true;
+
+        SetStatus("未配置 API Key，已打开翻译设置");
+        apiKey = "";
+        return false;
+    }
+
+    /// <summary>
+    /// 单击某个文字块直接翻译, 结果贴在窗口底部 (可选设置, 默认关闭)。
+    /// 请求与工具栏入口相互独立: 关闭译文条不影响独立译文窗口, 反之亦然。
+    /// </summary>
+    private void TranslateLine(int line)
+    {
+        if (!_ocrDone || line < 0 || line >= _lines.Length)
+            return;
+
+        string source = _lines[line].Text;
+        if (string.IsNullOrWhiteSpace(source))
+            return;
+
+        // 同一块已有译文/正在请求: 不重复发送 (每次请求都计费, 连点不该重复扣费);
+        // 失败后允许重点重试, 否则用户没有重试入口。
+        if (_barLine == line && (_barPending || !_barError))
+        {
+            SetStatus(_barPending ? "正在翻译\u2026" : "译文已显示在窗口底部");
+            return;
+        }
+
+        // 测试注入时跳过同意/Key: 不得联网, 也不得弹出会阻塞测试的模态框
+        string apiKey = "";
+        if (TranslateForTest is null && !EnsureTranslationReady(out apiKey))
+            return;
+
+        var settings = SettingsStore.Current;
+        string limited = TranslateClient.LimitInput(source, out bool truncated);
+        string model = string.IsNullOrWhiteSpace(settings.TranslateModel)
+            ? TranslateClient.DefaultModel
+            : settings.TranslateModel.Trim();
+        var direction = TranslateClient.ResolveDirection(limited, settings.TranslateTargetLanguage);
+
+        // 连点别的块: 取消上一次请求, 否则旧译文可能在新的之后才回来并覆盖它
+        _clickTranslateCts?.Cancel();
+        var cts = new CancellationTokenSource();
+        _clickTranslateCts = cts;
+        _barLine = line;
+        _barPending = true;
+
+        string title = $"译文 · {direction.Label}" + (truncated ? " · 已截断" : "");
+        SetTranslationBar(title, "正在翻译\u2026", error: false);
+        SetStatus("正在翻译\u2026");
+
+        Func<CancellationToken, Task<TranslateResult>> run = TranslateForTest is { } fake
+            ? token => fake(limited, token)
+            : token => TranslateClient.TranslateAsync(limited, direction.Target, model, apiKey, token);
+
+        _ = RunLineTranslationAsync(title, run, cts);
+    }
+
+    /// <summary>
+    /// 等待单击翻译结果并写入译文条。窗口关闭/请求被新点击取消后不再触碰界面;
+    /// CTS 由本方法独占释放 (关闭时只 Cancel, 不提前 Dispose)。
+    /// </summary>
+    private async Task RunLineTranslationAsync(
+        string title,
+        Func<CancellationToken, Task<TranslateResult>> run,
+        CancellationTokenSource cts)
+    {
+        try
+        {
+            var result = await run(cts.Token);
+            if (cts.IsCancellationRequested || IsDisposed || Disposing)
+                return;
+
+            if (result.Ok)
+            {
+                SetTranslationBar(title, result.Text, error: false);
+                SetStatus("翻译完成 · 译文显示在窗口底部");
+            }
+            else
+            {
+                SetTranslationBar(title, result.Error ?? "翻译失败。", error: true);
+                SetStatus("翻译失败");
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // 连点别的块/关闭窗口: 新内容或窗口本身已接管, 这里什么都不做
+        }
+        catch (Exception ex)
+        {
+            if (!cts.IsCancellationRequested && !IsDisposed && !Disposing)
+            {
+                SetTranslationBar(title, "翻译失败：" + ex.Message, error: true);
+                SetStatus("翻译失败");
+            }
+        }
+        finally
+        {
+            if (ReferenceEquals(_clickTranslateCts, cts))
+            {
+                _clickTranslateCts = null;
+                _barPending = false;
+            }
+            cts.Dispose();
+        }
     }
 
     /// <summary>文本写入剪贴板并在状态栏反馈结果</summary>
@@ -1449,12 +1765,14 @@ public sealed class OcrResultForm : Form
         });
     }
 
-    /// <summary>取消 OCR 任务、退订状态事件并释放位图</summary>
+    /// <summary>取消 OCR 与单击翻译任务、退订状态事件并释放位图</summary>
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
         OcrService.Instance.StatusChanged -= OnServiceStatus;
         _cts?.Cancel();
         _cts?.Dispose();
+        // 只取消不释放: 翻译任务的 finally 负责释放, 这里提前 Dispose 会和它竞争
+        _clickTranslateCts?.Cancel();
         _src.Dispose();
         base.OnFormClosed(e);
     }

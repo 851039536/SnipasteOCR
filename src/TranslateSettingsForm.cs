@@ -16,6 +16,7 @@ public sealed class TranslateSettingsForm : Form
     private readonly TextBox _modelBox = new();
     private readonly ComboBox _targetBox = new();
     private readonly CheckBox _consent = new();
+    private readonly CheckBox _clickToTranslate = new();
 
     private bool _clearPending;
 
@@ -130,6 +131,12 @@ public sealed class TranslateSettingsForm : Form
         _consent.Text = "允许把识别出的文字发送到 DeepSeek 进行翻译";
         _consent.Checked = settings.TranslateConsentGiven;
 
+        // 可选交互: 默认关闭, 不改变原来的"单击复制"习惯
+        _clickToTranslate.Location = new Point(18, 250);
+        _clickToTranslate.Size = new Size(484, 26);
+        _clickToTranslate.Text = "单击文字块翻译，结果显示在窗口底部（不再自动复制）";
+        _clickToTranslate.Checked = settings.ClickToTranslate;
+
         var keyHint = new Label
         {
             Text = "Key 只保存在本机（DPAPI 加密），换机器/账户后需重新输入。",
@@ -157,7 +164,7 @@ public sealed class TranslateSettingsForm : Form
         Controls.AddRange([
             tip, keyLabel, _keyBox, _clear, _keyStatus,
             modelLabel, _modelBox, targetLabel, _targetBox,
-            _consent, keyHint, ok, cancel,
+            _consent, _clickToTranslate, keyHint, ok, cancel,
         ]);
         AcceptButton = ok;
         CancelButton = cancel;
@@ -198,6 +205,7 @@ public sealed class TranslateSettingsForm : Form
             s.TranslateModel = model;
             s.TranslateTargetLanguage = target;
             s.TranslateConsentGiven = _consent.Checked;
+            s.ClickToTranslate = _clickToTranslate.Checked;
         });
 
         DialogResult = DialogResult.OK;

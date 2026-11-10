@@ -429,6 +429,10 @@ internal static class InteractiveCheck
             var resultForm = new OcrResultForm(src);
             var settings = SettingsStore.Current;
             bool savedClickToCopy = settings.ClickToCopy;
+            bool savedClickToTranslate = settings.ClickToTranslate;
+            // 用户可能在真实配置里开了「单击翻译」: 这里必须强制关闭,
+            // 否则 13.1「单击复制」会走翻译分支, 甚至真的发网络请求。
+            settings.ClickToTranslate = false;
             string? originalClip = GetClipboardTextSafe();
 
             try
@@ -445,13 +449,13 @@ internal static class InteractiveCheck
                 var statusLayout = typeof(OcrResultForm)
                     .GetMethod("ComputeStatusLayout", BindingFlags.NonPublic | BindingFlags.Static)!;
                 var (longBox, longText) = ((Rectangle Box, Rectangle Text))statusLayout.Invoke(
-                    null, [new Size(2000, 20), resultForm.ClientSize])!;
+                    null, [new Size(2000, 20), resultForm.ClientSize, 0])!;
                 Check(longBox.Right <= resultForm.ClientSize.Width - 8 && longBox.Left >= 4,
                     $"超长状态文本的面板不越出窗口 (box={longBox}, client={resultForm.ClientSize})");
                 Check(longText.Width < 2000,
                     $"超长状态文本获得有限绘制宽度, 省略号可生效 (text={longText})");
                 var (shortBox, _) = ((Rectangle Box, Rectangle Text))statusLayout.Invoke(
-                    null, [new Size(100, 20), resultForm.ClientSize])!;
+                    null, [new Size(100, 20), resultForm.ClientSize, 0])!;
                 Check(shortBox.Right == resultForm.ClientSize.Width - 8,
                     $"短状态文本仍贴右侧 (box={shortBox})");
 
@@ -534,12 +538,99 @@ internal static class InteractiveCheck
                 Check(copied == expectedAll,
                     $"Ctrl+A / Ctrl+C 按阅读顺序输出且换行为 CRLF (实得 \"{copied?.Replace("\r\n", "\\r\\n").Replace("\n", "\\n")}\")");
 
+                // 13.7 可选设置「单击翻译」: 译文贴在窗口底部, 且不再自动复制
+                var barTextField = typeof(OcrResultForm).GetField("_barText", Priv)!;
+                var barErrorField = typeof(OcrResultForm).GetField("_barError", Priv)!;
+                string BarText() => (string)barTextField.GetValue(resultForm)!;
+                string Status() => (string)typeof(OcrResultForm).GetField("_statusText", Priv)!.GetValue(resultForm)!;
+
+                settings.ClickToTranslate = true;
+                settings.ClickToCopy = true; // 两个都开时以翻译为准, 剪贴板不能被写
+                int translateCalls = 0;
+                resultForm.TranslateForTest = (text, _) =>
+                {
+                    translateCalls++;
+                    return Task.FromResult(new TranslateResult(true, "译文:" + text, null, 1, 2));
+                };
+
+                SetClipboardTextSafe("--marker--");
+                ClickAt(topPoint);
+                PumpUntil(() => BarText().Length > 0, 2000);
+                Check(BarText() == "译文:Top",
+                    $"单击翻译把译文显示在窗口底部 (实得 \"{BarText()}\")");
+                Check(GetClipboardTextSafe() == "--marker--",
+                    "开启单击翻译后单击不再写剪贴板");
+                Check(selected.SetEquals([1]), "单击翻译时仍整行选中被翻译的块");
+                Check(Status().Contains("翻译完成"),
+                    $"状态栏反馈翻译完成 (实得 \"{Status()}\")");
+
+                // 同一块再点一次: 译文条已显示该块结果, 不再重复发请求 (每次请求都计费)
+                ClickAt(topPoint);
+                Application.DoEvents();
+                Check(translateCalls == 1,
+                    $"同一文字块重复单击不重复请求 (请求次数={translateCalls})");
+
+                // 13.7.1 译文条「复制」: 直接把译文写进剪贴板 (反馈走状态栏)
+                SetClipboardTextSafe("--marker--");
+                var copyLayout = (TranslationBarLayout.Layout)typeof(OcrResultForm)
+                    .GetMethod("MeasureTranslationBar", Priv)!.Invoke(resultForm, null)!;
+                var copyCenter = new Point(copyLayout.Copy.Left + copyLayout.Copy.Width / 2,
+                                           copyLayout.Copy.Top + copyLayout.Copy.Height / 2);
+                mouseDown.Invoke(resultForm, [new MouseEventArgs(MouseButtons.Left, 1, copyCenter.X, copyCenter.Y, 0)]);
+                mouseUp.Invoke(resultForm, [new MouseEventArgs(MouseButtons.Left, 1, copyCenter.X, copyCenter.Y, 0)]);
+                Check(GetClipboardTextSafe() == "译文:Top",
+                    $"译文条「复制」把译文写进剪贴板 (实得 \"{GetClipboardTextSafe()}\")");
+                Check(Status().Contains("已复制"),
+                    $"复制译文后状态栏反馈 (实得 \"{Status()}\")");
+
+                // 13.8 译文条自己的命中优先于背后的图片/文字块
+                var measureBar = typeof(OcrResultForm).GetMethod("MeasureTranslationBar", Priv)!;
+                var barLayout = (TranslationBarLayout.Layout)measureBar.Invoke(resultForm, null)!;
+                var barCenter = new Point(barLayout.Box.Left + barLayout.Box.Width / 2,
+                                          barLayout.Box.Top + barLayout.Box.Height / 2);
+                mouseDown.Invoke(resultForm, [new MouseEventArgs(MouseButtons.Left, 1, barCenter.X, barCenter.Y, 0)]);
+                mouseUp.Invoke(resultForm, [new MouseEventArgs(MouseButtons.Left, 1, barCenter.X, barCenter.Y, 0)]);
+                Check(BarText() == "译文:Top", "点击译文条本体不会关闭/误改译文");
+                Check(selected.SetEquals([1]), "点击译文条不会清空选区 (没有透传给空白处逻辑)");
+
+                // 关闭图标: 清空译文条 (文字块选中保留)
+                var closeCenter = new Point(barLayout.Close.Left + barLayout.Close.Width / 2,
+                                            barLayout.Close.Top + barLayout.Close.Height / 2);
+                mouseDown.Invoke(resultForm, [new MouseEventArgs(MouseButtons.Left, 1, closeCenter.X, closeCenter.Y, 0)]);
+                Check(BarText().Length == 0, "点译文条关闭图标清空译文");
+
+                // 13.9 失败信息同样只落在译文条, 不冒充成功
+                resultForm.TranslateForTest = (_, _) =>
+                    Task.FromResult(TranslateResult.Fail("网络不可用"));
+                settings.ClickToTranslate = true;
+                ClickAt(middlePoint);
+                PumpUntil(() => BarText() == "网络不可用", 2000);
+                Check(BarText() == "网络不可用",
+                    $"失败提示显示在译文条 (实得 \"{BarText()}\")");
+                Check((bool)barErrorField.GetValue(resultForm)!, "失败状态会切换译文条配色");
+
+                // 失败态的「复制」必须不可用: 不能把错误提示当成译文复制出去
+                SetClipboardTextSafe("--marker--");
+                var errorLayout = (TranslationBarLayout.Layout)measureBar.Invoke(resultForm, null)!;
+                var errorCopy = new Point(errorLayout.Copy.Left + errorLayout.Copy.Width / 2,
+                                          errorLayout.Copy.Top + errorLayout.Copy.Height / 2);
+                mouseDown.Invoke(resultForm, [new MouseEventArgs(MouseButtons.Left, 1, errorCopy.X, errorCopy.Y, 0)]);
+                mouseUp.Invoke(resultForm, [new MouseEventArgs(MouseButtons.Left, 1, errorCopy.X, errorCopy.Y, 0)]);
+                Check(GetClipboardTextSafe() == "--marker--",
+                    "失败态「复制」不可用, 不会把错误提示写进剪贴板");
+
+                // 单击空白处: 清空选区的同时收起译文条, 画面与选区保持一致
+                ClickAt(new Point(resultForm.ClientSize.Width - 30, resultForm.ClientSize.Height / 2));
+                Check(BarText().Length == 0, "单击空白处收起译文条");
+
+                resultForm.TranslateForTest = null;
                 resultForm.Close();
                 Check(StatusSubscribers() == subscribersBefore, "关闭结果窗口后退订引擎状态事件");
             }
             finally
             {
                 settings.ClickToCopy = savedClickToCopy;
+                settings.ClickToTranslate = savedClickToTranslate;
                 RestoreClipboard(originalClip);
                 resultForm.Dispose();
                 src.Dispose();
@@ -552,6 +643,9 @@ internal static class InteractiveCheck
             var resultForm = new OcrResultForm(src);
             var settings = SettingsStore.Current;
             bool savedClickToCopy = settings.ClickToCopy;
+            bool savedClickToTranslate = settings.ClickToTranslate;
+            // 本段只测拖选/DPI: 关掉单击翻译, 避免误发真实请求
+            settings.ClickToTranslate = false;
             string? originalClip = GetClipboardTextSafe();
 
             try
@@ -624,6 +718,7 @@ internal static class InteractiveCheck
             finally
             {
                 settings.ClickToCopy = savedClickToCopy;
+                settings.ClickToTranslate = savedClickToTranslate;
                 RestoreClipboard(originalClip);
                 resultForm.Dispose();
                 src.Dispose();
@@ -1065,6 +1160,15 @@ internal static class InteractiveCheck
             Check(tr.StatusTextForTest.Contains("tokens"),
                 $"状态栏显示 token 用量 (实得 \"{tr.StatusTextForTest}\")");
 
+            // 居中: 按 owner 所在屏的工作区居中, 不是 CenterParent (结果窗口贴边时会被推出屏幕)
+            Rectangle workArea = Screen.FromControl(tr).WorkingArea;
+            int dx = tr.Left + tr.Width / 2 - (workArea.Left + workArea.Width / 2);
+            int dy = tr.Top + tr.Height / 2 - (workArea.Top + workArea.Height / 2);
+            Check(Math.Abs(dx) <= 4 && Math.Abs(dy) <= 4,
+                $"译文窗口在所在屏工作区居中 (偏移 {dx},{dy}, screen={workArea})");
+            Check(Screen.FromControl(tr).Equals(Screen.FromControl(owner)),
+                "译文窗口开在 owner 所在屏");
+
             // 走真实按键验证 Esc: 反射调用 ProcessCmdKey 会绕过焦点链,
             // 掩盖“只读 TextBox 吞掉 Escape”这类真实键盘问题。
             tr.Activate();
@@ -1223,16 +1327,26 @@ internal static class InteractiveCheck
             EmittedCount = 0,
         };
 
+    /// <summary>读剪贴板: 其它程序短暂占用是常态, 重试几次再判失败</summary>
     private static string? GetClipboardTextSafe()
     {
-        try { return Clipboard.ContainsText() ? Clipboard.GetText() : null; }
-        catch { return null; }
+        for (int i = 0; i < 5; i++)
+        {
+            try { return Clipboard.ContainsText() ? Clipboard.GetText() : null; }
+            catch { Thread.Sleep(20); }
+        }
+        return null;
     }
 
+    /// <summary>写剪贴板: 同样带重试, 避免被别的进程瞬间占用导致后续断言连锁失败</summary>
     private static void SetClipboardTextSafe(string text)
     {
-        try { Clipboard.SetText(text); }
-        catch { /* 剪贴板被占用时测试环境问题, 后续断言会如实失败 */ }
+        for (int i = 0; i < 5; i++)
+        {
+            try { Clipboard.SetText(text); return; }
+            catch { Thread.Sleep(20); }
+        }
+        // 仍失败说明剪贴板长期不可用: 后续断言会如实失败
     }
 
     private static void RestoreClipboard(string? text)

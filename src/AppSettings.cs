@@ -57,6 +57,14 @@ public sealed class AppSettings
     public bool ClickToCopy { get; set; } = true;
 
     /// <summary>
+    /// 单击识别结果中的文字块时直接翻译, 译文显示在结果窗口底部。
+    ///
+    /// 默认关闭: 默认行为必须保持原来的"单击复制"; 开启后单击<b>只翻译不复制</b>
+    /// (复制仍可用 Ctrl+C), 否则每次单击都会冲掉用户剪贴板。旧配置没有该字段时靠属性初值为 false。
+    /// </summary>
+    public bool ClickToTranslate { get; set; }
+
+    /// <summary>
     /// 翻译 API Key 的 DPAPI 密文 (Base64)。
     ///
     /// 这里只能存密文: <see cref="SettingsJsonContext"/> 会把本类所有属性原样写进

@@ -50,6 +50,8 @@
     <!-- 翻译客户端与 Key 保护 (纯逻辑 + HTTP/DPAPI, 不依赖桌面会话) -->
     <Compile Include="..\..\src\TranslateClient.cs" Link="Engine\TranslateClient.cs" />
     <Compile Include="..\..\src\ProtectedKey.cs" Link="Engine\ProtectedKey.cs" />
+    <!-- 结果窗口底部译文条的布局 (绘制/命中/状态栏避让的唯一来源) -->
+    <Compile Include="..\..\src\TranslateBarLayout.cs" Link="Engine\TranslateBarLayout.cs" />
   </ItemGroup>
 
   <ItemGroup>

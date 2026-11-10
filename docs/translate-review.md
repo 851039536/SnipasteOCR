@@ -239,13 +239,21 @@ Opus-MT 单方向 fp32 约 300 MB；`Microsoft.ML.OnnxRuntime` 的原生库约 1
 - 超长文本：单次上限约 8000 字符；超出时提示「已截断，可选中部分后再翻译」。
   不做自动分段（会增加请求数、成本与拼接错误）。
 
-### 6.3 独立翻译窗口
+### 6.3 翻译窗口与底部译文条
 
 - 新建 `TranslateForm`：原文与译文两块只读文本（上下或左右），带「复制译文」「关闭」；
-  `Esc` 关闭，复用 `UiFont` 与深色主题。
+  `Esc` 关闭，复用 `UiFont` 与深色主题；默认 560×400 紧凑尺寸。
+- 定位用 `Screen.FromControl(Owner).WorkingArea` 在结果窗口所在屏居中，**不用 `CenterParent`**：
+  结果窗口无边框且常贴屏幕边，以它为基准居中会把译文窗体推出屏幕。
 - 不修改 `OcrResultForm` 的自绘图片视口与缩放/命中逻辑 —— 这是选择独立窗口而不是右侧分栏的
   主要原因：改动面小、不会影响现有坐标与 DPI 逻辑。
 - 窗口关闭时取消进行中的请求。
+- 2026-11-10 增补可选交互（默认关闭）：`ClickToTranslate` 开启后，单击识别文本块直接翻译该块，
+  译文贴在结果窗口底部的覆盖条上（`TranslateBarLayout` 统一绘制/命中/状态栏避让）。
+  开启后单击**不再自动复制**（复制原文仍可用 `Ctrl+C`），避免每次单击都冲掉用户剪贴板；
+  连点别的块会取消上一次请求，旧译文不会后到覆盖新译文。
+- 译文条自带「复制」按钮（关闭图标左侧）：一键把译**文**写入剪贴板，不必再开独立窗口；
+  加载中/失败态按钮置灰且不可点，避免把“正在翻译…”或错误提示当成译文复制出去。
 
 ### 6.4 网络层
 
@@ -260,7 +268,7 @@ Opus-MT 单方向 fp32 约 300 MB；`Microsoft.ML.OnnxRuntime` 的原生库约 1
   事件声明与 `ShowMenu` 分支同步补齐）。
 - 必须新开一个小 Form：纯 Win32 菜单无法输入 Key，`HotKeyForm` 没有文本框，不能复用。
 - 设置项：API Key（掩码 + 清除）、模型名、目标语言、已同意状态（可撤销）、
-  「测试连接」可选。
+  「单击文字块翻译（结果显示在窗口底部，不再自动复制）」可选、 「测试连接」可选。
 
 ---
 
@@ -342,9 +350,11 @@ Opus-MT 单方向 fp32 约 300 MB；`Microsoft.ML.OnnxRuntime` 的原生库约 1
 - `src/OcrText.cs:264` — `ToPlainText(lines, joinAll)`；译文文本来源。
 - `src/TranslateClient.cs` — 请求构造/响应解析/错误映射/截断；`TranslateJsonContext` 源生成。
 - `src/ProtectedKey.cs` — DPAPI 加密（`CryptProtectData` + 固定 entropy）。
-- `src/TranslateForm.cs` / `src/TranslateSettingsForm.cs` — 译文窗口与设置对话框。
+- `src/TranslateForm.cs` / `src/TranslateSettingsForm.cs` — 译文窗口（owner 所在屏居中）与设置对话框。
+- `src/TranslateBarLayout.cs` — 结果窗口底部译文条布局（绘制/命中/状态栏避让的唯一来源）。
 - `src/ClipboardText.cs` — 剪贴板换行统一入口（结果窗口与译文窗口共用）。
-- `tests/AnnotationTests/TranslateCheck.cs` — 64 项离线断言（请求体/解析/错误/重试/截断/DPAPI）。
+- `tests/AnnotationTests/TranslateCheck.cs` — 66 项离线断言（请求体/解析/错误/重试/截断/DPAPI/设置）。
+- `tests/AnnotationTests/TranslateBarCheck.cs` — 17 项译文条布局断言（贴底/夹紧/复制与关闭图标/高度上限）。
 - `src/SnipasteOcr.csproj` — `PublishAot`、`InvariantGlobalization`、裁剪根程序集。
 - `scripts/publish.cmd` — AOT 发布与 `-SelfTest` 入口。
 - DeepSeek 官方文档：`https://api-docs.deepseek.com/`（首次调用、模型与价格、思考模式、错误码），
@@ -352,15 +362,18 @@ Opus-MT 单方向 fp32 约 300 MB；`Microsoft.ML.OnnxRuntime` 的原生库约 1
 
 ## 十一、实施结果
 
-- 离线自检：`dotnet run --project tests/AnnotationTests`，**408 项全部通过**（新增翻译 64 项）。
-- 交互自检：`dotnet run --project tests/InteractiveTests`，**130 项全部通过**（新增翻译窗口与设置 10 项）。
+- 离线自检：`dotnet run --project tests/AnnotationTests`，**427 项全部通过**
+  （翻译客户端 66 项 + 译文条布局 17 项）。
+- 交互自检：`dotnet run --project tests/InteractiveTests`，**146 项全部通过**
+  （翻译窗口/设置/居中/单击翻译/底部译文条共 16 项）。
 - AOT 发布：`scripts/publish.ps1 -OutputDir '' -SelfTest` 成功；publish 目录仍只有
-  `SnipasteOcr.exe` 与 `.pdb`；exe 为 171,137,024 字节（约 163 MiB），较实施前增加约 0.8 MB；
-  启动冒烟测试 3 秒后进程仍在运行。
+  `SnipasteOcr.exe` 与 `.pdb`；exe 为 171,149,312 字节（约 163 MiB）。本次因已有实例在运行
+  （单实例互斥），只用 `-SkipClean` 验证发布成功，未重复启动冒烟。
 - 未做真实 API 调用（当前无 Key）：请求体、响应解析、错误映射与重试策略由固定 JSON 离线断言覆盖，
   界面由注入假翻译结果验证。首次实机使用时需确认 401/402 等提示与真实响应一致。
 - 审查修复（`402b131` 之后）：配置字符串 `null` 兜底、客户端强制 8000 字上限、
   `finish_reason=length` 截断提示、翻译期间禁止重复发起、Esc 改为真实按键验证、
   CTS 所有权收敛到异步方法、system prompt 增加提示注入防护。
-- 产品入口：结果窗口工具栏「翻译」；托盘菜单「翻译设置…」。
+- 产品入口：结果窗口工具栏「翻译」；托盘菜单「翻译设置…」；翻译设置里的
+  「单击文字块翻译」（可选，译文贴在结果窗口底部，不与单击复制同时生效）。
 - 隐私：识别全程离线不变；首次点翻译弹知情同意；只发送 OCR 文字；Key 用 DPAPI 加密。

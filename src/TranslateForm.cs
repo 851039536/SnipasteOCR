@@ -38,7 +38,9 @@ internal sealed class TranslateForm : Form
 
         Text = $"SnipasteOCR - 翻译（{direction}）";
         FormBorderStyle = FormBorderStyle.Sizable;
-        StartPosition = FormStartPosition.CenterParent;
+        // 不用 CenterParent: 结果窗口无边框且常贴着屏幕边, 以它为基准居中会把译文窗口推出屏幕;
+        // 改为在 owner 所在屏的工作区居中 (见 OnLoad)。
+        StartPosition = FormStartPosition.Manual;
         MinimizeBox = false;
         ShowInTaskbar = false;
         // 结果窗口常贴着截图尺寸收缩, 译文窗口过大会盖住它甚至越出屏幕; 默认给一个紧凑尺寸
@@ -86,6 +88,23 @@ internal sealed class TranslateForm : Form
         // 只取消不释放: 释放由 StartTranslation 的 finally 负责 (请求结束/取消后才安全)。
         // 关闭时若提前 Dispose, FormClosed 的 Cancel() 会抛 ObjectDisposedException, 窗口就关不掉。
         FormClosed += (_, _) => _cts?.Cancel();
+    }
+
+    /// <summary>
+    /// 居中到 owner (结果窗口) 所在屏的工作区; 没有 owner 时用光标所在屏。
+    /// 多屏下不能按主屏居中, 否则副屏截图时译文窗口会跑到另一块屏。
+    /// </summary>
+    protected override void OnLoad(EventArgs e)
+    {
+        base.OnLoad(e);
+
+        Screen screen = Owner is { IsHandleCreated: true }
+            ? Screen.FromControl(Owner)
+            : Screen.FromPoint(Cursor.Position);
+        Rectangle wa = screen.WorkingArea;
+        Location = new Point(
+            wa.Left + Math.Max(0, (wa.Width - Width) / 2),
+            wa.Top + Math.Max(0, (wa.Height - Height) / 2));
     }
 
     // ===== 测试钩子 (仅 InteractiveTests 使用, 生产路径不得调用) =====
