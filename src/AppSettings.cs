@@ -9,6 +9,12 @@ namespace SnipasteOcr;
 /// </summary>
 public sealed class AppSettings
 {
+    /// <summary>
+    /// 目标语言为「自动」: 中文原文译成英文, 英文原文译成中文。
+    /// 用一个可读字符串存进配置, 用户手改 settings.json 时也能看懂。
+    /// </summary>
+    public const string AutoTranslateTarget = "自动（中↔英）";
+
     /// <summary>上次选择的识别模型档位</summary>
     public OcrModelProfile ModelProfile { get; set; } = OcrModelProfile.Medium;
 
@@ -46,6 +52,33 @@ public sealed class AppSettings
     /// 托盘菜单提供开关, 便于只想浏览结果的用户关掉。旧配置没有该字段时靠属性初值得到 true。
     /// </summary>
     public bool ClickToCopy { get; set; } = true;
+
+    /// <summary>
+    /// 翻译 API Key 的 DPAPI 密文 (Base64)。
+    ///
+    /// 这里只能存密文: <see cref="SettingsJsonContext"/> 会把本类所有属性原样写进
+    /// %LOCALAPPDATA%\SnipasteOCR\settings.json, 明文 Key 会被同机其它进程读到。
+    /// 解密失败 (换机器/换账户) 时由界面提示重新输入, 绝不回退明文。
+    /// </summary>
+    public string TranslateApiKeyProtected { get; set; } = "";
+
+    /// <summary>
+    /// 翻译模型名。默认值跟随 DeepSeek 官方当前模型, 但官方会调整/合并模型名,
+    /// 因此放进配置而不是写死在请求代码或界面文案里。
+    /// </summary>
+    public string TranslateModel { get; set; } = "deepseek-flash";
+
+    /// <summary>
+    /// 翻译目标语言。默认自动判断方向 (中文→英文 / 英文→中文);
+    /// 也可固定为 English / 简体中文 / 日本語 / 한국어 或自定义语言名。
+    /// </summary>
+    public string TranslateTargetLanguage { get; set; } = AutoTranslateTarget;
+
+    /// <summary>
+    /// 是否已同意把识别文字发送到 DeepSeek 翻译。
+    /// 默认 false: 首次点「翻译」时明确告知并询问, 拒绝则不发请求。
+    /// </summary>
+    public bool TranslateConsentGiven { get; set; }
 
     /// <summary>跟随系统的开机自启</summary>
     public bool RunAtStartup { get; set; }

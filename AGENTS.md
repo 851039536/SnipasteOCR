@@ -1,7 +1,7 @@
 ﻿# AGENTS.md — SnipasteOCR
 
-仿 Snipaste 的截图 OCR / 标注小工具。.NET 10 WinForms + **NativeAOT**,发布为单个原生 exe(约 159 MB),
-OCR 引擎与中文模型全部内嵌,**完全离线**。
+仿 Snipaste 的截图 OCR / 标注小工具。.NET 10 WinForms + **NativeAOT**,发布为单个原生 exe(约 163 MB),
+OCR 引擎与中文模型全部内嵌,**识别完全离线**;翻译是可选联网功能(默认关闭,只有点「翻译」才调用 DeepSeek API)。
 
 用户文档见 [README.md](README.md)(功能、热键、模型档位、准确率实测数据)。本文件只写给改代码的 Agent。
 
@@ -37,9 +37,14 @@ src/                       产品代码 (唯一的出货工程, 也是唯一的 
   UiTheme.cs               界面配色唯一来源 (强调蓝/深色底; 改主题只改这里)
   OcrPan.cs                结果窗口高倍缩放的平移夹紧 (纯函数; 图片覆盖视口, 小图居中)
   OcrConfidence.cs         置信度展示规则 (低分阈值/百分比格式; 只提示不过滤)
+  TranslateClient.cs       DeepSeek 翻译客户端 (请求/解析/错误映射; JSON 源生成)
+  TranslateForm.cs         独立译文窗口 (只读/复制/Esc; 与结果窗口解耦)
+  TranslateSettingsForm.cs 翻译设置对话框 (Key/模型/目标语言/同意状态)
+  ProtectedKey.cs          API Key 的 DPAPI 加密/解密 (CryptProtectData)
+  ClipboardText.cs         剪贴板文本写入唯一入口 (统一 CRLF)
   NativeMethods.cs         Win32 P/Invoke (消息/热键/窗口/菜单/托盘/输入模拟)
-tests/AnnotationTests/     离线自检, 344 项 (几何/命中/历史/渲染/工具栏/尺寸徽标/放大镜取色/多屏定位/缩放平移/置信度展示/设置迁移/编辑框/OCR 后处理/选词几何/双击选词/CTC 字符框)
-tests/InteractiveTests/    交互自检, 约 119 项 (真实窗口 + 真实按键 + 拖拽实时尺寸 + 多屏定位 + 工具栏 tooltip + 提示文案 + 状态栏省略号 + 托盘菜单文案 + 结果窗口单击复制 + 双击选词/三击选行 + 放大镜/取色 + DPI 基准 + CTC 选词 + 拖出收尾 + 缩放平移 + 置信度可视化 + 绘制缓存失效 + IME, 需要桌面会话)
+tests/AnnotationTests/     离线自检, 400 项 (几何/命中/历史/渲染/工具栏/尺寸徽标/放大镜取色/多屏定位/缩放平移/置信度展示/设置迁移/编辑框/OCR 后处理/选词几何/双击选词/CTC 字符框/翻译客户端)
+tests/InteractiveTests/    交互自检, 130 项 (真实窗口 + 真实按键 + 拖拽实时尺寸 + 多屏定位 + 工具栏 tooltip + 提示文案 + 状态栏省略号 + 托盘菜单文案 + 结果窗口单击复制 + 双击选词/三击选行 + 放大镜/取色 + DPI 基准 + CTC 选词 + 拖出收尾 + 缩放平移 + 置信度可视化 + 绘制缓存失效 + IME + 翻译窗口, 需要桌面会话)
 tools/DriveTest/           端到端驱动实际 exe (真实鼠标键盘事件 + 抓屏取证 + 校验导出图)
 ```
 
@@ -165,6 +170,7 @@ dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
 | `OcrGlyphLayout` | 结果窗口字符命中/高亮 **和** 离线断言; 不可用时统一回退 `OcrSelection.CharIndexFromU` + `_lineCumW` |
 | `SnipMagnifier.ComputeLayout` | 放大镜定位 **和** 离线断言(贴边翻转/夹紧/不盖住光标) |
 | `SnipMagnifier.Sample` / `FormatHex` / `FormatRgb` | 放大镜显示 **和** `C` 键剪贴板 **和** 离线断言 |
+| `ClipboardText.Normalize` | 结果窗口复制 **和** 译文窗口复制 (统一 Windows CRLF, 避免不同入口换行不一致) |
 
 - `OcrBox.TopEdge` 与 `BottomEdge` 的取点顺序必须**同向**(`X1→X2` 与 `X4→X3`),
   否则按同一参数 `u` 插值出的高亮四边形会自交。
@@ -308,6 +314,27 @@ dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
 显式存过的 `false` 也不会被覆盖。结果窗口每次单击都读 `SettingsStore.Current`,因此托盘里切换开关后,
 已经打开的结果窗口会立即响应,不需要重启或重建窗口。
 
+### 翻译 (可选联网)
+
+- **默认不联网**: OCR / 标注路径不得引用网络代码;只有结果窗口的「翻译」按钮发请求。
+  新增任何自动化触发都必须经过显式用户动作。
+- **首次知情同意**: `TranslateConsentGiven` 未置位不得发送;只发 OCR 文字,不发截图;
+  同意状态持久化,剪贴板识别路径复用同一状态,不能每个窗口弹一次。
+- **默认自动方向**: 配置为 `AppSettings.AutoTranslateTarget` 时, 中文原文译英文、英文原文译中文;
+  显式目标语言不得被自动覆盖。方向判断只用于选目标 (`TranslateClient.ResolveDirection`),
+  不是通用语言识别服务。
+- **思考模式必须显式关闭**: 请求体固定 `{"thinking":{"type":"disabled"}}`。官方默认开启,
+  `reasoning_content` 按输出 token 计费,费用与延迟会放大 3~10 倍。
+- **JSON 必须源生成**: 请求/响应用 `TranslateJsonContext`;新增 DTO 要加 `[JsonSerializable]`,
+  不得使用反射式序列化。
+- **Key 不明文落盘**: `AppSettings` 新增 string 会被自动写进 settings.json;Key 必须经
+  `ProtectedKey`(DPAPI + 固定 entropy)加密后存 `TranslateApiKeyProtected`。解密失败提示重新输入,
+  不得回退明文;Key 不进入异常消息、状态栏或日志。
+- **错误映射与重试**: 401/402/422 不重试;429/503 最多退避重试一次;只把中文可操作提示给用户,
+  不把原始 JSON / 异常栈直接抛到界面。
+- **测试不联网**: 离线自检用固定 JSON 断言请求体/解析/错误映射;交互自检向 `TranslateForm`
+  注入假翻译回调,不得发起真实请求。
+
 ### 开机自启 (`StartupRegistration`)
 
 - 写 **HKCU** 的 `Software\Microsoft\Windows\CurrentVersion\Run`,不用 HKLM(HKLM 需要管理员权限,
@@ -387,6 +414,8 @@ dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
 - 扩展项 F-2 跨行拖选、F-4 低分重试、F-5 多栏/竖排、F-6 隐藏识别框、F-7 保存文本/复制原图/
   重新识别、F-8 右键菜单已归档; 热键对话框高 DPI 布局 (ui-review P1-4) 因缺 150% 实机环境归档。
   详见 `docs/archive/ocr-review.md` 第十节与 `docs/archive/ui-review.md`，不要重复排期。
-- **不要尝试加离线截屏翻译**:已在 README 记录评估结论 —— 当前技术栈不可行。
-  `Sdcb.SimdPaddleOCR.OnnxSharp` 的 `DType` 不支持 INT8 量化张量,算子表缺 `LayerNormalization`
-  与 `Attention`;主流可离线分发的 NMT 模型要么体积过大、要么依赖原生 DLL 破坏单文件、要么仅限非商业。
+- **不要再尝试"把翻译模型内嵌进 exe"**:已实测当前 ONNX 引擎跑不了标准 Transformer
+  (`DType` 不支持 INT8、算子表缺 `LayerNormalization`/`Attention`)，内置 NLLB 又有 1.5 GB、
+  原生 DLL 与 CC-BY-NC 许可问题。翻译已按 `docs/translate-review.md` 实施为**可选云端功能**
+  (默认关闭、手动触发、DeepSeek API、独立译文窗口、DPAPI Key)；若要做"完全本地"，
+  正确方向是让用户自建 OpenAI 兼容服务并把请求指向本机，而不是往 exe 里塞模型。

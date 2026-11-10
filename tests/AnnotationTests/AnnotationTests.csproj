@@ -47,6 +47,9 @@
     <Compile Include="..\..\src\OcrSelection.cs" Link="Engine\OcrSelection.cs" />
     <!-- CTC 字符框布局 (纯函数): 真实字符框 -> 光标边界/高亮, 不可用时回退权重 -->
     <Compile Include="..\..\src\OcrGlyphLayout.cs" Link="Engine\OcrGlyphLayout.cs" />
+    <!-- 翻译客户端与 Key 保护 (纯逻辑 + HTTP/DPAPI, 不依赖桌面会话) -->
+    <Compile Include="..\..\src\TranslateClient.cs" Link="Engine\TranslateClient.cs" />
+    <Compile Include="..\..\src\ProtectedKey.cs" Link="Engine\ProtectedKey.cs" />
   </ItemGroup>
 
   <ItemGroup>

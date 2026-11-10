@@ -101,6 +101,14 @@ internal static class Program
             tray.ClickToCopyToggleRequested += want =>
                 SettingsStore.Update(s => s.ClickToCopy = want);
 
+            // 翻译设置: 纯 Win32 菜单无法输入 Key, 必须弹真实对话框。
+            // 这里只保存配置; 真正发请求发生在用户点结果窗口的「翻译」按钮时。
+            tray.TranslateSettingsRequested += () =>
+            {
+                using var dlg = new TranslateSettingsForm();
+                dlg.ShowDialog();
+            };
+
             IntPtr hwnd = tray.WindowHandle;
 
             // 热键来自设置 (默认 F1 / F3), 支持运行期更换; 两个热键各自带修饰键

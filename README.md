@@ -2,7 +2,7 @@
 
 仿 Snipaste 的截图 OCR 小工具:按热键框选屏幕区域,本地离线识别文字,支持部分选词、复制、保存。
 
-基于 .NET 10 WinForms + NativeAOT,发布后是**单个原生 exe**,无需安装 .NET 运行时;OCR 引擎 [SimdPaddleOCR](https://github.com/Sdcb/SimdPaddleOCR) 与中文识别模型全部内嵌,识别过程**完全离线**。
+基于 .NET 10 WinForms + NativeAOT,发布后是**单个原生 exe**,无需安装 .NET 运行时;OCR 引擎 [SimdPaddleOCR](https://github.com/Sdcb/SimdPaddleOCR) 与中文识别模型全部内嵌,识别过程**完全离线**。翻译是**可选的联网功能**,默认关闭,只有主动点「翻译」才会把识别出的文字发送到 DeepSeek。
 
 ## 功能
 
@@ -17,6 +17,9 @@
 - **防止电脑休眠**(托盘菜单勾选,运行期间阻止空闲休眠与息屏,详见下)
 - **结果支持阅读顺序排序与多种导出**(表格 / CSV / 段落 / Markdown),方便从截图里的表格取数
 - **单击识别结果即复制**:结果窗口里点一下文本块就复制该块;托盘菜单可关闭该行为
+- **可选 AI 翻译**(结果窗口 →「翻译」):有选中译选中、未选中译全部,译文在独立窗口对照显示;
+  **默认自动判断中↔英方向**(中文译英文、英文译中文),也可固定目标语言;
+  首次使用会明确提示联网,**识别本身仍全程离线**;API Key 只保存在本机(DPAPI 加密),详见下
 - 支持鼠标右键托盘菜单触发,热键被占用时会提示
 - 识别结果窗口:
   - 按截图原始尺寸 1:1 显示,缩放时窗口跟随图片大小联动
@@ -108,6 +111,10 @@
 | `sortReadingOrder` | 结果是否按阅读顺序重排 | true |
 | `runAtStartup` | 是否开机自启 (与注册表实际状态保持一致) | false |
 | `preventSleep` | 是否防止电脑休眠/息屏 (与真实生效状态保持一致) | false |
+| `translateApiKeyProtected` | DeepSeek API Key 的 DPAPI 密文 (Base64);界面里只显示末 4 位 | 空 |
+| `translateModel` | 翻译模型名 | `deepseek-flash` |
+| `translateTargetLanguage` | 翻译目标语言;`自动（中↔英）` 表示中文译英文、英文译中文 | `自动（中↔英）` |
+| `translateConsentGiven` | 是否已同意把识别文字发送到 DeepSeek | false |
 
 > 配置读写失败 (文件损坏/无权限) 时自动回退默认值,不影响启动。
 > NativeAOT 下 JSON 使用**源生成**序列化 (`SettingsJsonContext`),否则会被裁剪器移除。
@@ -141,7 +148,23 @@
 > 若系统不支持该接口或被安全策略拦截,勾选时会弹窗提示,且勾选会**自动回到未勾选** ——
 > 不会出现"显示开着但其实没生效"的假象。
 
+### 翻译(可选联网)
 
+右键托盘图标 → **翻译设置…** 填写 DeepSeek API Key(在 DeepSeek 平台申请)后,
+在识别结果窗口点「翻译」:
+
+- 有选中文本时只翻译选区,未选中时翻译全部(与「复制」的范围语义一致);
+- **默认自动判断方向**: 中文原文译成英文、英文原文译成中文;也可在翻译设置里固定目标语言;
+- 译文在独立窗口显示,可复制,`Esc` 关闭;
+- 首次点击会明确告知并询问是否允许把**文字**发送到 `api.deepseek.com` ——
+  **不上传截图**,拒绝则不发送;同意状态可在翻译设置里撤销;
+- 单次最多翻译 8000 字,超出部分截断并在窗口标题标注;
+- 自动关闭思考模式(`thinking: disabled`),控制延迟与费用。
+
+> **隐私与离线边界**: OCR 与标注仍然**完全离线**;只有你主动点「翻译」时才会发出一次
+> HTTPS 请求,请求体只有识别出的文字。API Key 用 Windows DPAPI(CurrentUser)加密后写入
+> `settings.json`,换机器/换账户后需要重新输入;程序不记录请求/响应日志。
+> 费用由 DeepSeek 按 token 计费(以其官方价格为准),一屏文字通常在分币级。
 
 ## 系统要求
 
@@ -154,7 +177,7 @@
 
 ## 快速开始(发布产物)
 
-发布后的 `SnipasteOcr.exe` 单文件即可运行(约 162 MB,内含高精度 + 快速两套模型):
+发布后的 `SnipasteOcr.exe` 单文件即可运行(约 163 MB,内含高精度 + 快速两套模型):
 
 ```
 SnipasteOcr.exe      # 启动后驻留系统托盘
@@ -183,7 +206,7 @@ SnipasteOcr.exe      # 启动后驻留系统托盘
 | **平均** | **99.0%** | **95.8%** |
 
 > 结论:屏幕截图通常很清晰,Tiny 在正常字号下完全够用;但**小字和模糊场景** Medium 明显更准。
-> 因为两者都打包进 exe,体积为两者之和(约 162 MB),换来的是随时切换、无需重新发布。
+> 因为两者都打包进 exe,体积为两者之和(约 163 MB),换来的是随时切换、无需重新发布。
 
 切换只需登记请求,真正的模型加载发生在其后的第一次识别(后台线程),不会卡住界面。
 
@@ -242,7 +265,7 @@ dotnet publish src/SnipasteOcr.csproj -c Release -r win-x64 --self-contained -p:
 > `publish.cmd` 由 `cmd.exe` 解析,**必须是不带 BOM 的 GBK + CRLF 行尾**
 > (LF 行尾会让 cmd.exe 吞掉行首字符)。`.gitattributes` 已用 `*.cmd text eol=crlf` 固定行尾。
 
-产物位于 `src/bin/Release/net10.0-windows/win-x64/publish/`,该目录下只有 `SnipasteOcr.exe`(约 162 MB)与 `SnipasteOcr.pdb`,
+产物位于 `src/bin/Release/net10.0-windows/win-x64/publish/`,该目录下只有 `SnipasteOcr.exe`(约 163 MB)与 `SnipasteOcr.pdb`,
 前者单文件即可分发,`.pdb` 是调试符号,**不必随包发布**。
 
 > 发布踩坑:若报 `LNK1104: 无法打开文件 "…\native\SnipasteOcr.exe"`,通常是上一次构建在
@@ -256,11 +279,11 @@ dotnet publish src/SnipasteOcr.csproj -c Release -r win-x64 --self-contained -p:
 标注引擎的几何、命中测试、撤销栈、渲染与交互都有自动化验证。两个工程都**链接产品源码**而非复制,保证验证对象即实际出货代码:
 
 ```powershell
-# 1) 离线自检 (274 项): 几何 / 命中 / 历史 / 像素级渲染 / 工具栏布局 / 尺寸徽标 / 设置迁移 / 文字编辑框 / OCR 后处理 / 选词几何 / CTC 字符框
+# 1) 离线自检 (400 项): 几何 / 命中 / 历史 / 像素级渲染 / 工具栏布局 / 尺寸徽标 / 设置迁移 / 文字编辑框 / OCR 后处理 / 选词几何 / CTC 字符框 / 翻译客户端
 dotnet run --project tests/AnnotationTests                  # 无需桌面会话
 dotnet run --project tests/AnnotationTests -- sample        # 额外输出一张六种标注的样例图, 便于目视确认
 
-# 2) 交互自检 (65 项): 真实窗口/按键、拖拽实时尺寸、托盘文案、单击复制、窗口 DPI 基准与 CTC 选词
+# 2) 交互自检 (130 项): 真实窗口/按键、拖拽实时尺寸、托盘文案、单击复制、窗口 DPI 基准、CTC 选词与翻译窗口
 dotnet run --project tests/InteractiveTests                 # 需要可用的桌面会话 (会真正创建窗口并抓屏)
 
 # 3) 端到端驱动 (可选): 用真实鼠标/键盘事件操作实际出货的 exe, 并抓屏取证
@@ -304,6 +327,11 @@ src/                      # 产品代码 (唯一的出货工程)
 ├── OcrSelection.cs       # 选词几何纯函数 (字符索引反解 / 多选阅读顺序名次)
 ├── OcrGlyphLayout.cs     # CTC 字符框布局 (真实字符边界/高亮; 不可用时回退权重)
 ├── AppSettings.cs        # 配置持久化 + AOT 安全的 JSON 源生成上下文
+├── TranslateClient.cs    # DeepSeek 翻译客户端 (请求/解析/错误映射; 源生成 JSON)
+├── TranslateForm.cs      # 独立译文窗口 (只读/复制/Esc; 与结果窗口解耦)
+├── TranslateSettingsForm.cs # 翻译设置 (Key/模型/目标语言/同意状态)
+├── ProtectedKey.cs       # API Key 的 DPAPI 加密/解密 (CryptProtectData)
+├── ClipboardText.cs      # 剪贴板文本写入唯一入口 (统一 CRLF)
 ├── HotKeyManager.cs      # 全局热键注册/重注册 (支持运行期换键)
 ├── HotKeyForm.cs         # 热键设置对话框 (按键录制)
 ├── TrayController.cs     # Win32 托盘图标 + 模型档位/热键菜单
@@ -315,7 +343,10 @@ src/                      # 产品代码 (唯一的出货工程)
 ## 技术要点
 
 - **NativeAOT + 裁剪**: `IsAotCompatible=true`、`IlcInstructionSet=avx2`;OCR 引擎与模型通过程序集嵌入资源加载,需在 `TrimmerRootAssembly` 中显式保留(**两套模型程序集都要保留**,否则运行时切换会找不到资源),`PublishAot` 默认开启。
-- **AOT 安全的 JSON**: 配置用 `JsonSerializerContext` **源生成**序列化。直接用反射式 `JsonSerializer` 会在裁剪后运行时失败 —— 这是 NativeAOT 最常见的坑之一。
+- **AOT 安全的 JSON**: 配置用 `JsonSerializerContext` **源生成**序列化。直接用反射式 `JsonSerializer` 会在裁剪后运行时失败 —— 这是 NativeAOT 最常见的坑之一。翻译请求/响应同样走 `TranslateJsonContext`,不例外。
+- **翻译不改变离线主路径**: OCR 与标注代码不引用任何网络模块;只有结果窗口点「翻译」时才由独立 `TranslateClient` 发一次 HTTPS 请求。首次点击需知情同意,只发送 OCR 文字、不发送截图。
+- **翻译必须显式关闭思考模式**: DeepSeek 默认开启 thinking,`reasoning_content` 按输出 token 计费并显著拉长等待;请求体固定带 `{"thinking":{"type":"disabled"}}`,并对 429/503 只退避重试一次。
+- **API Key 不明文落盘**: 设置文件在 `%LOCALAPPDATA%` 下、同机进程可读;Key 经 Windows DPAPI(CurrentUser)加密后以 Base64 写入 `translateApiKeyProtected`。换机器/账户解密失败时提示重新输入,绝不回退明文。
 - **模型档位切换**: `OcrService` 用 `_requestedProfile`(int,`Volatile` 读写)记录请求、`_loadedProfile` 记录实际已加载档位,两者不一致时在下一次识别中释放旧引擎并加载新模型。**取引擎与推理在同一个锁内完成**,避免切换时 `Dispose()` 打断另一线程正在进行的 `Run()`。
 - **热键可换不丢**: `HotKeyManager` 换键时**先注册新键,成功后才注销旧键**,失败则回滚保留原热键,避免"换失败导致两个热键都没了"。
 - **表格重建**: 结果块的包围盒先按纵向重叠聚类成行; 列不再按左边界聚类, 而是取「单元格数最多的行」做参考, 把单元格的 `[Left, Right]` 投影到 x 轴, 按区间空隙两侧的单元格数量与宽度选列分隔, 再按最大重叠把单元格归入列带。居中表头与右对齐数字不会再被拆成多列; 跨列表头通常只占一格, 不会被当作参考行桥接列间空白。缺失单元格留空以保持列对齐。**分词行这一步 (`OcrText.ClusterRows`) 与「阅读顺序排序」共用同一实现** —— 两处各写一份的话, 容差一旦漂移就会出现"列表里一行、表格里两行"的不一致。
@@ -350,10 +381,15 @@ src/                      # 产品代码 (唯一的出货工程)
 - 字符级选区优先使用 CTC 真实字符框; 引擎未返回对齐、字符数不一致或竖排行时回退到宽度比例估算(1~2 像素偏差)
 - 竖排文字仍不支持准确选词: 当前投影沿检测框顶边进行, 竖排行会回退到不准确的权重估算
 - 仅支持 x64 Windows;发布产物与编译机架构绑定,换架构需重新 publish
+- 翻译需要联网并自备 DeepSeek API Key,离线环境不可用;单次最多 8000 字,非流式(译文一次性返回)
+- 翻译只发送 OCR 文字,不发送截图;但文字本身可能包含敏感信息,请自行判断是否使用该功能
 
-## 关于「截屏翻译」的可行性结论
+## 关于「翻译」的结论
 
-曾评估加入离线截屏翻译,结论是**当前技术栈下不可行**,记录备查:
+**不内置本地翻译模型**;翻译通过可选的 DeepSeek API 提供(默认关闭、手动触发)。
+完整评审(5 条本地路径对比、接口核对、成本与风险)见 [docs/translate-review.md](docs/translate-review.md)。
+
+早期评估的是"把翻译模型打包进 exe",结论是**当前技术栈下不可行**:
 
 本项目的 `Sdcb.SimdPaddleOCR.OnnxSharp` 虽含通用 ONNX 加载 API(`Model.LoadOnnx` / `InferenceSession`),
 但实测**无法执行通用的 Transformer 翻译模型**:
@@ -368,13 +404,14 @@ src/                      # 产品代码 (唯一的出货工程)
 即**不支持 INT8 量化张量**,而主流可离线分发的 NMT 模型多为 INT8 量化。
 另扫描其算子表,**缺少 `LayerNormalization` 与 `Attention`**,标准 Transformer 无法运行。
 
-其他候选同样不合适:
+其他内置候选同样不合适:
 
 - `LMSupply.Translator`:包内不含模型,运行时从 HuggingFace 联网下载(违背离线)
 - `LocalAI.Translation` (NLLB):模型约 **1.5 GB**,依赖 `Microsoft.ML.OnnxRuntime.DirectML` **原生 DLL**(破坏单文件);且模型为 CC BY-NC 4.0 **仅限非商业**
 
-若将来要做,可行方向是:自备**非量化、且 LayerNorm 已分解为基础算子**的 ONNX 翻译模型,
-或用纯卷积式 NMT 小模型,并同样以嵌入资源方式打包。
+因此当前实现不往 exe 里塞翻译模型:单文件体积与离线识别承诺不变,翻译是显式的可选联网动作。
+若确实需要完全本地,可行路径是自建 OpenAI 兼容服务(Ollama / LM Studio)后把请求指向本机 ——
+这只需要增加 BaseUrl 配置,属于后续扩展点;当前版本固定 DeepSeek 官方端点。
 
 ## 依赖
 

@@ -31,7 +31,7 @@
     但 LNK1104 会原样复现。
 
 .PARAMETER SelfTest
-    发布后运行离线自检 (tests/AnnotationTests, 215 项, 无需桌面会话)。
+    发布后运行离线自检 (tests/AnnotationTests, 400 项, 无需桌面会话)。
     产物能不能跑不等于逻辑没坏, 建议正式出包时开启。
 
 .PARAMETER IncludePdb
@@ -200,7 +200,7 @@ if ($strayDll.Count -gt 0) {
 # 两套模型程序集必须都被嵌入, 否则运行时切换档位会找不到资源
 # 这里通过 exe 体积做粗判: 两套中文模型合计约 138MB, 缺失会显著变小
 if ($exeItem.Length -lt 100MB) {
-    Write-Warn "产物仅 $exeMB MB, 明显小于预期(约 162 MB) —— 可能缺少模型程序集或裁剪过度。"
+    Write-Warn "产物仅 $exeMB MB, 明显小于预期(约 163 MB) —— 可能缺少模型程序集或裁剪过度。"
 } else {
     Write-Ok '体积符合预期 (两套中文模型已内嵌)'
 }
@@ -209,7 +209,7 @@ if ($exeItem.Length -lt 100MB) {
 # 4. 自检 (可选)
 # ---------------------------------------------------------------------------
 if ($SelfTest) {
-    Write-Step '离线自检 (215 项)'
+    Write-Step '离线自检 (400 项)'
     & dotnet run --project (Join-Path $RepoRoot 'tests\AnnotationTests') -c $Configuration
     if ($LASTEXITCODE -ne 0) { throw "自检未通过 (exit $LASTEXITCODE)" }
     Write-Ok '自检通过'
@@ -250,10 +250,11 @@ SnipasteOCR ($stamp)
   F1  截图 OCR   —— 框选区域, 弹出识别结果
   F3  截图标注   —— 框选后可画矩形/椭圆/箭头/画笔/马赛克/文字, 结果复制到剪贴板
 
-右键托盘图标可切换识别模型(高精度 / 快速)与修改热键。
+右键托盘图标可切换识别模型(高精度 / 快速)、修改热键与翻译设置。
 
 系统要求: Windows 10 1809+ / 11 (x64), CPU 需支持 AVX2。
-识别全程离线, 模型已内嵌, 不联网。
+识别全程离线, 模型已内嵌。
+翻译是可选联网功能, 默认关闭: 只有你点结果窗口的「翻译」才会把识别文字发送到 DeepSeek。
 "@
     Set-Content -Path (Join-Path $pkgDir '使用说明.txt') -Value $readme -Encoding UTF8
     Write-Ok '已生成 使用说明.txt'

@@ -1044,7 +1044,79 @@ internal static class InteractiveCheck
             }
         }
 
+        // 17. 翻译窗口: 真实窗口 + 注入假翻译结果, 不联网
+        {
+            // 生产路径是 form.Show(结果窗口); 测试同样给一个 owner, 保持与真实使用一致。
+            using var owner = new Form { Text = "translate-owner", ShowInTaskbar = false };
+            owner.Show();
+            Application.DoEvents();
+
+            using var tr = new TranslateForm(
+                "Hello world", "English", false,
+                _ => Task.FromResult(new TranslateResult(true, "你好，世界", null, 12, 34)));
+            tr.Show(owner);
+            PumpUntil(() => tr.CopyEnabledForTest, 3000);
+            Application.DoEvents();
+
+            Check(tr.SourceTextForTest == "Hello world", "翻译窗口显示原文");
+            Check(tr.TranslationTextForTest == "你好，世界",
+                $"翻译窗口显示译文 (实得 \"{tr.TranslationTextForTest}\")");
+            Check(tr.CopyEnabledForTest, "翻译成功后复制按钮可用");
+            Check(tr.StatusTextForTest.Contains("tokens"),
+                $"状态栏显示 token 用量 (实得 \"{tr.StatusTextForTest}\")");
+
+            Check(InvokeFormCmdKey(tr, Keys.Escape), "Esc 被翻译窗口处理");
+            PumpUntil(() => !tr.Visible, 2000);
+            Check(!tr.Visible,
+                $"Esc 关闭翻译窗口 (visible={tr.Visible}, disposed={tr.IsDisposed}, handle={tr.IsHandleCreated})");
+
+            using var trErr = new TranslateForm(
+                "x", "English", false,
+                _ => Task.FromResult(TranslateResult.Fail("网络不可用")));
+            trErr.Show(owner);
+            PumpUntil(() => trErr.TranslationTextForTest == "网络不可用", 3000);
+            Check(trErr.TranslationTextForTest == "网络不可用",
+                $"失败提示显示在译文区 (实得 \"{trErr.TranslationTextForTest}\")");
+            Check(!trErr.CopyEnabledForTest, "翻译失败时复制按钮保持禁用");
+            trErr.Close();
+            owner.Close();
+
+            // 设置对话框: 只验证 Key 输入与掩码显示, 不点保存 (避免改写真实配置)
+            using var settingsOwner = new Form { ShowInTaskbar = false };
+            settingsOwner.Show();
+            Application.DoEvents();
+            using var settingsForm = new TranslateSettingsForm();
+            settingsForm.Show(settingsOwner);
+            Application.DoEvents();
+            settingsForm.SetKeyTextForTest("sk-test-abcd");
+            Application.DoEvents();
+            Check(settingsForm.KeyBoxTextForTest == "sk-test-abcd", "翻译设置的 Key 输入框可输入");
+            Check(settingsForm.KeyStatusForTest.Contains("****abcd"),
+                $"Key 状态只显示末 4 位 (实得 \"{settingsForm.KeyStatusForTest}\")");
+            settingsForm.Close();
+            settingsOwner.Close();
+        }
+
         return runner.ToResult();
+    }
+
+    /// <summary>泵消息直到条件成立或超时 (翻译窗口的结果是异步回投的)</summary>
+    private static void PumpUntil(Func<bool> condition, int timeoutMs)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        while (!condition() && sw.ElapsedMilliseconds < timeoutMs)
+        {
+            Application.DoEvents();
+            Thread.Sleep(10);
+        }
+    }
+
+    /// <summary>反射调用任意窗体的 ProcessCmdKey, 返回是否被处理 (用于 Esc 关闭路径)</summary>
+    private static bool InvokeFormCmdKey(Form form, Keys key)
+    {
+        var mi = form.GetType().GetMethod("ProcessCmdKey", Priv)!;
+        object?[] args = [default(Message), key];
+        return (bool)mi.Invoke(form, args)!;
     }
 
     /// <summary>

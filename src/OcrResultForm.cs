@@ -76,7 +76,11 @@ public sealed class OcrResultForm : Form
     private readonly ToolStripButton _copyMarkdown = new();
     private readonly ToolStripButton _copySelection = new();
     private readonly ToolStripButton _saveImage = new();
+    private readonly ToolStripButton _translateButton = new();
     private readonly ToolStripButton _closeButton = new();
+
+    /// <summary>当前打开的译文窗口; 再次点「翻译」时先关旧窗, 避免多个窗口显示不同选区</summary>
+    private TranslateForm? _translateForm;
 
     /// <summary>
     /// 工具栏字号 (逻辑像素, 非 pt)。
@@ -244,6 +248,12 @@ public sealed class OcrResultForm : Form
         _saveImage.ToolTipText = "保存截图为 PNG";
         _saveImage.Click += (_, _) => SaveImage();
 
+        // 翻译是显式联网动作: 按钮常驻但识别完成前禁用; 未配置 Key 时点击会打开设置
+        _translateButton.Text = "翻译";
+        _translateButton.ToolTipText = "翻译选中文本；未选中时翻译全部（需联网）";
+        _translateButton.Enabled = false;
+        _translateButton.Click += (_, _) => TranslateSelectionOrAll();
+
         _closeButton.Text = "关闭";
         _closeButton.ToolTipText = "关闭当前窗口";
         _closeButton.Click += (_, _) => this.Close();
@@ -263,6 +273,7 @@ public sealed class OcrResultForm : Form
         _toolStrip.Items.Add(_selectAll);
         _toolStrip.Items.Add(_copySelection);
         _toolStrip.Items.Add(_copyMenu);
+        _toolStrip.Items.Add(_translateButton);
         _toolStrip.Items.Add(new ToolStripSeparator());
         _toolStrip.Items.Add(_saveImage);
         // 右侧组: 分隔线在最左, 因此按"右对齐项从右往左依次排布"的顺序加入,
@@ -1258,27 +1269,99 @@ public sealed class OcrResultForm : Form
         }
     }
 
+    /// <summary>
+    /// 翻译选区或全部文本。顺序: 知情同意 -> 确保有 Key -> 截断 -> 打开独立译文窗口。
+    /// 任何一步不满足都只给提示, 不改动识别结果或剪贴板。
+    /// </summary>
+    private void TranslateSelectionOrAll()
+    {
+        if (!_ocrDone)
+            return;
+
+        string text = HasSelection()
+            ? GetSelectedText()
+            : OcrText.ToPlainText(CurrentLines(), joinAll: true);
+
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            SetStatus("没有可翻译的文本");
+            return;
+        }
+
+        var settings = SettingsStore.Current;
+        if (!settings.TranslateConsentGiven)
+        {
+            // 只在第一次点翻译时询问; 同意状态会落盘, 用户可在翻译设置里撤销
+            var choice = MessageBox.Show(
+                this,
+                "翻译需要联网：本次会把识别出的文字发送到 DeepSeek（api.deepseek.com）进行翻译，不会上传截图。\n\n" +
+                "识别本身仍然全程离线。是否继续？",
+                "翻译需要联网",
+                MessageBoxButtons.OKCancel,
+                MessageBoxIcon.Information,
+                MessageBoxDefaultButton.Button1);
+            if (choice != DialogResult.OK)
+                return;
+
+            SettingsStore.Update(s => s.TranslateConsentGiven = true);
+        }
+
+        if (!ProtectedKey.TryUnprotect(settings.TranslateApiKeyProtected, out string apiKey) ||
+            string.IsNullOrWhiteSpace(apiKey))
+        {
+            using var dlg = new TranslateSettingsForm();
+            dlg.ShowDialog(this);
+
+            settings = SettingsStore.Current;
+            if (!ProtectedKey.TryUnprotect(settings.TranslateApiKeyProtected, out apiKey) ||
+                string.IsNullOrWhiteSpace(apiKey))
+            {
+                SetStatus("未配置 API Key，已打开翻译设置");
+                return;
+            }
+        }
+
+        string limited = TranslateClient.LimitInput(text, out bool truncated);
+        string model = string.IsNullOrWhiteSpace(settings.TranslateModel)
+            ? TranslateClient.DefaultModel
+            : settings.TranslateModel.Trim();
+
+        // 目标语言默认「自动」: 中文译英文、英文译中文; 用户也可在设置里固定方向
+        var direction = TranslateClient.ResolveDirection(limited, settings.TranslateTargetLanguage);
+
+        // 先关旧窗再开新窗: 同一结果窗口只保留一个译文视图, 避免旧译文与当前选区不一致
+        _translateForm?.Close();
+
+        var form = new TranslateForm(
+            limited, direction.Label, truncated,
+            token => TranslateClient.TranslateAsync(limited, direction.Target, model, apiKey, token));
+        form.FormClosed += (_, _) =>
+        {
+            if (ReferenceEquals(_translateForm, form))
+                _translateForm = null;
+        };
+        _translateForm = form;
+        form.Show(this);
+
+        if (truncated)
+            SetStatus($"文本过长，仅翻译前 {TranslateClient.MaxInputChars} 字");
+    }
+
     /// <summary>文本写入剪贴板并在状态栏反馈结果</summary>
     private void CopyText(string text)
     {
         if (string.IsNullOrWhiteSpace(text))
         {
-                SetStatus("没有可复制的文本");
+            SetStatus("没有可复制的文本");
             return;
         }
-        try
+
+        if (ClipboardText.TrySet(text))
         {
-            // Windows 剪贴板文本约定用 CRLF; 选区/全选内部用 \n 拼接, 段落导出用 Environment.NewLine,
-            // 不统一的话同一份内容从不同入口复制出去换行不一致 (粘进旧版记事本可能断行丢失)。
-            string clipboardText = text
-                .Replace("\r\n", "\n")
-                .Replace('\r', '\n')
-                .Replace("\n", Environment.NewLine);
             int charCount = text.Count(c => c != '\r');
-            Clipboard.SetText(clipboardText);
             SetStatus($"已复制 {charCount} 字符");
         }
-        catch
+        else
         {
             SetStatus("复制失败（剪贴板被占用？）");
         }
@@ -1336,6 +1419,7 @@ public sealed class OcrResultForm : Form
                     _lineRank = OcrSelection.BuildReadingRanks(_lines, _wordOrder);
                     _hover = -1;
                     _ocrDone = true;
+                    _translateButton.Enabled = true;
                     _minScale = ComputeFitScale();
                     if (_scale < _minScale) _scale = _minScale;
                     UpdateZoomLabel();
