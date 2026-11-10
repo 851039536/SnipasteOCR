@@ -1065,8 +1065,19 @@ internal static class InteractiveCheck
             Check(tr.StatusTextForTest.Contains("tokens"),
                 $"状态栏显示 token 用量 (实得 \"{tr.StatusTextForTest}\")");
 
-            Check(InvokeFormCmdKey(tr, Keys.Escape), "Esc 被翻译窗口处理");
-            PumpUntil(() => !tr.Visible, 2000);
+            // 走真实按键验证 Esc: 反射调用 ProcessCmdKey 会绕过焦点链,
+            // 掩盖“只读 TextBox 吞掉 Escape”这类真实键盘问题。
+            tr.Activate();
+            SetForegroundWindow(tr.Handle);
+            Application.DoEvents();
+            bool foreground = GetForegroundWindow() == tr.Handle;
+            Check(foreground,
+                $"翻译窗口处于系统前台 (前台=0x{GetForegroundWindow():X}, 窗口=0x{tr.Handle:X})");
+            if (foreground)
+            {
+                SendVirtualKey(0x1B);   // VK_ESCAPE
+                PumpUntil(() => !tr.Visible, 2000);
+            }
             Check(!tr.Visible,
                 $"Esc 关闭翻译窗口 (visible={tr.Visible}, disposed={tr.IsDisposed}, handle={tr.IsHandleCreated})");
 
@@ -1109,14 +1120,6 @@ internal static class InteractiveCheck
             Application.DoEvents();
             Thread.Sleep(10);
         }
-    }
-
-    /// <summary>反射调用任意窗体的 ProcessCmdKey, 返回是否被处理 (用于 Esc 关闭路径)</summary>
-    private static bool InvokeFormCmdKey(Form form, Keys key)
-    {
-        var mi = form.GetType().GetMethod("ProcessCmdKey", Priv)!;
-        object?[] args = [default(Message), key];
-        return (bool)mi.Invoke(form, args)!;
     }
 
     /// <summary>
@@ -1258,6 +1261,10 @@ internal static class InteractiveCheck
 
     [DllImport("user32.dll")]
     private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
 
     [DllImport("user32.dll")]
     private static extern IntPtr GetFocus();

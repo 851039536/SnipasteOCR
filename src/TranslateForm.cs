@@ -20,7 +20,7 @@ internal sealed class TranslateForm : Form
     private readonly ToolStripButton _copy = new();
     private readonly ToolStripButton _close = new();
     private readonly ToolStripLabel _status = new();
-    private readonly CancellationTokenSource _cts = new();
+    private CancellationTokenSource? _cts;
     private readonly Func<CancellationToken, Task<TranslateResult>> _translate;
     private string _translated = "";
 
@@ -82,11 +82,9 @@ internal sealed class TranslateForm : Form
         Controls.Add(layout);
 
         Shown += (_, _) => StartTranslation();
-        // 只在关闭时取消, 不提前 Dispose:
-        // 1) 请求进行中直接 Dispose 会让还在注册取消回调的 HttpClient 抛 ObjectDisposedException;
-        // 2) 请求已完成后再 Dispose, 关闭时的 Cancel() 同样会抛 —— 表现为窗口关不掉。
-        // CTS 本身很轻, 随窗体一起回收即可。
-        FormClosed += (_, _) => _cts.Cancel();
+        // 只取消不释放: 释放由 StartTranslation 的 finally 负责 (请求结束/取消后才安全)。
+        // 关闭时若提前 Dispose, FormClosed 的 Cancel() 会抛 ObjectDisposedException, 窗口就关不掉。
+        FormClosed += (_, _) => _cts?.Cancel();
     }
 
     // ===== 测试钩子 (仅 InteractiveTests 使用, 生产路径不得调用) =====
@@ -154,10 +152,13 @@ internal sealed class TranslateForm : Form
     /// </summary>
     private async void StartTranslation()
     {
+        // 每次翻译窗口只发起一次请求; CTS 由本方法独占, 结束后在 finally 释放
+        var cts = new CancellationTokenSource();
+        _cts = cts;
         try
         {
-            var result = await _translate(_cts.Token);
-            if (_cts.IsCancellationRequested || IsDisposed || Disposing)
+            var result = await _translate(cts.Token);
+            if (cts.IsCancellationRequested || IsDisposed || Disposing)
                 return;
 
             if (result.Ok)
@@ -166,7 +167,8 @@ internal sealed class TranslateForm : Form
                 _translation.Text = result.Text;
                 _copy.Enabled = true;
                 int tokens = result.PromptTokens + result.CompletionTokens;
-                _status.Text = tokens > 0 ? $"完成 · {tokens} tokens" : "完成";
+                string tokenText = tokens > 0 ? $" · {tokens} tokens" : "";
+                _status.Text = "完成" + tokenText + (result.Truncated ? " · 译文可能被截断" : "");
             }
             else
             {
@@ -190,6 +192,12 @@ internal sealed class TranslateForm : Form
                 _translation.Text = "翻译失败：" + ex.Message;
                 _status.Text = "翻译失败";
             }
+        }
+        finally
+        {
+            if (ReferenceEquals(_cts, cts))
+                _cts = null;
+            cts.Dispose();
         }
     }
 

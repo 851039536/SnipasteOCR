@@ -1329,8 +1329,13 @@ public sealed class OcrResultForm : Form
         // 目标语言默认「自动」: 中文译英文、英文译中文; 用户也可在设置里固定方向
         var direction = TranslateClient.ResolveDirection(limited, settings.TranslateTargetLanguage);
 
-        // 先关旧窗再开新窗: 同一结果窗口只保留一个译文视图, 避免旧译文与当前选区不一致
-        _translateForm?.Close();
+        // 已有译文窗口时只激活, 不重新发请求:
+        // Close() 只取消本地 HTTP, 不保证服务端停止计费; 连续点击会重复发送。
+        if (_translateForm is { IsDisposed: false })
+        {
+            _translateForm.Activate();
+            return;
+        }
 
         var form = new TranslateForm(
             limited, direction.Label, truncated,
@@ -1339,8 +1344,13 @@ public sealed class OcrResultForm : Form
         {
             if (ReferenceEquals(_translateForm, form))
                 _translateForm = null;
+
+            // 请求结束后才能再次发起; 结果窗口关闭时不再碰已销毁的控件
+            if (!IsDisposed && !Disposing)
+                _translateButton.Enabled = _ocrDone;
         };
         _translateForm = form;
+        _translateButton.Enabled = false;
         form.Show(this);
 
         if (truncated)

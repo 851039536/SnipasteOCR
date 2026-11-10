@@ -287,17 +287,18 @@ Opus-MT 单方向 fp32 约 300 MB；`Microsoft.ML.OnnxRuntime` 的原生库约 1
 ### 8.1 离线自检（不联网）
 
 - 请求体构造：端点、模型、`thinking` 关闭、`max_tokens`、`temperature` 正确。
-- 响应解析：正常译文、`content=null`、空 `choices`、非 JSON、错误 JSON。
+- 响应解析：正常译文、`content=null`、空 `choices`、非 JSON、错误 JSON；`finish_reason=length` 标记译文可能被截断。
 - 错误映射：401/402/422/429/503 分别落到预期中文提示；429/503 只重试一次。
-- 截断：超过 8000 字符时的提示与发送内容一致。
+- 截断：客户端与 UI 双重截断到 8000 字，`max_tokens` 按截断后的长度计算。
+- 配置兜底：JSON 显式 `null` 的 Key/模型/目标语言归一化为默认值，不触发空引用。
 - Key：DPAPI 往返、换账户解密失败提示、掩码只显示末 4 位。
 - 文本来源：全部文本与选中文本都复用 `OcrText.ToPlainText` / `GetSelectedText` 的语义。
 - 自动方向：中文→English、英文→简体中文、中英混排、显式目标语言不被自动覆盖。
 
 ### 8.2 交互自检
 
-- 识别完成前「翻译」按钮禁用，完成后启用。
-- 点击后弹出独立窗口，焦点正确；`Esc` 关闭并取消请求。
+- 识别完成前「翻译」按钮禁用，完成后启用；翻译进行中禁用，关闭译文窗口后恢复。
+- 点击后弹出独立窗口，焦点正确；`Esc` 用真实按键验证关闭并取消请求（不靠反射调用）。
 - 首次点击弹知情同意；拒绝后不发送；同意后不再重复弹。
 - 断网、错误 Key、余额不足分别给出可操作提示，窗口不崩。
 
@@ -343,7 +344,7 @@ Opus-MT 单方向 fp32 约 300 MB；`Microsoft.ML.OnnxRuntime` 的原生库约 1
 - `src/ProtectedKey.cs` — DPAPI 加密（`CryptProtectData` + 固定 entropy）。
 - `src/TranslateForm.cs` / `src/TranslateSettingsForm.cs` — 译文窗口与设置对话框。
 - `src/ClipboardText.cs` — 剪贴板换行统一入口（结果窗口与译文窗口共用）。
-- `tests/AnnotationTests/TranslateCheck.cs` — 56 项离线断言（请求体/解析/错误/重试/截断/DPAPI）。
+- `tests/AnnotationTests/TranslateCheck.cs` — 64 项离线断言（请求体/解析/错误/重试/截断/DPAPI）。
 - `src/SnipasteOcr.csproj` — `PublishAot`、`InvariantGlobalization`、裁剪根程序集。
 - `scripts/publish.cmd` — AOT 发布与 `-SelfTest` 入口。
 - DeepSeek 官方文档：`https://api-docs.deepseek.com/`（首次调用、模型与价格、思考模式、错误码），
@@ -351,12 +352,15 @@ Opus-MT 单方向 fp32 约 300 MB；`Microsoft.ML.OnnxRuntime` 的原生库约 1
 
 ## 十一、实施结果
 
-- 离线自检：`dotnet run --project tests/AnnotationTests`，**400 项全部通过**（新增翻译 56 项）。
+- 离线自检：`dotnet run --project tests/AnnotationTests`，**408 项全部通过**（新增翻译 64 项）。
 - 交互自检：`dotnet run --project tests/InteractiveTests`，**130 项全部通过**（新增翻译窗口与设置 10 项）。
 - AOT 发布：`scripts/publish.ps1 -OutputDir '' -SelfTest` 成功；publish 目录仍只有
-  `SnipasteOcr.exe` 与 `.pdb`；exe 为 171,136,000 字节（约 163 MiB），较实施前增加约 0.8 MB；
+  `SnipasteOcr.exe` 与 `.pdb`；exe 为 171,137,024 字节（约 163 MiB），较实施前增加约 0.8 MB；
   启动冒烟测试 3 秒后进程仍在运行。
 - 未做真实 API 调用（当前无 Key）：请求体、响应解析、错误映射与重试策略由固定 JSON 离线断言覆盖，
   界面由注入假翻译结果验证。首次实机使用时需确认 401/402 等提示与真实响应一致。
+- 审查修复（`402b131` 之后）：配置字符串 `null` 兜底、客户端强制 8000 字上限、
+  `finish_reason=length` 截断提示、翻译期间禁止重复发起、Esc 改为真实按键验证、
+  CTS 所有权收敛到异步方法、system prompt 增加提示注入防护。
 - 产品入口：结果窗口工具栏「翻译」；托盘菜单「翻译设置…」。
 - 隐私：识别全程离线不变；首次点翻译弹知情同意；只发送 OCR 文字；Key 用 DPAPI 加密。

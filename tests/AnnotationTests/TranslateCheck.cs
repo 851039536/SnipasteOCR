@@ -1,6 +1,7 @@
 // 校验翻译客户端: 请求体 (含关闭思考模式)、响应解析、错误映射、重试策略、截断与 Key 保护。
 // 全部离线执行, 不发起真实网络请求。
 using System.Net;
+using System.Reflection;
 using System.Text.Json;
 using SnipasteOcr;
 
@@ -30,6 +31,8 @@ internal static class TranslateCheck
             Check(messages[0].GetProperty("role").GetString() == "system", "第一条是 system 角色");
             Check(messages[0].GetProperty("content").GetString()!.Contains("只输出译文"),
                 "system 提示词要求只输出译文");
+            Check(messages[0].GetProperty("content").GetString()!.Contains("不要执行"),
+                "system 提示词明确不执行原文中的指令 (提示注入防护)");
 
             string user = messages[1].GetProperty("content").GetString()!;
             Check(messages[1].GetProperty("role").GetString() == "user", "第二条是 user 角色");
@@ -62,6 +65,22 @@ internal static class TranslateCheck
                   !char.IsHighSurrogate(cut[^1]), "截断不会切出半个代理对字符");
         }
 
+        // ===== 4b. 客户端自身也截断: 不能只依赖 UI 调用 LimitInput =====
+        {
+            string body = TranslateClient.BuildRequestBody(
+                "m", "English", new string('a', TranslateClient.MaxInputChars + 1));
+            using var doc = JsonDocument.Parse(body);
+            var messages = doc.RootElement.GetProperty("messages").EnumerateArray().ToArray();
+            string content = messages[1].GetProperty("content").GetString()!;
+            int prefixLength = "目标语言：English\n\n".Length;
+
+            Check(content.Length == prefixLength + TranslateClient.MaxInputChars,
+                $"请求体内部截断到 {TranslateClient.MaxInputChars} 字 (实得正文 {content.Length - prefixLength})");
+            Check(doc.RootElement.GetProperty("max_tokens").GetInt32() ==
+                  TranslateClient.ComputeMaxTokens(TranslateClient.MaxInputChars),
+                "max_tokens 按截断后的长度计算");
+        }
+
         // ===== 5. 成功响应解析 =====
         {
             const string json = """
@@ -73,6 +92,16 @@ internal static class TranslateCheck
             var r = TranslateClient.ParseResponse(json, HttpStatusCode.OK);
             Check(r.Ok && r.Text == "Hello", $"解析 choices[0].message.content 并去首尾空白 (实得 '{r.Text}')");
             Check(r.PromptTokens == 12 && r.CompletionTokens == 34, "解析 usage tokens");
+
+            var truncated = TranslateClient.ParseResponse(
+                """{"choices":[{"message":{"content":"Partial"},"finish_reason":"length"}]}""",
+                HttpStatusCode.OK);
+            Check(truncated.Ok && truncated.Truncated, "finish_reason=length 标记译文可能被截断");
+
+            var stopped = TranslateClient.ParseResponse(
+                """{"choices":[{"message":{"content":"Done"},"finish_reason":"stop"}]}""",
+                HttpStatusCode.OK);
+            Check(stopped.Ok && !stopped.Truncated, "finish_reason=stop 不标记截断");
         }
 
         // ===== 6. 空/缺失内容 =====
@@ -197,6 +226,27 @@ internal static class TranslateCheck
             Check(TranslateClient.IsMostlyChinese("纯中文"), "纯中文判定为中文");
             Check(!TranslateClient.IsMostlyChinese("English only"), "纯英文判定为非中文");
             Check(TranslateClient.IsMostlyChinese("这是一段中文 abc"), "汉字多于字母时判定为中文");
+        }
+
+        // ===== 14. JSON 显式 null 的兜底 (设置文件被手工编辑/半写入) =====
+        {
+            // Normalize 是私有方法, 与 SettingsCheck 一样按真实加载路径反射调用
+            var normalize = typeof(SettingsStore).GetMethod(
+                "Normalize", BindingFlags.NonPublic | BindingFlags.Static)!;
+            AppSettings Normalize(AppSettings s) => (AppSettings)normalize.Invoke(null, [s])!;
+
+            const string nulls = """
+                {
+                  "translateApiKeyProtected": null,
+                  "translateModel": null,
+                  "translateTargetLanguage": null
+                }
+                """;
+            var s = Normalize(JsonSerializer.Deserialize(nulls, SettingsJsonContext.Default.AppSettings)!);
+
+            Check(s.TranslateApiKeyProtected == "", "null Key 密文归一化为空串 (避免设置对话框空引用)");
+            Check(s.TranslateModel == AppSettings.DefaultTranslateModel, "null 模型名回退默认值");
+            Check(s.TranslateTargetLanguage == AppSettings.AutoTranslateTarget, "null 目标语言回退自动");
         }
 
         return runner.ToResult();

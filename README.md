@@ -279,7 +279,7 @@ dotnet publish src/SnipasteOcr.csproj -c Release -r win-x64 --self-contained -p:
 标注引擎的几何、命中测试、撤销栈、渲染与交互都有自动化验证。两个工程都**链接产品源码**而非复制,保证验证对象即实际出货代码:
 
 ```powershell
-# 1) 离线自检 (400 项): 几何 / 命中 / 历史 / 像素级渲染 / 工具栏布局 / 尺寸徽标 / 设置迁移 / 文字编辑框 / OCR 后处理 / 选词几何 / CTC 字符框 / 翻译客户端
+# 1) 离线自检 (408 项): 几何 / 命中 / 历史 / 像素级渲染 / 工具栏布局 / 尺寸徽标 / 设置迁移 / 文字编辑框 / OCR 后处理 / 选词几何 / CTC 字符框 / 翻译客户端
 dotnet run --project tests/AnnotationTests                  # 无需桌面会话
 dotnet run --project tests/AnnotationTests -- sample        # 额外输出一张六种标注的样例图, 便于目视确认
 

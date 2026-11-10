@@ -15,6 +15,9 @@ public sealed class AppSettings
     /// </summary>
     public const string AutoTranslateTarget = "自动（中↔英）";
 
+    /// <summary>默认翻译模型名 (与 TranslateClient 共用, 避免两处各写一份)</summary>
+    public const string DefaultTranslateModel = "deepseek-flash";
+
     /// <summary>上次选择的识别模型档位</summary>
     public OcrModelProfile ModelProfile { get; set; } = OcrModelProfile.Medium;
 
@@ -66,7 +69,7 @@ public sealed class AppSettings
     /// 翻译模型名。默认值跟随 DeepSeek 官方当前模型, 但官方会调整/合并模型名,
     /// 因此放进配置而不是写死在请求代码或界面文案里。
     /// </summary>
-    public string TranslateModel { get; set; } = "deepseek-flash";
+    public string TranslateModel { get; set; } = DefaultTranslateModel;
 
     /// <summary>
     /// 翻译目标语言。默认自动判断方向 (中文→英文 / 英文→中文);
@@ -190,6 +193,16 @@ public static class SettingsStore
         // 用户显式存过的 0 (确实不要修饰键) 不受影响。
         if (s.HotKeyImageModifiers < 0)
             s.HotKeyImageModifiers = s.HotKeyModifiers;
+
+        // JSON 里显式写 null 不会被反序列化拒绝 (默认不支持 nullable 注解校验),
+        // 这里必须兜底: 否则托盘打开翻译设置时 .Length 会抛 NullReferenceException。
+        if (string.IsNullOrEmpty(s.TranslateApiKeyProtected))
+            s.TranslateApiKeyProtected = "";
+        if (string.IsNullOrWhiteSpace(s.TranslateModel))
+            s.TranslateModel = AppSettings.DefaultTranslateModel;
+        if (string.IsNullOrWhiteSpace(s.TranslateTargetLanguage))
+            s.TranslateTargetLanguage = AppSettings.AutoTranslateTarget;
+
         return s;
     }
 
