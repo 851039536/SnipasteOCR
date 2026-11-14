@@ -44,8 +44,8 @@ src/                       产品代码 (唯一的出货工程, 也是唯一的 
   ProtectedKey.cs          API Key 的 DPAPI 加密/解密 (CryptProtectData)
   ClipboardText.cs         剪贴板文本写入唯一入口 (统一 CRLF)
   NativeMethods.cs         Win32 P/Invoke (消息/热键/窗口/菜单/托盘/输入模拟)
-tests/AnnotationTests/     离线自检, 434 项 (几何/命中/历史/渲染/工具栏/尺寸徽标/放大镜取色/多屏定位/缩放平移/置信度展示/设置迁移/编辑框/OCR 后处理/选词几何/双击选词/CTC 字符框/翻译客户端/译文条布局)
-tests/InteractiveTests/    交互自检, 151 项 (真实窗口 + 真实按键 + 拖拽实时尺寸 + 多屏定位 + 工具栏 tooltip + 提示文案 + 状态栏省略号 + 托盘菜单文案 + 结果窗口单击复制/单击翻译 + 底部译文条 + 双击选词/三击选行 + 放大镜/取色 + DPI 基准 + CTC 选词 + 拖出收尾 + 缩放平移 + 置信度可视化 + 绘制缓存失效 + IME + 翻译窗口与居中 + Ctrl+回车直接识别 + 延时截图 + 贴图 DPI, 需要桌面会话)
+tests/AnnotationTests/     离线自检, 451 项 (几何/标注拖拽约束/命中/历史/渲染/工具栏/尺寸徽标/放大镜取色/多屏定位/缩放平移/置信度展示/设置迁移/编辑框/OCR 后处理/选词几何/双击选词/CTC 字符框/翻译客户端/译文条布局)
+tests/InteractiveTests/    交互自检, 163 项 (真实窗口 + 真实按键 + Ctrl 约束绘制 + 重复上次识别 + 拖拽实时尺寸 + 多屏定位 + 工具栏 tooltip + 提示文案 + 状态栏省略号 + 托盘菜单文案 + 结果窗口单击复制/单击翻译 + 底部译文条 + 双击选词/三击选行 + 放大镜/取色 + DPI 基准 + CTC 选词 + 拖出收尾 + 缩放平移 + 置信度可视化 + 绘制缓存失效 + IME + 翻译窗口与居中 + Ctrl+回车直接识别 + 延时截图 + 贴图 DPI, 需要桌面会话)
 tools/DriveTest/           端到端驱动实际 exe (真实鼠标键盘事件 + 抓屏取证 + 校验导出图)
 ```
 
@@ -55,6 +55,7 @@ tools/DriveTest/           端到端驱动实际 exe (真实鼠标键盘事件 +
 | --- | --- |
 | `Annotation.cs` | 单条标注模型: 几何 / 命中测试 / 克隆 / 平移 |
 | `AnnotationTool.cs` | 工具枚举与展示元数据 |
+| `AnnotationDrag.cs` | 拖拽 Ctrl 约束 (矩形/椭圆变正, 箭头吸附 8 方向; 预览与提交共用) |
 | `AnnotationEngine.cs` | 渲染引擎 (六种工具 + 马赛克像素化 + 箭头几何) |
 | `AnnotationHistory.cs` | 撤销/重做 (快照模型, 深度上限 100) |
 | `AnnotationToolbar.cs` | 自绘工具栏 (图标全矢量) |
@@ -79,10 +80,10 @@ dotnet publish src/SnipasteOcr.csproj -c Release -r win-x64 --self-contained -p:
 ```
 
 ```powershell
-# 离线自检 (434 项), 无需桌面会话 —— 改完必跑
+# 离线自检 (451 项), 无需桌面会话 —— 改完必跑
 dotnet run --project tests/AnnotationTests              # 期望输出「全部通过」, 退出码 0
 dotnet run --project tests/AnnotationTests -- sample    # 额外输出六种标注样例图
-# 交互自检 (151 项) —— 需要可用的桌面会话
+# 交互自检 (163 项) —— 需要可用的桌面会话
 dotnet run --project tests/InteractiveTests
 # 端到端驱动实际 exe (可选)
 dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
@@ -159,9 +160,10 @@ dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
 | `AnnotationEngine.OutlineColorFor` | 文字标注描边 **和** 正在输入的编辑框描边 |
 | `AnnotationEngine.Draw` | 覆盖层实时预览 **和** 最终合成导出 |
 | `AnnotationToolbar.ComputeLayout`(私有,内部共用) | 工具栏绘制 **和** 宽度测量(`MeasurePreferredWidth`) |
-| `SnipGeometry.ExportRect` | 实时尺寸徽标 **和** `RenderResult` 裁剪导出 **和** 无效选区兜底 **和** 结果窗口的屏幕锚点 |
+| `SnipGeometry.ExportRect` | 实时尺寸徽标 **和** `RenderResult` 裁剪导出 **和** 无效选区兜底 **和** 结果窗口的屏幕锚点 **和** 重复上次识别的区域记录 |
 | `SnipGeometry.PickScreen` / `ToolbarLocation` | 覆盖层工具栏定位 **和** 多屏离线断言(夹紧边界必须是选区所在屏, 不是虚拟屏) |
 | `UiTheme` | 覆盖层/标注工具栏/尺寸徽标/放大镜/结果窗口/菜单的强调色、深色底与弱化文本颜色(只收拢相同 ARGB, 不合并相近色) |
+| `AnnotationDrag.ConstrainEnd` | 标注拖拽实时预览 **和** 松手提交 (否则松手瞬间形状跳变) |
 | `OcrPan` | 结果窗口平移偏移夹紧 **和** 离线断言; 缩放锚点反推也用它夹紧, 手写第二份范围公式会拖出背景空白 |
 | `OcrConfidence` | 低置信度框标橙 **和** 悬停状态栏百分比; 阈值/格式化只写一份 |
 | `SnipGeometry.MinDragSide` / `IsValidSelection` | 拖拽/松手判定 **和** 遮罩绘制 **和** 导出判据 |
@@ -231,6 +233,11 @@ dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
   两条路径共用 `ConfirmCore(toOcr)`。
 - **F3 复制/保存失败不得关窗**: 剪贴板被占用、磁盘无权限时保留覆盖层并明确提示。
   踩过的坑: 原先先 `Close()` 再 `Clipboard.SetImage`, 失败被静默吞掉, 用户标注完的截图直接消失。
+- **重复上次识别先藏自己的窗口**: 上一次结果窗口常盖在目标区域上, 直接 `CopyFromScreen` 会把结果窗口
+  自己截进去。`SnipCoordinator.RepeatLastOcr` 抓屏前隐藏 `_openForms` 里的可见窗体, 抓完用
+  `SW_SHOWNA` 恢复(不抢焦点); 区域只记录真正送 OCR 的路径, 且必须完整落在当前虚拟屏内。
+- **Ctrl 约束拖拽只有一份几何**: 实时预览与松手提交都走 `AnnotationDrag.ConstrainEnd`;
+  两边各算一份会在松手瞬间跳变。
 - **延时截图必须用 WinForms Timer**: 覆盖层是 WinForms 窗体, 必须在创建托盘/热键的 UI 线程构造;
   `Task.Delay` + 后台线程会跨线程建窗体。延时入口只放托盘菜单, 不改变 F1/F3 的即时性;
   直接按热键会取消尚未到期的延时, 避免稍后突然弹出第二个覆盖层。

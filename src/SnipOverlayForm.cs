@@ -268,6 +268,13 @@ public sealed class SnipOverlayForm : Form
         FontSize = AnnotationEngine.DefaultFontSize * ScaleFactor,
     };
 
+    /// <summary>
+    /// 拖拽终点的 Ctrl 约束 (矩形/椭圆变正, 箭头吸附 8 方向)。
+    /// 实时预览与松手提交必须都走这里, 否则会看到"松手瞬间变形"。
+    /// </summary>
+    private static PointF ConstrainDragEnd(AnnotationTool tool, PointF start, PointF end)
+        => AnnotationDrag.ConstrainEnd(tool, start, end, (Control.ModifierKeys & Keys.Control) != 0);
+
     // ===== 绘制 =====
 
     /// <summary>绘制: 全屏底图 + 选区遮罩 + 标注 (已完成 + 拖拽中) + 工具栏</summary>
@@ -525,7 +532,7 @@ public sealed class SnipOverlayForm : Form
             }
             else
             {
-                pending.End = phys;
+                pending.End = ConstrainDragEnd(pending.Tool, pending.Start, phys);
             }
             Invalidate();
             return;
@@ -561,7 +568,7 @@ public sealed class SnipOverlayForm : Form
             }
             else
             {
-                pending.End = phys;
+                pending.End = ConstrainDragEnd(pending.Tool, pending.Start, phys);
             }
 
             // 形状过小则不记录 (避免撤销栈里全是误点产生的垃圾)
@@ -1031,6 +1038,9 @@ public sealed class SnipOverlayForm : Form
 
         if (toOcr)
         {
+            // 记住上次区域, 供托盘「重复上次识别」直接截同一块屏;
+            // 只记录真正送 OCR 的路径, 图片复制/保存不应改写它。
+            SnipCoordinator.RememberOcrRegion(anchor);
             Close();
             if (launcher is { } launch)
                 launch(crop, anchor);

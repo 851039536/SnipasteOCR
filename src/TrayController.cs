@@ -28,6 +28,7 @@ public sealed class TrayController : IDisposable
     private const int CMD_DELAY_3_IMAGE = 0x100C;
     private const int CMD_DELAY_5_OCR = 0x100D;
     private const int CMD_DELAY_5_IMAGE = 0x100E;
+    private const int CMD_REPEAT_LAST_OCR = 0x100F;
     private static readonly uint TRAY_CALLBACK = User32.WM_APP + 1;
 
     // 静态持有: 窗口过程委托必须防止被 GC; 单实例引用用于回调
@@ -53,6 +54,9 @@ public sealed class TrayController : IDisposable
     public event Action? HotKeyChangeRequested;
     /// <summary>用户要求识别剪贴板中的图片</summary>
     public event Action? OcrClipboardRequested;
+
+    /// <summary>用户要求重复上一次 OCR 的屏幕区域</summary>
+    public event Action? RepeatLastOcrRequested;
     /// <summary>
     /// 用户切换"开机自动启动" (参数为期望的新状态)。
     /// 实际写注册表由 Program 处理, 并回读真实结果后回调 <see cref="SyncStartupCheck"/> 纠正勾选,
@@ -143,6 +147,7 @@ public sealed class TrayController : IDisposable
         User32.AppendMenu(_hMenu, User32.MF_STRING, (IntPtr)CMD_SNIP_OCR, "截图识别 (F1)");
         User32.AppendMenu(_hMenu, User32.MF_STRING, (IntPtr)CMD_SNIP_IMAGE, "截图标注 (F3)");
         User32.AppendMenu(_hMenu, User32.MF_STRING, (IntPtr)CMD_OCR_CLIPBOARD, "识别剪贴板图片");
+        User32.AppendMenu(_hMenu, User32.MF_STRING, (IntPtr)CMD_REPEAT_LAST_OCR, "重复上次识别");
         User32.AppendMenu(_hMenu, User32.MF_SEPARATOR, IntPtr.Zero, null);
         User32.AppendMenu(_hMenu, User32.MF_STRING | User32.MF_POPUP, _hModelMenu, "识别模型");
         User32.AppendMenu(_hMenu, User32.MF_STRING | User32.MF_POPUP, _hDelayMenu, "延时截图");
@@ -253,6 +258,9 @@ public sealed class TrayController : IDisposable
                 break;
             case CMD_OCR_CLIPBOARD:
                 _instance?.OcrClipboardRequested?.Invoke();
+                break;
+            case CMD_REPEAT_LAST_OCR:
+                _instance?.RepeatLastOcrRequested?.Invoke();
                 break;
             case CMD_DELAY_3_OCR:
                 _instance?.DelayedSnipRequested?.Invoke(SnipMode.Ocr, 3);

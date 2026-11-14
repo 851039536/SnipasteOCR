@@ -673,7 +673,9 @@ public sealed class AnnotationToolbar : Control
         if (toolIndex >= 0)
         {
             var tool = AnnotationToolInfo.AllTools[toolIndex];
-            return $"{AnnotationToolInfo.DisplayName(tool)} ({AnnotationToolInfo.ShortcutDigit(tool)})";
+            string name = $"{AnnotationToolInfo.DisplayName(tool)} ({AnnotationToolInfo.ShortcutDigit(tool)})";
+            string hint = AnnotationToolInfo.ConstraintHint(tool);
+            return hint.Length == 0 ? name : $"{name} · {hint}";
         }
         if (colorIndex >= 0)
             return "颜色: 点击循环切换";

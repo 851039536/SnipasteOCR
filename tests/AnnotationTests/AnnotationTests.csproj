@@ -21,6 +21,7 @@
   <ItemGroup>
     <Compile Include="..\..\src\Annotations\Annotation.cs" Link="Engine\Annotation.cs" />
     <Compile Include="..\..\src\Annotations\AnnotationTool.cs" Link="Engine\AnnotationTool.cs" />
+    <Compile Include="..\..\src\Annotations\AnnotationDrag.cs" Link="Engine\AnnotationDrag.cs" />
     <Compile Include="..\..\src\Annotations\AnnotationEngine.cs" Link="Engine\AnnotationEngine.cs" />
     <Compile Include="..\..\src\Annotations\AnnotationHistory.cs" Link="Engine\AnnotationHistory.cs" />
     <Compile Include="..\..\src\Annotations\AnnotationToolbar.cs" Link="Engine\AnnotationToolbar.cs" />

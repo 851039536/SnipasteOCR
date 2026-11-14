@@ -67,6 +67,18 @@ internal static class Program
                 }
             };
 
+            // 重复上次 OCR 区域: 屏幕布局变了或还没识别过时明确提示, 不静默失败
+            tray.RepeatLastOcrRequested += () =>
+            {
+                if (!SnipCoordinator.RepeatLastOcr())
+                {
+                    MessageBox.Show(
+                        "没有可重复的识别区域。\n\n请先用 F1 框选识别一次；" +
+                        "如果刚才换过显示器或分辨率，请重新框选。",
+                        "SnipasteOCR", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+            };
+
             // 延时截图: 给用户时间先打开要截的菜单/下拉框; 气泡提示倒计时开始
             tray.DelayedSnipRequested += (mode, seconds) =>
             {

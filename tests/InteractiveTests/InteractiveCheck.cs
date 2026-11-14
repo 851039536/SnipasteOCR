@@ -316,6 +316,53 @@ internal static class InteractiveCheck
                     $"移动选区后徽标跟随到新位置 (新位置={movedPixels}, 旧位置={stalePixels})");
             }
 
+            // 8b. Ctrl 约束绘制: 真实按下 Ctrl 后, 矩形拖拽必须变正方形。
+            //     预览与松手提交共用 AnnotationDrag.ConstrainEnd, 这里直接检查提交后的几何。
+            annotations.Clear();
+            toolbar.SetTool(AnnotationTool.Rectangle);
+            Application.DoEvents();
+
+            var ctrlStart = new Point(360, 260);
+            var ctrlEnd = new Point(520, 320);   // 160x60, Ctrl 后应变成 160x160
+            int annotationsBefore = annotations.Count;
+            keybd_event(0x11, 0, 0, IntPtr.Zero); // VK_CONTROL down
+            try
+            {
+                // keybd_event 走系统输入队列; 必须泵一次消息, 本线程的 ModifierKeys 才读到新状态
+                Application.DoEvents();
+                Thread.Sleep(20);
+                Application.DoEvents();
+                Check((Control.ModifierKeys & Keys.Control) != 0,
+                    $"测试注入的 Ctrl 已生效 (实得 {Control.ModifierKeys})");
+                mouseDown.Invoke(form, [MouseArgs(ctrlStart)]);
+                mouseMove.Invoke(form, [MouseArgs(ctrlEnd)]);
+
+                // 预览态也必须已经是正方形: 预览与松手提交共用同一约束函数, 不能只在提交时修正
+                var pending = (Annotation?)typeof(SnipOverlayForm)
+                    .GetField("_pending", Priv)!.GetValue(form);
+                var preview = pending?.Bounds ?? RectangleF.Empty;
+                Check(pending is not null && Math.Abs(preview.Width - preview.Height) < 0.5f,
+                    $"Ctrl 拖拽预览即为正方形 (实得 {preview.Width:F1}x{preview.Height:F1})");
+
+                mouseUp.Invoke(form, [MouseArgs(ctrlEnd)]);
+            }
+            finally
+            {
+                keybd_event(0x11, 0, 0x0002, IntPtr.Zero); // KEYEVENTF_KEYUP
+            }
+
+            Check(annotations.Count == annotationsBefore + 1,
+                $"Ctrl 拖拽提交 1 条标注 (实得 {annotations.Count - annotationsBefore})");
+            if (annotations.Count > 0)
+            {
+                var constrained = annotations[^1];
+                var cb = constrained.Bounds;
+                Check(constrained.Tool == AnnotationTool.Rectangle, "Ctrl 拖拽生成矩形标注");
+                Check(Math.Abs(cb.Width - cb.Height) < 0.5f,
+                    $"Ctrl 拖拽矩形宽高相等 (实得 {cb.Width:F1}x{cb.Height:F1})");
+                Check(cb.Width > 100f, $"Ctrl 正方形保留较长边 (实得 {cb.Width:F1})");
+            }
+
             // 9. 识别模式不应出现「可点但无反应」的贴图按钮
             Check(toolbar.ShowPin, "图片模式显示贴图按钮");
             using (var ocrOverlay = new SnipOverlayForm(SnipMode.Ocr))
@@ -367,6 +414,8 @@ internal static class InteractiveCheck
                     $"默认菜单显示 F1 (实得 \"{MenuText(hMenu, 0x1000)}\")");
                 Check(MenuText(hMenu, 0x1001).Contains("F3", StringComparison.Ordinal),
                     $"默认菜单显示 F3 (实得 \"{MenuText(hMenu, 0x1001)}\")");
+                Check(MenuText(hMenu, 0x100F) == "重复上次识别",
+                    $"菜单包含「重复上次识别」(实得 \"{MenuText(hMenu, 0x100F)}\")");
 
                 tray.SyncHotKeyLabels(0x51, 0x2 | 0x1, 0x2C, 0x4);   // Ctrl+Alt+Q / Shift+PrintScreen
                 string ocrText = MenuText(hMenu, 0x1000);
@@ -1261,6 +1310,57 @@ internal static class InteractiveCheck
                 Check(pin.ClientSize == expected,
                     $"贴图按窗口 DPI 换算尺寸 (实得 {pin.ClientSize}, 期望 {expected})");
                 pin.Close();
+            }
+        }
+
+        // 22. 重复上次识别: 记住区域 -> 直接截同一块屏幕, 不经过覆盖层/OCR 引擎
+        {
+            var vs = SystemInformation.VirtualScreen;
+            var region = new Rectangle(vs.Left + 10, vs.Top + 10, 120, 80);
+            SnipCoordinator.RememberOcrRegion(region);
+            Check(SnipCoordinator.LastOcrRegionForTest == region, "记住上次 OCR 区域");
+
+            Bitmap? captured = null;
+            Rectangle? capturedAnchor = null;
+            var savedLauncher = SnipCoordinator.OcrResultLauncherForTest;
+            SnipCoordinator.OcrResultLauncherForTest = (bmp, anchor) =>
+            {
+                captured = bmp;
+                capturedAnchor = anchor;
+            };
+            try
+            {
+                bool ok = SnipCoordinator.RepeatLastOcr();
+                Check(ok, "重复上次识别返回成功");
+                Check(captured is not null && captured.Size == region.Size,
+                    $"重复截图尺寸等于上次区域 (实得 {captured?.Size}, 期望 {region.Size})");
+                Check(capturedAnchor == region,
+                    $"重复识别锚点等于上次区域 (实得 {capturedAnchor}, 期望 {region})");
+                captured?.Dispose();
+                captured = null;
+            }
+            finally
+            {
+                SnipCoordinator.OcrResultLauncherForTest = savedLauncher;
+            }
+
+            // 区域不在当前虚拟屏内 (换显示器/改分辨率) 时必须拒绝, 而不是截到桌面空白
+            int invalidLaunches = 0;
+            SnipCoordinator.RememberOcrRegion(new Rectangle(vs.Right + 100, vs.Bottom + 100, 50, 50));
+            SnipCoordinator.OcrResultLauncherForTest = (bmp, _) =>
+            {
+                invalidLaunches++;
+                bmp.Dispose();
+            };
+            try
+            {
+                Check(!SnipCoordinator.RepeatLastOcr(), "屏幕布局变化后拒绝重复上次区域");
+                Check(invalidLaunches == 0, "失效区域不打开结果窗口");
+            }
+            finally
+            {
+                SnipCoordinator.OcrResultLauncherForTest = savedLauncher;
+                SnipCoordinator.RememberOcrRegion(region);   // 恢复有效区域, 避免影响后续用例
             }
         }
 

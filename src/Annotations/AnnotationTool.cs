@@ -62,6 +62,15 @@ public static class AnnotationToolInfo
         tool is AnnotationTool.Rectangle or AnnotationTool.Ellipse
              or AnnotationTool.Arrow or AnnotationTool.Mosaic;
 
+    /// <summary>拖拽时的 Ctrl 约束说明 (无约束返回空串); 与 <see cref="AnnotationDrag"/> 的能力对应</summary>
+    public static string ConstraintHint(AnnotationTool tool) => tool switch
+    {
+        AnnotationTool.Rectangle => "Ctrl 变正方形",
+        AnnotationTool.Ellipse => "Ctrl 变正圆",
+        AnnotationTool.Arrow => "Ctrl 吸附 45°",
+        _ => string.Empty,
+    };
+
     /// <summary>所有可选工具, 供工具栏按顺序创建按钮</summary>
     public static readonly AnnotationTool[] AllTools =
     [
