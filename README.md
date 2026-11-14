@@ -405,7 +405,7 @@ src/                      # 产品代码 (唯一的出货工程)
 ## 关于「翻译」的结论
 
 **不内置本地翻译模型**;翻译通过可选的 DeepSeek API 提供(默认关闭、手动触发)。
-完整评审(5 条本地路径对比、接口核对、成本与风险)见 [docs/translate-review.md](docs/translate-review.md)。
+完整评审(5 条本地路径对比、接口核对、成本与风险)见 [docs/archive/translate-review.md](docs/archive/translate-review.md)。
 
 早期评估的是"把翻译模型打包进 exe",结论是**当前技术栈下不可行**:
 

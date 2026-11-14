@@ -451,6 +451,6 @@ dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
   详见 `docs/archive/ocr-review.md` 第十节与 `docs/archive/ui-review.md`，不要重复排期。
 - **不要再尝试"把翻译模型内嵌进 exe"**:已实测当前 ONNX 引擎跑不了标准 Transformer
   (`DType` 不支持 INT8、算子表缺 `LayerNormalization`/`Attention`)，内置 NLLB 又有 1.5 GB、
-  原生 DLL 与 CC-BY-NC 许可问题。翻译已按 `docs/translate-review.md` 实施为**可选云端功能**
+  原生 DLL 与 CC-BY-NC 许可问题。翻译已按 `docs/archive/translate-review.md` 实施为**可选云端功能**
   (默认关闭、手动触发、DeepSeek API、独立译文窗口、DPAPI Key)；若要做"完全本地"，
   正确方向是让用户自建 OpenAI 兼容服务并把请求指向本机，而不是往 exe 里塞模型。
