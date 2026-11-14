@@ -1,7 +1,7 @@
 namespace SnipasteOcr.Annotations;
 
 /// <summary>
-/// 标注工具类型。工具栏按钮与键位 (1..6) 一一对应。
+/// 标注工具类型。工具栏按钮与键位 (1..8) 一一对应。
 /// </summary>
 public enum AnnotationTool
 {
@@ -25,6 +25,12 @@ public enum AnnotationTool
 
     /// <summary>文字</summary>
     Text = 6,
+
+    /// <summary>马克笔 (半透明高亮, 不遮挡底层文字)</summary>
+    Marker = 7,
+
+    /// <summary>序号 (点击放置自动递增的数字徽标)</summary>
+    StepNumber = 8,
 }
 
 /// <summary>工具枚举的中文名/快捷键等展示元数据</summary>
@@ -39,13 +45,15 @@ public static class AnnotationToolInfo
         AnnotationTool.Pen => "画笔",
         AnnotationTool.Mosaic => "马赛克",
         AnnotationTool.Text => "文字",
+        AnnotationTool.Marker => "马克笔",
+        AnnotationTool.StepNumber => "序号",
         _ => "选择",
     };
 
-    /// <summary>快捷键数字 (1..6), None 返回 0</summary>
+    /// <summary>快捷键数字 (1..8), None 返回 0</summary>
     public static int ShortcutDigit(AnnotationTool tool) => (int)tool;
 
-    /// <summary>按数字键反查工具 (1..6), 其它返回 None</summary>
+    /// <summary>按数字键反查工具 (1..8), 其它返回 None</summary>
     public static AnnotationTool FromShortcutDigit(int digit) => digit switch
     {
         1 => AnnotationTool.Rectangle,
@@ -54,6 +62,8 @@ public static class AnnotationToolInfo
         4 => AnnotationTool.Pen,
         5 => AnnotationTool.Mosaic,
         6 => AnnotationTool.Text,
+        7 => AnnotationTool.Marker,
+        8 => AnnotationTool.StepNumber,
         _ => AnnotationTool.None,
     };
 
@@ -71,6 +81,14 @@ public static class AnnotationToolInfo
         _ => string.Empty,
     };
 
+    /// <summary>快捷键之外的常用操作提示 (无提示返回空串)</summary>
+    public static string OperationHint(AnnotationTool tool) => tool switch
+    {
+        AnnotationTool.Marker => "拖动高亮",
+        AnnotationTool.StepNumber => "点击自动递增",
+        _ => string.Empty,
+    };
+
     /// <summary>所有可选工具, 供工具栏按顺序创建按钮</summary>
     public static readonly AnnotationTool[] AllTools =
     [
@@ -80,5 +98,7 @@ public static class AnnotationToolInfo
         AnnotationTool.Pen,
         AnnotationTool.Mosaic,
         AnnotationTool.Text,
+        AnnotationTool.Marker,
+        AnnotationTool.StepNumber,
     ];
 }

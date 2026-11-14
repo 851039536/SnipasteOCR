@@ -167,6 +167,7 @@ Check(s2.Width == 0 && s2.Height == 0, "空文字度量返回 0");
 
 // ===== 11. 分组校验 =====
 RunGroup("标注拖拽约束校验", AnnotationDragCheck.Run);
+RunGroup("马克笔/序号校验", AnnotationToolsCheck.Run);
 RunGroup("渲染校验", RenderChecks.Run);
 RunGroup("工具栏校验", ToolbarCheck.Run);
 RunGroup("尺寸徽标校验", SnipSizeCheck.Run);

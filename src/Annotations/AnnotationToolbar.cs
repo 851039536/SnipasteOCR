@@ -16,17 +16,19 @@ public sealed class AnnotationToolbar : Control
     // 尺寸原则: 紧凑优先。工具栏是浮在截图上的辅助控件, 越窄越好。
     // 历史: 一度加到 38px 按钮 / 58px 高 + 按钮下方中文名称, 整条达 730px 且需两行,
     // 视觉松散。现在移除全部文字, 退回单行纯图标布局。
-    private const int ButtonSize = 34;
+    // 工具从 6 个扩到 8 个后, 按钮/间距/分隔线各收紧一档, 仍保持在 650px 上限内;
+    // 若还要加按钮, 应改为分组/溢出菜单, 不要再继续压缩这里的数字。
+    private const int ButtonSize = 30;
     private const int IconPad = 8;
-    private const int Gap = 3;
-    private const int SepWidth = 8;
+    private const int Gap = 2;
+    private const int SepWidth = 6;
     // 单行布局: 控件垂直居中于工具栏高度。
     private const int ToolbarHeight = 42;
     private const int PadLeft = 7;
     private const int PadRight = 7;
 
     /// <summary>颜色色块边长 (与 OnPaint 中的 swatch 保持一致)</summary>
-    private const int ColorBlockWidth = 22;
+    private const int ColorBlockWidth = 20;
 
     // 右侧文字按钮 (保存/确认/取消): 统一宽度与字号, 让三者等宽对齐 ——
     // 原先 58/64/64 三种宽度混排, 视觉上参差不齐。
@@ -217,7 +219,7 @@ public sealed class AnnotationToolbar : Control
         int sep1 = x - SepWidth / 2 - 1;
 
         var color = new Rectangle(x, 0, ColorBlockWidth, ButtonSize);
-        x += ColorBlockWidth + 12;
+        x += ColorBlockWidth + 8;
 
         x += SepWidth;
         int sep2 = x - SepWidth / 2 - 1;
@@ -229,7 +231,6 @@ public sealed class AnnotationToolbar : Control
             widths[i] = new Rectangle(x, 0, wb, wb);
             x += wb + Gap;
         }
-
         x += SepWidth - Gap;
         int sep3 = x - SepWidth / 2 - 1;
 
@@ -373,7 +374,13 @@ public sealed class AnnotationToolbar : Control
 
             // 预览用当前颜色而非固定白色: 所选颜色就是将要画出的颜色, 预览应如实反映,
             // 否则选"黄色细线"时预览仍是白色细线, 无从判断实际效果。
-            using (var pen = new Pen(CurrentColor, Widths[i]))
+            // 马克笔画出的线更粗更透明, 预览也必须按同样规则显示 (否则线宽档位的含义对不上)。
+            bool marker = Tool == AnnotationTool.Marker;
+            Color previewColor = marker ? AnnotationEngine.MarkerColor(CurrentColor) : CurrentColor;
+            float previewWidth = marker
+                ? MathF.Min(AnnotationEngine.MarkerWidth(Widths[i]), rect.Height - 6f)
+                : Widths[i];
+            using (var pen = new Pen(previewColor, previewWidth))
                 g.DrawLine(pen, rect.Left + 5, cy, rect.Right - 5, cy);
         }
 
@@ -608,6 +615,30 @@ public sealed class AnnotationToolbar : Control
                 g.DrawLine(pen, cx - s + 1, cy - s + 3, cx + s - 1, cy - s + 3);
                 g.DrawLine(pen, cx, cy - s + 3, cx, cy + s - 1);
                 break;
+
+            case AnnotationTool.Marker:
+                // 半透明宽色带 (与真实马克笔同一套颜色规则; 图标用更高不透明度保证深色底上可见)
+                using (var marker = new Pen(Color.FromArgb(200, color), 7f)
+                {
+                    StartCap = LineCap.Square,
+                    EndCap = LineCap.Square,
+                })
+                    g.DrawLine(marker, cx - s, cy + 2, cx + s, cy - 2);
+                break;
+
+            case AnnotationTool.StepNumber:
+                // 彩色圆 + 对比色数字 "1"
+                using (var badge = new SolidBrush(color))
+                    g.FillEllipse(badge, cx - 7, cy - 7, 14, 14);
+                using (var font = UiFont.Create(9f))
+                using (var format = new StringFormat
+                {
+                    Alignment = StringAlignment.Center,
+                    LineAlignment = StringAlignment.Center,
+                })
+                using (var numberBrush = new SolidBrush(AnnotationEngine.ContrastTextColorFor(color)))
+                    g.DrawString("1", font, numberBrush, new RectangleF(cx - 8, cy - 8, 16, 16), format);
+                break;
         }
     }
 
@@ -675,12 +706,19 @@ public sealed class AnnotationToolbar : Control
             var tool = AnnotationToolInfo.AllTools[toolIndex];
             string name = $"{AnnotationToolInfo.DisplayName(tool)} ({AnnotationToolInfo.ShortcutDigit(tool)})";
             string hint = AnnotationToolInfo.ConstraintHint(tool);
+            if (hint.Length == 0)
+                hint = AnnotationToolInfo.OperationHint(tool);
             return hint.Length == 0 ? name : $"{name} · {hint}";
         }
         if (colorIndex >= 0)
             return "颜色: 点击循环切换";
         if (widthIndex >= 0)
-            return $"线宽: {Widths[widthIndex]:0.#} px";
+        {
+            float actual = Tool == AnnotationTool.Marker
+                ? AnnotationEngine.MarkerWidth(Widths[widthIndex])
+                : Widths[widthIndex];
+            return $"线宽: {actual:0.#} px";
+        }
 
         return action switch
         {

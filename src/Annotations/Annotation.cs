@@ -28,14 +28,17 @@ public sealed class Annotation
     public PointF End { get; set; }
 
     /// <summary>
-    /// 画笔轨迹点列 (仅 <see cref="AnnotationTool.Pen"/>)。
+    /// 画笔/马克笔轨迹点列 (仅 <see cref="AnnotationTool.Pen"/> / <see cref="AnnotationTool.Marker"/>)。
     /// </summary>
     public List<PointF> Points { get; init; } = [];
 
     /// <summary>文字内容 (仅 <see cref="AnnotationTool.Text"/>)</summary>
     public string Text { get; set; } = string.Empty;
 
-    /// <summary>字号 (物理像素, 仅文字标注)</summary>
+    /// <summary>序号 (仅 <see cref="AnnotationTool.StepNumber"/>), 从 1 开始自动递增</summary>
+    public int Number { get; set; }
+
+    /// <summary>字号 (物理像素, 仅文字/序号标注)</summary>
     public float FontSize { get; set; } = 18f;
 
     /// <summary>
@@ -45,7 +48,7 @@ public sealed class Annotation
     {
         get
         {
-            if (Tool == AnnotationTool.Pen)
+            if (Tool is AnnotationTool.Pen or AnnotationTool.Marker)
             {
                 if (Points.Count == 0)
                     return RectangleF.Empty;
@@ -63,6 +66,9 @@ public sealed class Annotation
 
             if (Tool == AnnotationTool.Text)
                 return TextBounds();
+
+            if (Tool == AnnotationTool.StepNumber)
+                return AnnotationEngine.StepBadgeBounds(Start, Number, FontSize);
 
             return RectangleF.FromLTRB(
                 Math.Min(Start.X, End.X), Math.Min(Start.Y, End.Y),
@@ -99,8 +105,11 @@ public sealed class Annotation
         if (Tool == AnnotationTool.Text)
             return string.IsNullOrWhiteSpace(Text);
 
-        if (Tool == AnnotationTool.Pen)
+        if (Tool is AnnotationTool.Pen or AnnotationTool.Marker)
             return Points.Count < 2;
+
+        if (Tool == AnnotationTool.StepNumber)
+            return Number <= 0;
 
         var b = Bounds;
         return b.Width < 2 && b.Height < 2;
@@ -119,6 +128,7 @@ public sealed class Annotation
         switch (Tool)
         {
             case AnnotationTool.Pen:
+            case AnnotationTool.Marker:
                 return HitPolyline(pt, tolerance);
 
             case AnnotationTool.Rectangle:
@@ -134,6 +144,7 @@ public sealed class Annotation
                 return Bounds.Contains(pt);
 
             case AnnotationTool.Text:
+            case AnnotationTool.StepNumber:
                 return Bounds.Contains(pt);
 
             default:
@@ -236,6 +247,7 @@ public sealed class Annotation
         End = End,
         Points = [.. Points],
         Text = Text,
+        Number = Number,
         FontSize = FontSize,
     };
 

@@ -85,7 +85,7 @@ internal static class InteractiveCheck
             var toolRects = (List<(Rectangle Rect, AnnotationTool Tool)>)typeof(AnnotationToolbar)
                 .GetField("_toolRects", Priv)!.GetValue(toolbar)!;
             var hover = typeof(AnnotationToolbar).GetMethod("OnMouseMove", Priv)!;
-            Check(toolRects.Count == 6, $"工具栏建立 6 个工具命中区 (实得 {toolRects.Count})");
+            Check(toolRects.Count == 8, $"工具栏建立 8 个工具命中区 (实得 {toolRects.Count})");
             if (toolRects.Count > 0)
             {
                 var r = toolRects[0].Rect;
@@ -362,6 +362,52 @@ internal static class InteractiveCheck
                     $"Ctrl 拖拽矩形宽高相等 (实得 {cb.Width:F1}x{cb.Height:F1})");
                 Check(cb.Width > 100f, $"Ctrl 正方形保留较长边 (实得 {cb.Width:F1})");
             }
+
+            // 8c. 马克笔/序号: 马克笔按画笔轨迹拖拽; 序号单击即落, 自动递增且撤销后复用编号
+            annotations.Clear();
+            toolbar.SetTool(AnnotationTool.Marker);
+            Application.DoEvents();
+
+            mouseDown.Invoke(form, [MouseArgs(new Point(360, 260))]);
+            mouseMove.Invoke(form, [MouseArgs(new Point(400, 280))]);
+            mouseMove.Invoke(form, [MouseArgs(new Point(450, 300))]);
+            mouseUp.Invoke(form, [MouseArgs(new Point(450, 300))]);
+            Check(annotations.Count == 1, $"马克笔拖拽生成 1 条标注 (实得 {annotations.Count})");
+            if (annotations.Count == 1)
+            {
+                Check(annotations[0].Tool == AnnotationTool.Marker, "标注类型为马克笔");
+                Check(annotations[0].Points.Count >= 3,
+                    $"马克笔记录完整轨迹 (实得 {annotations[0].Points.Count} 个点)");
+            }
+
+            annotations.Clear();
+            toolbar.SetTool(AnnotationTool.StepNumber);
+            Application.DoEvents();
+
+            mouseDown.Invoke(form, [MouseArgs(new Point(380, 280))]);
+            mouseDown.Invoke(form, [MouseArgs(new Point(450, 320))]);
+            Check(annotations.Count == 2, $"序号点击两次生成 2 条标注 (实得 {annotations.Count})");
+            if (annotations.Count == 2)
+            {
+                Check(annotations[0].Tool == AnnotationTool.StepNumber && annotations[0].Number == 1 &&
+                      annotations[1].Tool == AnnotationTool.StepNumber && annotations[1].Number == 2,
+                    $"序号自动递增 (实得 {annotations[0].Number}, {annotations[1].Number})");
+            }
+
+            // 撤销最后一个序号后, 下一次点击应复用 2, 而不是跳到 3
+            typeof(SnipOverlayForm).GetMethod("DoUndo", Priv)!.Invoke(form, null);
+            Check(annotations.Count == 1, $"撤销一个序号后剩 1 条 (实得 {annotations.Count})");
+            mouseDown.Invoke(form, [MouseArgs(new Point(500, 340))]);
+            Check(annotations.Count == 2 && annotations[^1].Number == 2,
+                $"撤销后序号复用被撤销的编号 (实得 {annotations[^1].Number})");
+
+            // 数字键 7/8 必须切到新工具
+            typeof(SnipOverlayForm).GetMethod("OnKeyDown", Priv)!
+                .Invoke(form, [new KeyEventArgs(Keys.D7)]);
+            Check(toolbar.Tool == AnnotationTool.Marker, "数字键 7 切到马克笔");
+            typeof(SnipOverlayForm).GetMethod("OnKeyDown", Priv)!
+                .Invoke(form, [new KeyEventArgs(Keys.D8)]);
+            Check(toolbar.Tool == AnnotationTool.StepNumber, "数字键 8 切到序号");
 
             // 9. 识别模式不应出现「可点但无反应」的贴图按钮
             Check(toolbar.ShowPin, "图片模式显示贴图按钮");

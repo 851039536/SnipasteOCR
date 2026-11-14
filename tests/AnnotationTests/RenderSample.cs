@@ -6,7 +6,7 @@ using SnipasteOcr.Annotations;
 namespace SnipasteOcr.Tests;
 
 /// <summary>
-/// 渲染一张可视化样例图, 用于人工确认六种标注的实际观感。
+/// 渲染一张可视化样例图, 用于人工确认各种标注的实际观感。
 /// 像素级断言无法证明"画得好不好看", 因此保留这个可选的目视检查入口。
 /// </summary>
 internal static class RenderSample
@@ -23,7 +23,7 @@ internal static class RenderSample
             g.DrawString("标注引擎可视化验证", titleFont, Brushes.Black, 30, 24);
 
             using var bodyFont = new Font("Microsoft YaHei UI", 13f);
-            g.DrawString("六个区域分别演示: 矩形 / 椭圆 / 箭头 / 画笔 / 马赛克 / 文字", bodyFont, Brushes.DimGray, 30, 70);
+            g.DrawString("八个区域分别演示: 矩形 / 椭圆 / 箭头 / 画笔 / 马克笔 / 马赛克 / 文字 / 序号", bodyFont, Brushes.DimGray, 30, 70);
 
             // 马赛克目标: 一段"敏感信息"
             using var mono = new Font("Consolas", 15f);
@@ -61,6 +61,31 @@ internal static class RenderSample
             penAnn.Points.Add(new PointF(280 + t * 220, 340 + MathF.Sin(t * MathF.PI * 4f) * 38));
         }
         anns.Add(penAnn);
+
+        // 7. 马克笔: 半透明高亮带, 底层网格仍可见
+        var markerAnn = new Annotation
+        {
+            Tool = AnnotationTool.Marker,
+            Color = Color.FromArgb(255, 255, 214, 0),
+            StrokeWidth = 4,
+        };
+        for (int i = 0; i <= 120; i++)
+        {
+            float t = i / 120f;
+            markerAnn.Points.Add(new PointF(500 + t * 340, 390 + MathF.Sin(t * MathF.PI * 2f) * 8));
+        }
+        anns.Add(markerAnn);
+
+        // 8. 序号: 三个自动递增徽标 (多位数也在这里检验)
+        for (int i = 1; i <= 3; i++)
+            anns.Add(new Annotation
+            {
+                Tool = AnnotationTool.StepNumber,
+                Start = new PointF(600 + (i - 1) * 70, 460),
+                Number = i,
+                Color = Color.FromArgb(255, 235, 59, 36),
+                FontSize = 20,
+            });
 
         // 6. 文字 (深浅两种颜色, 检验描边自适应)
         anns.Add(new Annotation { Tool = AnnotationTool.Text, Start = new PointF(40, 430), Text = "文字标注: 支持中文与 English 123", Color = Color.FromArgb(255, 235, 59, 36), FontSize = 24 });

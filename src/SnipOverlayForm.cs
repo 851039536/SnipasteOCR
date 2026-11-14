@@ -489,11 +489,39 @@ public sealed class SnipOverlayForm : Form
             return;
         }
 
+        // 序号: 单击即落一个自动递增的徽标, 同样不做拖拽
+        if (_toolbar.Tool == AnnotationTool.StepNumber)
+        {
+            CommitEditorIfOpen();
+            PlaceStepNumber(phys);
+            return;
+        }
+
         _pending = CreateShape(_toolbar.Tool, phys);
-        if (_toolbar.Tool == AnnotationTool.Pen)
+        if (_toolbar.Tool is AnnotationTool.Pen or AnnotationTool.Marker)
             _pending.Points.Add(phys);
 
         _dragging = true;
+        Invalidate();
+    }
+
+    /// <summary>在指定位置落一个序号; 编号取现有最大序号 + 1, 撤销后复用被撤销的编号</summary>
+    private void PlaceStepNumber(PointF phys)
+    {
+        var ann = new Annotation
+        {
+            Tool = AnnotationTool.StepNumber,
+            Color = _toolbar.CurrentColor,
+            StrokeWidth = _toolbar.CurrentWidth,
+            Start = phys,
+            End = phys,
+            Number = AnnotationEngine.NextStepNumber(_annotations),
+            FontSize = AnnotationEngine.DefaultFontSize * ScaleFactor,
+        };
+
+        _history.Push(_annotations);
+        _annotations.Add(ann);
+        SyncToolbarState();
         Invalidate();
     }
 
@@ -522,7 +550,7 @@ public sealed class SnipOverlayForm : Form
         if (_pending is { } pending)
         {
             var phys = ToPhysical(e.Location);
-            if (pending.Tool == AnnotationTool.Pen)
+            if (pending.Tool is AnnotationTool.Pen or AnnotationTool.Marker)
             {
                 // 采样去抖: 距离过近的点丢弃, 避免轨迹点爆炸
                 var last = pending.Points[^1];
@@ -561,7 +589,7 @@ public sealed class SnipOverlayForm : Form
         if (_pending is { } pending)
         {
             var phys = ToPhysical(e.Location);
-            if (pending.Tool == AnnotationTool.Pen)
+            if (pending.Tool is AnnotationTool.Pen or AnnotationTool.Marker)
             {
                 if (pending.Points.Count > 0)
                     pending.Points.Add(phys);
@@ -733,14 +761,14 @@ public sealed class SnipOverlayForm : Form
                 return;
         }
 
-        // 数字键 1..6 切换工具; 0 退回框选模式。
+        // 数字键 1..8 切换工具; 0 退回框选模式。
         // 识别模式没有标注工具, 不劫持数字键, 也避免把光标切成 IBeam 等无用状态。
         if (_mode == SnipMode.Image && !e.Control && !e.Alt)
         {
             int digit = e.KeyCode switch
             {
-                >= Keys.D1 and <= Keys.D6 => e.KeyCode - Keys.D0,
-                >= Keys.NumPad1 and <= Keys.NumPad6 => e.KeyCode - Keys.NumPad0,
+                >= Keys.D1 and <= Keys.D8 => e.KeyCode - Keys.D0,
+                >= Keys.NumPad1 and <= Keys.NumPad8 => e.KeyCode - Keys.NumPad0,
                 _ => -1,
             };
 
@@ -809,6 +837,8 @@ public sealed class SnipOverlayForm : Form
             AnnotationTool.None => Cursors.Cross,
             AnnotationTool.Text => Cursors.IBeam,
             AnnotationTool.Pen => Cursors.Cross,
+            AnnotationTool.Marker => Cursors.Cross,
+            AnnotationTool.StepNumber => Cursors.Hand,
             _ => Cursors.Cross,
         };
 

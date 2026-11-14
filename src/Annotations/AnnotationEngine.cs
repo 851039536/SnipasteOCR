@@ -22,6 +22,58 @@ public static class AnnotationEngine
     /// <summary>文字默认字号 (物理像素)</summary>
     public const float DefaultFontSize = 18f;
 
+    /// <summary>马克笔相对普通线宽的倍数 (2/4/7 -> 8/16/28 px)</summary>
+    private const float MarkerWidthFactor = 4f;
+
+    /// <summary>马克笔最小线宽 (物理像素), 保证细线档也有"高亮带"的观感</summary>
+    private const float MarkerMinWidth = 8f;
+
+    /// <summary>马克笔透明度: 足够醒目, 但仍能看清底下的文字</summary>
+    private const int MarkerAlpha = 110;
+
+    /// <summary>马克笔实际线宽 (物理像素); 渲染与工具栏预览共用</summary>
+    public static float MarkerWidth(float strokeWidth)
+        => MathF.Max(MarkerMinWidth, strokeWidth * MarkerWidthFactor);
+
+    /// <summary>马克笔颜色 (半透明); 渲染与工具栏预览共用</summary>
+    public static Color MarkerColor(Color color) => Color.FromArgb(MarkerAlpha, color);
+
+    /// <summary>
+    /// 序号徽标半径 (物理像素)。按数字位数扩张, 保证 10/100 等多位数也能完整放进圆内。
+    /// 渲染、包围盒和命中测试都从这里取, 不各自估算。
+    /// </summary>
+    public static float StepBadgeRadius(int number, float fontSize)
+    {
+        int digits = Math.Max(1, number).ToString().Length;
+        return fontSize * (0.95f + 0.35f * (digits - 1));
+    }
+
+    /// <summary>序号徽标的包围盒 (以点击点为中心)</summary>
+    public static RectangleF StepBadgeBounds(PointF center, int number, float fontSize)
+    {
+        float r = StepBadgeRadius(number, fontSize);
+        return new RectangleF(center.X - r, center.Y - r, r * 2, r * 2);
+    }
+
+    /// <summary>
+    /// 下一个序号: 取现有最大编号 + 1。
+    /// 用最大值而不是数量, 这样撤销最后一个序号后再放会复用该编号; 全部清空后从 1 重新开始。
+    /// </summary>
+    public static int NextStepNumber(IReadOnlyList<Annotation> annotations)
+    {
+        int max = 0;
+        foreach (var a in annotations)
+        {
+            if (a.Tool == AnnotationTool.StepNumber && a.Number > max)
+                max = a.Number;
+        }
+        return max + 1;
+    }
+
+    /// <summary>序号数字在彩色徽标上的对比色 (浅底用黑字, 深底用白字)</summary>
+    public static Color ContrastTextColorFor(Color fill)
+        => Luminance(fill) > OutlineLuminanceThreshold ? Color.Black : Color.White;
+
     // ===== 文字度量 =====
 
     /// <summary>
@@ -116,11 +168,17 @@ public static class AnnotationEngine
             case AnnotationTool.Pen:
                 DrawPen(g, a);
                 break;
+            case AnnotationTool.Marker:
+                DrawMarker(g, a);
+                break;
             case AnnotationTool.Mosaic:
                 DrawMosaic(g, a, source);
                 break;
             case AnnotationTool.Text:
                 DrawText(g, a);
+                break;
+            case AnnotationTool.StepNumber:
+                DrawStepNumber(g, a);
                 break;
         }
     }
@@ -292,6 +350,25 @@ public static class AnnotationEngine
     }
 
     /// <summary>
+    /// 马克笔: 半透明宽线, 用于高亮文字/区域。
+    /// 不画白色外衬 —— 外衬会把高亮带变成"描边图形", 反而遮住底层文字;
+    /// 半透明填色叠在文字上仍可阅读, 这才是马克笔与普通画笔的区别。
+    /// </summary>
+    private static void DrawMarker(Graphics g, Annotation a)
+    {
+        if (a.Points.Count < 2)
+            return;
+
+        using var pen = new Pen(MarkerColor(a.Color), MarkerWidth(a.StrokeWidth))
+        {
+            StartCap = LineCap.Round,
+            EndCap = LineCap.Round,
+            LineJoin = LineJoin.Round,
+        };
+        g.DrawLines(pen, a.Points.ToArray());
+    }
+
+    /// <summary>
     /// 马赛克: 对选区内的底图像素做块平均后再放大绘制, 形成像素化效果。
     /// 直接从底图取样, 因此不会把下方的其它标注也糊进去 (与预览一致)。
     /// </summary>
@@ -443,6 +520,49 @@ public static class AnnotationEngine
 
         using var fill = new SolidBrush(a.Color);
         g.FillPath(fill, path);
+    }
+
+    /// <summary>
+    /// 序号: 实心彩色圆 + 对比色数字。圆环与文字颜色都由填充色亮度决定,
+    /// 浅色徽标用黑字、深色徽标用白字, 在深浅背景上都能读。
+    /// </summary>
+    private static void DrawStepNumber(Graphics g, Annotation a)
+    {
+        if (a.Number <= 0)
+            return;
+
+        var bounds = StepBadgeBounds(a.Start, a.Number, a.FontSize);
+        using (var fill = new SolidBrush(a.Color))
+            g.FillEllipse(fill, bounds);
+
+        Color contrast = ContrastTextColorFor(a.Color);
+        using (var ring = new Pen(Color.FromArgb(190, contrast), MathF.Max(1f, a.FontSize * 0.06f)))
+            g.DrawEllipse(ring, bounds);
+
+        DrawCenteredText(
+            g, a.Number.ToString(), bounds, MathF.Max(8f, a.FontSize * 0.9f), contrast);
+    }
+
+    /// <summary>把单行文字按字形轮廓居中绘制到指定矩形 (不走 TextRenderer, 理由见 DrawText)</summary>
+    private static void DrawCenteredText(
+        Graphics g, string text, RectangleF area, float fontSize, Color color)
+    {
+        using var font = CreateFont(fontSize);
+        using var format = CreateTextFormat();
+        using var path = new GraphicsPath();
+        path.AddString(text, font.FontFamily, (int)font.Style, fontSize, PointF.Empty, format);
+        if (path.PointCount == 0)
+            return;
+
+        RectangleF glyph = path.GetBounds();
+        using var transform = new Matrix();
+        transform.Translate(
+            area.X + (area.Width - glyph.Width) / 2f - glyph.X,
+            area.Y + (area.Height - glyph.Height) / 2f - glyph.Y);
+        path.Transform(transform);
+
+        using var brush = new SolidBrush(color);
+        g.FillPath(brush, path);
     }
 
     /// <summary>

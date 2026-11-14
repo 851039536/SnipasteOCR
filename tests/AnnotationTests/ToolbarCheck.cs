@@ -57,10 +57,10 @@ internal static class ToolbarCheck
         Check(colorsRight < tb.Width, $"颜色按钮未溢出 (right={colorsRight})");
         Check(widthsRight < tb.Width, $"线宽按钮未溢出 (right={widthsRight})");
 
-        // 六个工具都应布局出来
+        // 八个工具都应布局出来
         var toolRects = (System.Collections.IList)typeof(AnnotationToolbar)
             .GetField("_toolRects", flags)!.GetValue(tb)!;
-        Check(toolRects.Count == 6, $"六种工具都有按钮 (实得 {toolRects.Count})");
+        Check(toolRects.Count == 8, $"八种工具都有按钮 (实得 {toolRects.Count})");
 
         // 工具按钮为等宽纯图标 (不再带名称标签)
         {
@@ -68,7 +68,7 @@ internal static class ToolbarCheck
             bool uniform = true;
             foreach (var item in (System.Collections.IEnumerable)toolRects)
                 if (RectOf(item).Width != w0) uniform = false;
-            Check(uniform, $"六个工具按钮等宽 (实得首宽 {w0})");
+            Check(uniform, $"八个工具按钮等宽 (实得首宽 {w0})");
         }
 
         // ===== 工具栏不得有描边 =====
@@ -157,8 +157,8 @@ internal static class ToolbarCheck
         // ===== 整体尺寸: 工具栏是浮在截图上的辅助控件, 必须保持紧凑 =====
         // 回归: 曾达 730x58 (含两行文字标签), 在小选区里几乎盖住半个画面且观感松散。
         // 移除全部文字后应回到单行 ~42px 高度。
-        // 上限从 620 提到 650: 新增「钉住」图标按钮(34px + 3px 间距)后必然超出原上限。
-        // 这是有意识的取舍 —— 该按钮是功能需求, 而 650px 相对 1920 以上的常见屏宽仍属紧凑;
+        // 上限从 620 提到 650: 新增「钉住」图标按钮后必然超出原上限。
+        // 之后工具从 6 个扩到 8 个, 通过收紧按钮/间距/分隔线继续留在 650 内;
         // 若将来还要继续加按钮, 应改为分组/溢出菜单, 而不是一路抬高这个数字。
         Check(tb.Width <= 650, $"工具栏宽度保持紧凑 (实得 {tb.Width}, 上限 650)");
         Check(tb.Height <= 46, $"工具栏高度保持紧凑 (实得 {tb.Height}, 上限 46)");
@@ -253,6 +253,22 @@ internal static class ToolbarCheck
             Check(undoPx > 8, $"撤销图标可见 (非背景像素={undoPx})");
             Check(redoPx > 8, $"重做图标可见 (非背景像素={redoPx})");
 
+            // 新增的马克笔/序号图标同样必须真的画出像素 (矢量图标最怕"画不出仍不报错")
+            var toolRects2 = (System.Collections.IList)typeof(AnnotationToolbar)
+                .GetField("_toolRects", flags)!.GetValue(tb2)!;
+            Rectangle RectForTool(AnnotationTool wanted)
+            {
+                foreach (var item in toolRects2)
+                    if ((AnnotationTool)item.GetType().GetField("Item2")!.GetValue(item)! == wanted)
+                        return (Rectangle)item.GetType().GetField("Item1")!.GetValue(item)!;
+                return Rectangle.Empty;
+            }
+
+            int markerPx = CountIconPixels(RectForTool(AnnotationTool.Marker), iconBmp);
+            int numberPx = CountIconPixels(RectForTool(AnnotationTool.StepNumber), iconBmp);
+            Check(markerPx > 8, $"马克笔图标可见 (非背景像素={markerPx})");
+            Check(numberPx > 8, $"序号图标可见 (非背景像素={numberPx})");
+
             // 图钉(钉住)图标同样必须真的画出像素 —— 它是后来新增的矢量图标,
             // 与撤销/重做同属"画不出就是空白按钮且不报错"的高危区。
             var pinRect = (Rectangle)typeof(AnnotationToolbar)
@@ -307,8 +323,8 @@ internal static class ToolbarCheck
             var cancelAfter = (Rectangle)typeof(AnnotationToolbar).GetField("_cancelRect", flags)!.GetValue(tb6)!;
 
             Check(pinAfter == Rectangle.Empty, $"隐藏后贴图按钮无命中区域 (实得 {pinAfter})");
-            Check(widthWithPin - tb6.Width == 34 + 3,
-                $"隐藏后工具栏收窄一个按钮位 (实得 {widthWithPin - tb6.Width}, 期望 37)");
+            Check(widthWithPin - tb6.Width == 30 + 2,
+                $"隐藏后工具栏收窄一个按钮位 (实得 {widthWithPin - tb6.Width}, 期望 32)");
             Check(tb6.Width - cancelAfter.Right == 7,
                 $"隐藏后尾部留白仍为 7px (实得 {tb6.Width - cancelAfter.Right})");
             Check(cancelAfter.Bottom <= tb6.Height, "隐藏后按钮仍完整落在工具栏内");
