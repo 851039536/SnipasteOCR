@@ -67,6 +67,14 @@ internal static class Program
                 }
             };
 
+            // 延时截图: 给用户时间先打开要截的菜单/下拉框; 气泡提示倒计时开始
+            tray.DelayedSnipRequested += (mode, seconds) =>
+            {
+                tray.ShowBalloon("SnipasteOCR",
+                    $"{seconds} 秒后截图，请先打开要截的菜单。");
+                SnipCoordinator.StartDelayed(mode, seconds);
+            };
+
             // 开机自启: 写注册表可能失败 (策略锁定/无权限), 失败要如实告知而不是假装成功
             tray.StartupToggleRequested += want =>
             {
@@ -97,9 +105,15 @@ internal static class Program
                 SettingsStore.Update(s => s.PreventSleep = actual);
             };
 
-            // 单击复制识别结果: 纯设置项, 落盘即可; 结果窗口每次单击都读取当前设置
+            // 单击复制识别结果: 纯设置项, 落盘即可; 结果窗口每次单击都读取当前设置。
+            // 两个单击行为互斥: 重新开启复制就关闭单击翻译, 否则托盘勾选会与实际行为不符。
             tray.ClickToCopyToggleRequested += want =>
-                SettingsStore.Update(s => s.ClickToCopy = want);
+                SettingsStore.Update(s =>
+                {
+                    s.ClickToCopy = want;
+                    if (want)
+                        s.ClickToTranslate = false;
+                });
 
             // 翻译设置: 纯 Win32 菜单无法输入 Key, 必须弹真实对话框。
             // 这里只保存配置; 真正发请求发生在用户点结果窗口的「翻译」按钮时。
@@ -107,6 +121,8 @@ internal static class Program
             {
                 using var dlg = new TranslateSettingsForm();
                 dlg.ShowDialog();
+                // 对话框里开启「单击翻译」会关掉「单击复制」, 托盘勾选必须立即跟上
+                tray.SyncClickToCopyCheck();
             };
 
             IntPtr hwnd = tray.WindowHandle;

@@ -1212,6 +1212,58 @@ internal static class InteractiveCheck
             settingsOwner.Close();
         }
 
+        // 21. 新增入口: F3 Ctrl+回车直接识别 / 延时截图 / 贴图 DPI
+        {
+            // 21.1 F3 标注模式: Ctrl+回车把标注图送 OCR, 不经过剪贴板
+            using (var imageOverlay = new SnipOverlayForm(SnipMode.Image))
+            {
+                int launches = 0;
+                imageOverlay.OcrResultLauncherForTest = (bmp, _) => { launches++; bmp.Dispose(); };
+                imageOverlay.Show();
+                Application.DoEvents();
+
+                typeof(SnipOverlayForm).GetField("_selection", Priv)!
+                    .SetValue(imageOverlay, new Rectangle(80, 80, 260, 160));
+                typeof(SnipOverlayForm).GetMethod("OnSelectionChanged", Priv)!
+                    .Invoke(imageOverlay, null);
+                Application.DoEvents();
+
+                typeof(SnipOverlayForm).GetMethod("OnKeyDown", Priv)!
+                    .Invoke(imageOverlay, [new KeyEventArgs(Keys.Control | Keys.Enter)]);
+
+                Check(launches == 1, $"F3 Ctrl+回车直接识别 (实得 {launches} 次)");
+                Check(imageOverlay.IsDisposed, "F3 直接识别后覆盖层关闭");
+            }
+
+            // 21.2 延时截图: 到点前不显示, 到点后自动打开覆盖层
+            SnipCoordinator.StartDelayed(SnipMode.Ocr, 1);
+            Check(!SnipCoordinator.OverlayVisible, "延时期间不立即打开覆盖层");
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            while (!SnipCoordinator.OverlayVisible && sw.ElapsedMilliseconds < 3000)
+            {
+                Application.DoEvents();
+                Thread.Sleep(10);
+            }
+            Check(SnipCoordinator.OverlayVisible, "1 秒后自动打开覆盖层");
+            SnipCoordinator.GetOverlay()?.Close();
+            Application.DoEvents();
+
+            // 21.3 贴图窗口按窗口自身 DPI 换算尺寸 (不是主屏桌面 DC)
+            var pinSrc = new Bitmap(300, 200);
+            using (var pin = new PinnedImageForm(pinSrc, new Point(10, 10)))
+            {
+                pin.Show();
+                Application.DoEvents();
+                float dpi = pin.DeviceDpi / 96f;
+                var expected = new Size(
+                    (int)Math.Round(300 / dpi),
+                    (int)Math.Round(200 / dpi));
+                Check(pin.ClientSize == expected,
+                    $"贴图按窗口 DPI 换算尺寸 (实得 {pin.ClientSize}, 期望 {expected})");
+                pin.Close();
+            }
+        }
+
         return runner.ToResult();
     }
 

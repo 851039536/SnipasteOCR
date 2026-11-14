@@ -280,6 +280,10 @@ public static class Shell32
     public const uint NIF_TIP = 4;
     public const uint NIF_VERSION = 4;
     public const uint NIF_SHOWTIP = 0x80000000;
+    /// <summary>本次修改带气泡正文 (与 szInfo/szInfoTitle/dwInfoFlags 配合)</summary>
+    public const uint NIF_INFO = 0x00000010;
+    /// <summary>气泡使用信息图标</summary>
+    public const uint NIIF_INFO = 0x00000001;
 
     [DllImport("shell32.dll", SetLastError = true, CharSet = CharSet.Unicode, EntryPoint = "Shell_NotifyIconW")]
     [return: MarshalAs(UnmanagedType.Bool)]

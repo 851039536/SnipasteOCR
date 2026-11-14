@@ -1294,7 +1294,15 @@ public sealed class OcrResultForm : Form
             // (每次单击都冲掉用户剪贴板代价太大); 复制仍可用 Ctrl+C 或工具栏。
             if (SettingsStore.Current.ClickToTranslate)
             {
-                TranslateLine(clickedLine);
+                // 未配置 Key/未同意联网时不再走 EnsureTranslationReady 的模态框 ——
+                // 否则每点一个块都会弹一次设置/同意对话框。测试注入不受此门限制。
+                if (TranslateForTest is not null || ClickTranslationReady())
+                {
+                    TranslateLine(clickedLine);
+                    return;
+                }
+
+                SetStatus("单击翻译未就绪（缺 API Key 或未同意联网）· Ctrl+C 复制");
                 return;
             }
 
@@ -1529,6 +1537,16 @@ public sealed class OcrResultForm : Form
 
         if (truncated)
             SetStatus($"文本过长，仅翻译前 {TranslateClient.MaxInputChars} 字");
+    }
+
+    /// <summary>
+    /// 单击翻译是否真正可用: 已同意联网且 Key 能解密。
+    /// 只做只读检查, 不弹任何对话框 —— 单击路径不能每次都打断用户。
+    /// </summary>
+    private static bool ClickTranslationReady()
+    {
+        var s = SettingsStore.Current;
+        return TranslateClient.IsReady(s.TranslateApiKeyProtected, s.TranslateConsentGiven);
     }
 
     /// <summary>

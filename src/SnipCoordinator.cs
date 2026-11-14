@@ -12,8 +12,62 @@ public static class SnipCoordinator
     internal static bool OverlayVisible => _openForms.OfType<SnipOverlayForm>().Any(o => o.IsHandleCreated && o.Visible);
     internal static Form? GetOverlay() => _openForms.OfType<SnipOverlayForm>().FirstOrDefault();
 
+    // 延时截图的 UI 线程计时器; 只允许一个待触发的延时
+    private static System.Windows.Forms.Timer? _delayTimer;
+
     /// <summary>启动截图; 已有截图层在用时忽略</summary>
     public static void Start(SnipMode mode)
+    {
+        // 用户直接按热键 = 立即截图, 取消尚未到期的延时请求, 避免稍后突然弹出第二个覆盖层
+        CancelDelayed();
+
+        // 已有截图层在用时忽略
+        if (_openForms.OfType<SnipOverlayForm>().Any())
+            return;
+
+        var overlay = new SnipOverlayForm(mode);
+        _openForms.Add(overlay);
+        overlay.FormClosed += (_, _) => _openForms.Remove(overlay);
+        overlay.Show();
+    }
+
+    /// <summary>
+    /// 延时启动截图覆盖层 (托盘菜单「延时截图」)。
+    ///
+    /// 必须用 WinForms 的 Timer 而不是 <c>Task.Delay</c> + 后台线程:
+    /// 覆盖层是 WinForms 窗体, 必须在创建托盘/热键的 UI 线程上构造;
+    /// WinForms Timer 的 Tick 天然回到该线程, 且手动消息循环会正常派发 WM_TIMER。
+    /// </summary>
+    public static void StartDelayed(SnipMode mode, int seconds)
+    {
+        CancelDelayed();
+
+        var timer = new System.Windows.Forms.Timer { Interval = Math.Max(1, seconds) * 1000 };
+        _delayTimer = timer;
+        timer.Tick += (_, _) =>
+        {
+            timer.Stop();
+            timer.Dispose();
+            if (ReferenceEquals(_delayTimer, timer))
+                _delayTimer = null;
+
+            // 不能再走 Start (它会调用 CancelDelayed) —— 此时计时器已自行释放
+            StartCore(mode);
+        };
+        timer.Start();
+    }
+
+    private static void CancelDelayed()
+    {
+        if (_delayTimer is { } timer)
+        {
+            _delayTimer = null;
+            timer.Stop();
+            timer.Dispose();
+        }
+    }
+
+    private static void StartCore(SnipMode mode)
     {
         // 已有截图层在用时忽略
         if (_openForms.OfType<SnipOverlayForm>().Any())

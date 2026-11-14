@@ -199,13 +199,42 @@ public sealed class TranslateSettingsForm : Form
             }
         }
 
+        bool clickTranslate = _clickToTranslate.Checked;
+
+        // 开启「单击翻译」前必须真正可用: 否则每点一个文字块都会弹一次同意/设置框,
+        // 而且单击不再复制 —— 用户会觉得点了没反应。
+        if (clickTranslate)
+        {
+            if (!_consent.Checked)
+            {
+                MessageBox.Show(this,
+                    "开启「单击文字块翻译」前，请先勾选上方的联网同意项。",
+                    "SnipasteOCR", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                DialogResult = DialogResult.None;
+                return;
+            }
+
+            bool hasUsableKey = TranslateClient.IsReady(protectedKey, consentGiven: true);
+            if (!hasUsableKey)
+            {
+                MessageBox.Show(this,
+                    "开启「单击文字块翻译」前，请先填写可用的 API Key。",
+                    "SnipasteOCR", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                DialogResult = DialogResult.None;
+                return;
+            }
+        }
+
         SettingsStore.Update(s =>
         {
             s.TranslateApiKeyProtected = protectedKey;
             s.TranslateModel = model;
             s.TranslateTargetLanguage = target;
             s.TranslateConsentGiven = _consent.Checked;
-            s.ClickToTranslate = _clickToTranslate.Checked;
+            s.ClickToTranslate = clickTranslate;
+            // 两个单击行为互斥: 保留复制会让托盘勾选与实际行为不一致
+            if (clickTranslate)
+                s.ClickToCopy = false;
         });
 
         DialogResult = DialogResult.OK;

@@ -116,6 +116,9 @@ public sealed class AnnotationToolbar : Control
     /// <summary>点击确认 (复制/识别)</summary>
     public event Action? ConfirmRequested;
 
+    /// <summary>Ctrl+点击「确认」: 跳过剪贴板, 直接把标注后的图送 OCR</summary>
+    public event Action? OcrRequested;
+
     /// <summary>点击取消</summary>
     public event Action? CancelRequested;
 
@@ -683,7 +686,7 @@ public sealed class AnnotationToolbar : Control
             "redo" => "重做 (Ctrl+Y)",
             "pin" => "贴图: 钉在屏幕上",
             "save" => "保存为 PNG",
-            "confirm" => "确认 (回车)",
+            "confirm" => "确认 (回车) · Ctrl+点击 = 识别文字",
             "cancel" => "取消 (Esc)",
             _ => string.Empty,
         };
@@ -728,7 +731,12 @@ public sealed class AnnotationToolbar : Control
             case "redo": if (CanRedo) RedoRequested?.Invoke(); break;
             case "pin": PinRequested?.Invoke(); break;
             case "save": SaveRequested?.Invoke(); break;
-            case "confirm": ConfirmRequested?.Invoke(); break;
+            case "confirm":
+                if ((ModifierKeys & Keys.Control) != 0)
+                    OcrRequested?.Invoke();
+                else
+                    ConfirmRequested?.Invoke();
+                break;
             case "cancel": CancelRequested?.Invoke(); break;
         }
     }

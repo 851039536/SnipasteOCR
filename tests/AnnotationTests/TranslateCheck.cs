@@ -180,6 +180,17 @@ internal static class TranslateCheck
                 "空 Key 不加密也不解密");
         }
 
+        // ===== 11b. 翻译可用性: 同意联网 + Key 可解密 (设置与单击路径共用) =====
+        {
+            string encrypted = ProtectedKey.Protect("sk-ready");
+            Check(TranslateClient.IsReady(encrypted, consentGiven: true),
+                "已同意且有可解密 Key 时翻译可用");
+            Check(!TranslateClient.IsReady(encrypted, consentGiven: false),
+                "未同意联网时翻译不可用");
+            Check(!TranslateClient.IsReady("", consentGiven: true),
+                "空 Key 时翻译不可用");
+        }
+
         // ===== 12. 设置默认值与旧配置兼容 =====
         {
             var legacy = JsonSerializer.Deserialize("""{"clickToCopy":false}""",

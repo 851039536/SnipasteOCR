@@ -24,6 +24,10 @@ public sealed class TrayController : IDisposable
     private const int CMD_PREVENT_SLEEP = 0x1008;
     private const int CMD_CLICK_TO_COPY = 0x1009;
     private const int CMD_TRANSLATE_SETTINGS = 0x100A;
+    private const int CMD_DELAY_3_OCR = 0x100B;
+    private const int CMD_DELAY_3_IMAGE = 0x100C;
+    private const int CMD_DELAY_5_OCR = 0x100D;
+    private const int CMD_DELAY_5_IMAGE = 0x100E;
     private static readonly uint TRAY_CALLBACK = User32.WM_APP + 1;
 
     // 静态持有: 窗口过程委托必须防止被 GC; 单实例引用用于回调
@@ -34,6 +38,7 @@ public sealed class TrayController : IDisposable
     private readonly IntPtr _hIcon;
     private readonly IntPtr _hMenu;
     private readonly IntPtr _hModelMenu;
+    private readonly IntPtr _hDelayMenu;
     private Icon? _icon;
 
     /// <summary>宿主窗口句柄 (热键也注册在这里)</summary>
@@ -70,6 +75,13 @@ public sealed class TrayController : IDisposable
 
     /// <summary>用户要求打开翻译设置 (API Key / 模型 / 目标语言 / 联网同意)</summary>
     public event Action? TranslateSettingsRequested;
+
+    /// <summary>
+    /// 用户要求延时截图: 参数为模式与秒数。
+    /// 单独做成动作而不是全局设置 —— 截菜单/下拉框只是偶发需求,
+    /// 让每次 F1/F3 都等 3 秒会毁掉日常框选的即时性。
+    /// </summary>
+    public event Action<SnipMode, int>? DelayedSnipRequested;
 
     /// <summary>注册窗口类与宿主窗口, 创建右键菜单和托盘图标; 任一步失败抛 Win32Exception</summary>
     public TrayController()
@@ -117,11 +129,23 @@ public sealed class TrayController : IDisposable
         User32.AppendMenu(_hModelMenu, User32.MF_STRING, (IntPtr)CMD_MODEL_TINY,
             OcrService.DisplayName(OcrModelProfile.Tiny));
 
+        // 延时截图子菜单: 截菜单/下拉框时, 点完托盘后系统菜单会立刻收起,
+        // 必须先延时再抓屏。识别与标注各给 3/5 秒两档, 覆盖大多数场景。
+        _hDelayMenu = User32.CreatePopupMenu();
+        if (_hDelayMenu == IntPtr.Zero)
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "CreatePopupMenu(延时截图) 失败");
+        User32.AppendMenu(_hDelayMenu, User32.MF_STRING, (IntPtr)CMD_DELAY_3_OCR, "3 秒后截图识别");
+        User32.AppendMenu(_hDelayMenu, User32.MF_STRING, (IntPtr)CMD_DELAY_3_IMAGE, "3 秒后截图标注");
+        User32.AppendMenu(_hDelayMenu, User32.MF_SEPARATOR, IntPtr.Zero, null);
+        User32.AppendMenu(_hDelayMenu, User32.MF_STRING, (IntPtr)CMD_DELAY_5_OCR, "5 秒后截图识别");
+        User32.AppendMenu(_hDelayMenu, User32.MF_STRING, (IntPtr)CMD_DELAY_5_IMAGE, "5 秒后截图标注");
+
         User32.AppendMenu(_hMenu, User32.MF_STRING, (IntPtr)CMD_SNIP_OCR, "截图识别 (F1)");
         User32.AppendMenu(_hMenu, User32.MF_STRING, (IntPtr)CMD_SNIP_IMAGE, "截图标注 (F3)");
         User32.AppendMenu(_hMenu, User32.MF_STRING, (IntPtr)CMD_OCR_CLIPBOARD, "识别剪贴板图片");
         User32.AppendMenu(_hMenu, User32.MF_SEPARATOR, IntPtr.Zero, null);
         User32.AppendMenu(_hMenu, User32.MF_STRING | User32.MF_POPUP, _hModelMenu, "识别模型");
+        User32.AppendMenu(_hMenu, User32.MF_STRING | User32.MF_POPUP, _hDelayMenu, "延时截图");
         User32.AppendMenu(_hMenu, User32.MF_STRING, (IntPtr)CMD_HOTKEY_SETTINGS, "热键设置…");
         User32.AppendMenu(_hMenu, User32.MF_STRING, (IntPtr)CMD_TRANSLATE_SETTINGS, "翻译设置…");
         User32.AppendMenu(_hMenu, User32.MF_STRING, (IntPtr)CMD_STARTUP, "开机自动启动");
@@ -230,6 +254,18 @@ public sealed class TrayController : IDisposable
             case CMD_OCR_CLIPBOARD:
                 _instance?.OcrClipboardRequested?.Invoke();
                 break;
+            case CMD_DELAY_3_OCR:
+                _instance?.DelayedSnipRequested?.Invoke(SnipMode.Ocr, 3);
+                break;
+            case CMD_DELAY_3_IMAGE:
+                _instance?.DelayedSnipRequested?.Invoke(SnipMode.Image, 3);
+                break;
+            case CMD_DELAY_5_OCR:
+                _instance?.DelayedSnipRequested?.Invoke(SnipMode.Ocr, 5);
+                break;
+            case CMD_DELAY_5_IMAGE:
+                _instance?.DelayedSnipRequested?.Invoke(SnipMode.Image, 5);
+                break;
             case CMD_STARTUP:
                 // 传"取反后的当前真实状态": 勾选状态以注册表为准, 不靠菜单自己的勾号推断
                 _instance?.StartupToggleRequested?.Invoke(!StartupRegistration.IsEnabled());
@@ -245,6 +281,33 @@ public sealed class TrayController : IDisposable
                 _instance?.SyncClickToCopyCheck();
                 break;
             case CMD_EXIT: _instance?.ExitRequested?.Invoke(); break;
+        }
+    }
+
+    /// <summary>
+    /// 弹一条托盘气泡提示 (延时截图开始倒计时时告知用户, 免得以为点了没反应)。
+    /// 气泡被系统勿扰模式/通知策略抑制时静默失败, 不影响截图本身。
+    /// </summary>
+    public void ShowBalloon(string title, string text)
+    {
+        try
+        {
+            var nid = new Shell32.NOTIFYICONDATA
+            {
+                cbSize = Marshal.SizeOf<Shell32.NOTIFYICONDATA>(),
+                hWnd = _hwnd,
+                uID = 1,
+                uFlags = Shell32.NIF_INFO,
+                szTip = "",
+                szInfo = text,
+                szInfoTitle = title,
+                dwInfoFlags = Shell32.NIIF_INFO,
+            };
+            Shell32.Shell_NotifyIcon(Shell32.NIM_MODIFY, ref nid);
+        }
+        catch
+        {
+            // 托盘气泡只是辅助提示, 失败不影响延时截图
         }
     }
 
@@ -316,8 +379,11 @@ public sealed class TrayController : IDisposable
             User32.MF_BYCOMMAND | (SleepPreventer.IsActive ? User32.MF_CHECKED : User32.MF_UNCHECKED));
     }
 
-    /// <summary>按设置刷新「单击复制识别结果」的勾选 (纯设置项, 无外部真实状态需要回读)</summary>
-    private void SyncClickToCopyCheck()
+    /// <summary>
+    /// 按设置刷新「单击复制识别结果」的勾选 (纯设置项, 无外部真实状态需要回读)。
+    /// 翻译设置对话框可能改动该开关, 关闭后由 Program 调用本方法同步勾选。
+    /// </summary>
+    public void SyncClickToCopyCheck()
     {
         User32.CheckMenuItem(
             _hMenu,

@@ -18,6 +18,9 @@ public sealed class PinnedImageForm : Form
 {
     private readonly Bitmap _image;
 
+    /// <summary>窗口所在屏的 DPI 因子; 构造阶段按 96 DPI 估算, 句柄创建后按 DeviceDpi 校正</summary>
+    private float _dpi = 1f;
+
     /// <summary>构造贴图窗口; 图像所有权转移给本窗口 (关闭时释放)</summary>
     /// <param name="image">已合成标注的成品图 (物理像素)</param>
     /// <param name="location">窗口左上角 (屏幕坐标)</param>
@@ -36,21 +39,49 @@ public sealed class PinnedImageForm : Form
         // 尺寸换算: 传入的是<b>物理像素</b>, 而 WinForms 的 ClientSize 是<b>逻辑像素</b>。
         // 本程序是 PerMonitorV2, 在 125%/150% 缩放下两者不等 —— 若直接把物理像素当逻辑像素,
         // 贴图会被放大 1.25/1.5 倍, 看起来"糊了"且与截图尺寸对不上。
-        // 这里除以 DPI 因子, 使贴图在任何缩放比例下都是 1:1 显示 (与 OcrResultForm 同一套换算)。
-        float dpi = DpiFactor();
-        ClientSize = new Size(
-            (int)Math.Round(image.Width / dpi),
-            (int)Math.Round(image.Height / dpi));
-
+        // 构造阶段先按 96 DPI 估算; 真实 DPI 必须取窗口自身 (DeviceDpi), 见 OnHandleCreated。
+        ClientSize = new Size(Math.Max(1, image.Width), Math.Max(1, image.Height));
         Location = location;
         Cursor = Cursors.SizeAll;
     }
 
-    /// <summary>物理像素/逻辑像素比例 (与 OcrResultForm 的换算保持一致)</summary>
-    private static float DpiFactor()
+    /// <summary>
+    /// 句柄创建后先记录窗口实际所在屏的 DPI。
+    ///
+    /// 这里<b>不能</b>立刻设置 ClientSize: <see cref="Form.CreateHandle"/> 在 OnHandleCreated
+    /// 之后还会执行 ApplyClientSize/UpdateStylesCore, 按旧的非客户区再改一次尺寸
+    /// (实测 300x200 会被改回 300x239)。真正落尺寸放在 <see cref="OnLoad"/>。
+    ///
+    /// 也不能用 <c>Graphics.FromHwnd(IntPtr.Zero)</c>: 那是桌面 DC, 永远返回主屏 DPI。
+    /// 主屏 100% + 副屏 150% 时, 副屏上的贴图会按 100% 计算, 结果小一圈。
+    /// </summary>
+    protected override void OnHandleCreated(EventArgs e)
     {
-        using var g = Graphics.FromHwnd(IntPtr.Zero);
-        return g.DpiX / 96f;
+        base.OnHandleCreated(e);
+        _dpi = DeviceDpi / 96f;
+    }
+
+    /// <summary>样式与客户区在 CreateHandle 末端才最终确定, Load 时按 1:1 落一次尺寸</summary>
+    protected override void OnLoad(EventArgs e)
+    {
+        base.OnLoad(e);
+        ApplyDpi(DeviceDpi / 96f);
+    }
+
+    /// <summary>贴图被拖到另一块缩放比例不同的屏幕时, 保持 1:1 物理像素大小</summary>
+    protected override void OnDpiChanged(DpiChangedEventArgs e)
+    {
+        base.OnDpiChanged(e);
+        ApplyDpi(e.DeviceDpiNew / 96f);
+    }
+
+    /// <summary>按 DPI 因子把物理像素图片换算成客户区逻辑尺寸 (左上角不动)</summary>
+    private void ApplyDpi(float dpi)
+    {
+        _dpi = dpi <= 0 ? 1f : dpi;
+        ClientSize = new Size(
+            Math.Max(1, (int)Math.Round(_image.Width / _dpi)),
+            Math.Max(1, (int)Math.Round(_image.Height / _dpi)));
     }
 
     /// <summary>

@@ -211,6 +211,12 @@ public static class SettingsStore
         if (string.IsNullOrWhiteSpace(s.TranslateTargetLanguage))
             s.TranslateTargetLanguage = AppSettings.AutoTranslateTarget;
 
+        // 单击只能有一种行为。旧配置里两个开关可能同时为 true (实际以翻译优先),
+        // 但托盘菜单仍把「单击复制识别结果」显示为勾选 —— 界面在骗人。
+        // 加载时统一收敛为互斥: 翻译开启即关闭复制; 用户想改回复制需显式操作。
+        if (s.ClickToTranslate)
+            s.ClickToCopy = false;
+
         return s;
     }
 

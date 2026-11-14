@@ -44,8 +44,8 @@ src/                       产品代码 (唯一的出货工程, 也是唯一的 
   ProtectedKey.cs          API Key 的 DPAPI 加密/解密 (CryptProtectData)
   ClipboardText.cs         剪贴板文本写入唯一入口 (统一 CRLF)
   NativeMethods.cs         Win32 P/Invoke (消息/热键/窗口/菜单/托盘/输入模拟)
-tests/AnnotationTests/     离线自检, 427 项 (几何/命中/历史/渲染/工具栏/尺寸徽标/放大镜取色/多屏定位/缩放平移/置信度展示/设置迁移/编辑框/OCR 后处理/选词几何/双击选词/CTC 字符框/翻译客户端/译文条布局)
-tests/InteractiveTests/    交互自检, 146 项 (真实窗口 + 真实按键 + 拖拽实时尺寸 + 多屏定位 + 工具栏 tooltip + 提示文案 + 状态栏省略号 + 托盘菜单文案 + 结果窗口单击复制/单击翻译 + 底部译文条 + 双击选词/三击选行 + 放大镜/取色 + DPI 基准 + CTC 选词 + 拖出收尾 + 缩放平移 + 置信度可视化 + 绘制缓存失效 + IME + 翻译窗口与居中, 需要桌面会话)
+tests/AnnotationTests/     离线自检, 434 项 (几何/命中/历史/渲染/工具栏/尺寸徽标/放大镜取色/多屏定位/缩放平移/置信度展示/设置迁移/编辑框/OCR 后处理/选词几何/双击选词/CTC 字符框/翻译客户端/译文条布局)
+tests/InteractiveTests/    交互自检, 151 项 (真实窗口 + 真实按键 + 拖拽实时尺寸 + 多屏定位 + 工具栏 tooltip + 提示文案 + 状态栏省略号 + 托盘菜单文案 + 结果窗口单击复制/单击翻译 + 底部译文条 + 双击选词/三击选行 + 放大镜/取色 + DPI 基准 + CTC 选词 + 拖出收尾 + 缩放平移 + 置信度可视化 + 绘制缓存失效 + IME + 翻译窗口与居中 + Ctrl+回车直接识别 + 延时截图 + 贴图 DPI, 需要桌面会话)
 tools/DriveTest/           端到端驱动实际 exe (真实鼠标键盘事件 + 抓屏取证 + 校验导出图)
 ```
 
@@ -79,10 +79,10 @@ dotnet publish src/SnipasteOcr.csproj -c Release -r win-x64 --self-contained -p:
 ```
 
 ```powershell
-# 离线自检 (427 项), 无需桌面会话 —— 改完必跑
+# 离线自检 (434 项), 无需桌面会话 —— 改完必跑
 dotnet run --project tests/AnnotationTests              # 期望输出「全部通过」, 退出码 0
 dotnet run --project tests/AnnotationTests -- sample    # 额外输出六种标注样例图
-# 交互自检 (146 项) —— 需要可用的桌面会话
+# 交互自检 (151 项) —— 需要可用的桌面会话
 dotnet run --project tests/InteractiveTests
 # 端到端驱动实际 exe (可选)
 dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
@@ -224,6 +224,19 @@ dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
   把单元格 `[Left, Right]` 投影到 x 轴, 按空隙两侧单元格数量 + 空隙宽度选列分隔,
   再按最大重叠归入列带。分行仍只走 `ClusterRows`; 改分列时不要重新引入左边界容差聚类。
 
+### 截图流程 / 标注
+
+- **F3 直接识别复用确认入口**: 标注工具栏宽度有 650px 上限 (`ToolbarCheck` 守着), 不要再加文字按钮。
+  `Ctrl+回车` / `Ctrl+点击「确认」` = 把标注后的图直接送 OCR, 普通回车/点击仍复制到剪贴板;
+  两条路径共用 `ConfirmCore(toOcr)`。
+- **F3 复制/保存失败不得关窗**: 剪贴板被占用、磁盘无权限时保留覆盖层并明确提示。
+  踩过的坑: 原先先 `Close()` 再 `Clipboard.SetImage`, 失败被静默吞掉, 用户标注完的截图直接消失。
+- **延时截图必须用 WinForms Timer**: 覆盖层是 WinForms 窗体, 必须在创建托盘/热键的 UI 线程构造;
+  `Task.Delay` + 后台线程会跨线程建窗体。延时入口只放托盘菜单, 不改变 F1/F3 的即时性;
+  直接按热键会取消尚未到期的延时, 避免稍后突然弹出第二个覆盖层。
+- **单击只能有一种行为**: `ClickToTranslate` 与 `ClickToCopy` 互斥 (加载 `Normalize` + 设置对话框 + 托盘切换三处)。
+  否则托盘勾着「单击复制」、实际却翻译。未配置 Key/未同意联网时, 单击只给状态提示, 不弹模态框。
+
 ### 坐标系与 DPI
 
 - 标注几何**一律存位图物理像素**(与 `SnipOverlayForm._screen` 同坐标系),不是窗口客户区逻辑坐标。
@@ -243,8 +256,12 @@ dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
   光标/命中框因此与绘制一致。`RenderChecks` 守着:导出平移后文字仍在图内、预览缩放后位置正确、
   文字区域没有偏蓝像素。
 - **贴图窗口的尺寸也要换算**:`PinnedImageForm` 收到的是**物理像素**位图,而 `ClientSize` 是
-  **逻辑像素**。必须除以 DPI 因子(与 `OcrResultForm.DpiFactor` 同一套),否则 150% 缩放下贴图被放大
-  1.5 倍且只画出左上角一部分。绘制时同样要按 `ClientSize` 尺寸还原,不能直接 `DrawImageUnscaled`。
+  **逻辑像素**。必须除以 DPI 因子,否则 150% 缩放下贴图被放大 1.5 倍且只画出左上角一部分。
+  绘制时同样要按 `ClientSize` 尺寸还原,不能直接 `DrawImageUnscaled`。
+  DPI 必须取窗口自身的 `DeviceDpi`(不能 `Graphics.FromHwnd(IntPtr.Zero)` 取主屏桌面 DC),
+  且 `ClientSize` 要在 `OnLoad` / `OnDpiChanged` 落 —— `OnHandleCreated` 太早:
+  `CreateHandle` 之后还会执行 ApplyClientSize/UpdateStylesCore 再改一次尺寸
+  (实测 300x200 被改成 300x239)。
 - **多屏定位必须夹紧到"目标屏",不能按虚拟屏**:覆盖层客户区横跨整个虚拟屏,提示条按 `ClientSize`
   居中会横跨接缝,工具栏按虚拟屏夹紧则贴着左屏右边缘框选时会整条跑到右屏。统一走
   `SnipGeometry.PickScreen`(取重叠面积最大的屏) + `ToolbarLocation`;屏幕矩形换算到客户区必须

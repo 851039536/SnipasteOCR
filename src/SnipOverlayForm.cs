@@ -100,6 +100,7 @@ public sealed class SnipOverlayForm : Form
         _toolbar.UndoRequested += DoUndo;
         _toolbar.RedoRequested += DoRedo;
         _toolbar.ConfirmRequested += Confirm;
+        _toolbar.OcrRequested += ConfirmToOcr;
         _toolbar.CancelRequested += Close;
         _toolbar.SaveRequested += SaveToFile;
         _toolbar.PinRequested += PinToScreen;
@@ -698,7 +699,11 @@ public sealed class SnipOverlayForm : Form
                 return;
 
             case Keys.Enter:
-                Confirm();
+                // Ctrl+回车 = 直接识别 (跳过剪贴板); 普通回车仍是确认
+                if (e.Control)
+                    ConfirmToOcr();
+                else
+                    Confirm();
                 return;
 
             case Keys.Z when e.Control:
@@ -988,10 +993,28 @@ public sealed class SnipOverlayForm : Form
     }
 
     /// <summary>
-    /// 确认: 合成标注后输出。OCR 模式打开结果窗口, 否则图片写入剪贴板;
-    /// 未框选时默认取屏幕中央 1/2 区域
+    /// 确认: 合成标注后输出。OCR 模式打开结果窗口, 否则图片写入剪贴板。
+    /// 未框选时默认取屏幕中央 1/2 区域。
     /// </summary>
-    private void Confirm()
+    private void Confirm() => ConfirmCore(toOcr: _mode == SnipMode.Ocr);
+
+    /// <summary>
+    /// F3 的「识别」: 标注后的图直接送 OCR, 不经过剪贴板。
+    /// 入口是 Ctrl+回车 / Ctrl+点击「确认」—— 工具栏宽度已到紧凑上限 (650px),
+    /// 再加一个文字按钮会把小选区上的工具栏撑得过宽, 因此复用确认按钮而不新增控件。
+    /// </summary>
+    private void ConfirmToOcr()
+    {
+        if (_mode != SnipMode.Image)
+        {
+            Confirm();
+            return;
+        }
+        ConfirmCore(toOcr: true);
+    }
+
+    /// <summary>确认动作的唯一实现; toOcr 决定产物交给结果窗口还是剪贴板</summary>
+    private void ConfirmCore(bool toOcr)
     {
         CommitEditorIfOpen();
 
@@ -1006,27 +1029,32 @@ public sealed class SnipOverlayForm : Form
         // Close() 会释放本窗体, 测试缝必须先取出
         Action<Bitmap, Rectangle>? launcher = OcrResultLauncherForTest;
 
-        Close();
-
-        if (_mode == SnipMode.Ocr)
+        if (toOcr)
         {
+            Close();
             if (launcher is { } launch)
                 launch(crop, anchor);
             else
                 new OcrResultForm(crop, anchor).Show();
+            return;
         }
-        else
+
+        // 图片模式: 剪贴板写入成功才关窗。
+        // 踩过的坑: 原先先 Close() 再 SetImage, 失败被静默吞掉 —— 用户标注完的图直接消失,
+        // 没有任何提示 (剪贴板常被 Office/远程桌面占用)。
+        try
         {
-            try
-            {
-                Clipboard.SetImage(crop);
-            }
-            catch
-            {
-                // 剪贴板被占用时忽略
-            }
-            crop.Dispose();
+            Clipboard.SetImage(crop);
         }
+        catch
+        {
+            crop.Dispose();
+            ShowToast("复制失败（剪贴板被占用）· 可点「保存」另存或按 Esc 放弃");
+            return;
+        }
+
+        crop.Dispose();
+        Close();
     }
 
     /// <summary>
@@ -1057,7 +1085,7 @@ public sealed class SnipOverlayForm : Form
         pinned.Show();
     }
 
-    /// <summary>保存为 PNG 文件 (从工具栏触发)</summary>
+    /// <summary>保存为 PNG 文件 (从工具栏触发); 失败时保留覆盖层并明确提示, 不能装作已保存</summary>
     private void SaveToFile()
     {
         CommitEditorIfOpen();
@@ -1072,9 +1100,14 @@ public sealed class SnipOverlayForm : Form
             string file = Path.Combine(dir, $"Snip_{DateTime.Now:yyyyMMdd_HHmmss}.png");
             crop.Save(file, System.Drawing.Imaging.ImageFormat.Png);
         }
-        catch
+        catch (Exception ex)
         {
-            // 保存失败 (无权限/磁盘满) 静默忽略, 不打断截图流程
+            // 原先静默吞掉异常后照样 Close(): 用户以为已保存, 实际文件不存在。
+            // 这里保留框选现场, 用户可重试或改用「确认」复制。
+            MessageBox.Show(this,
+                "保存失败：" + ex.Message + "\n\n截图仍保留在框选界面上，可重试或改用「确认」复制。",
+                "SnipasteOCR", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
         }
         finally
         {

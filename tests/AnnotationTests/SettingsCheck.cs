@@ -93,6 +93,19 @@ internal static class SettingsCheck
             Check(!back.ClickToCopy, "单击复制开关往返一致");
         }
 
+        // ===== 6. 单击行为互斥: 翻译开启时必须关闭复制 =====
+        // 旧版本允许两个开关同时为 true, 实际以翻译优先, 但托盘仍显示"单击复制"已勾选。
+        // 加载时收敛为互斥, 保证勾选与实际行为一致。
+        {
+            var both = Normalize(new AppSettings { ClickToCopy = true, ClickToTranslate = true });
+            Check(!both.ClickToCopy, "单击翻译开启时自动关闭单击复制");
+            Check(both.ClickToTranslate, "单击翻译开关本身保持不变");
+
+            var copyOnly = Normalize(new AppSettings { ClickToCopy = true, ClickToTranslate = false });
+            Check(copyOnly.ClickToCopy && !copyOnly.ClickToTranslate,
+                "仅开启单击复制时两项状态不变");
+        }
+
         return runner.ToResult();
     }
 }
