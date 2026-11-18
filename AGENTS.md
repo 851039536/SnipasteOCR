@@ -46,8 +46,8 @@ src/                       产品代码 (唯一的出货工程, 也是唯一的 
   ProtectedKey.cs          API Key 的 DPAPI 加密/解密 (CryptProtectData)
   ClipboardText.cs         剪贴板文本写入唯一入口 (统一 CRLF)
   NativeMethods.cs         Win32 P/Invoke (消息/热键/窗口/菜单/托盘/输入模拟)
-tests/AnnotationTests/     离线自检, 508 项 (几何/标注拖拽约束/马克笔与序号/命中/历史/渲染/工具栏/尺寸徽标/放大镜取色/多屏定位/缩放平移/置信度展示/设置迁移/编辑框/OCR 后处理/表格中间模型/选词几何/双击选词/CTC 字符框/翻译客户端/译文条布局)
-tests/InteractiveTests/    交互自检, 172 项 (真实窗口 + 真实按键 + Ctrl 约束绘制 + 马克笔/序号 + 重复上次识别 + 拖拽实时尺寸 + 多屏定位 + 工具栏 tooltip + 提示文案 + 状态栏省略号 + 托盘菜单文案 + 结果窗口单击复制/单击翻译 + 底部译文条 + 双击选词/三击选行 + 放大镜/取色 + DPI 基准 + CTC 选词 + 拖出收尾 + 缩放平移 + 置信度可视化 + 绘制缓存失效 + IME + 翻译窗口与居中 + Ctrl+回车直接识别 + 延时截图 + 贴图 DPI, 需要桌面会话)
+tests/AnnotationTests/     离线自检, 551 项 (几何/标注拖拽约束/标注选中与手柄/马克笔与序号/命中/历史/渲染/工具栏/尺寸徽标/放大镜取色/多屏定位/缩放平移/置信度展示/设置迁移/编辑框/OCR 后处理/表格中间模型/选词几何/双击选词/CTC 字符框/翻译客户端/译文条布局)
+tests/InteractiveTests/    交互自检, 188 项 (真实窗口 + 真实按键 + Ctrl 约束绘制 + 马克笔/序号 + 标注选中/拖动/层级/选区手柄 + 重复上次识别 + 拖拽实时尺寸 + 多屏定位 + 工具栏 tooltip + 提示文案 + 状态栏省略号 + 托盘菜单文案 + 结果窗口单击复制/单击翻译 + 底部译文条 + 双击选词/三击选行 + 放大镜/取色 + DPI 基准 + CTC 选词 + 拖出收尾 + 缩放平移 + 置信度可视化 + 绘制缓存失效 + IME + 翻译窗口与居中 + Ctrl+回车直接识别 + 延时截图 + 贴图 DPI, 需要桌面会话)
 tools/DriveTest/           端到端驱动实际 exe (真实鼠标键盘事件 + 抓屏取证 + 校验导出图)
 ```
 
@@ -60,6 +60,10 @@ tools/DriveTest/           端到端驱动实际 exe (真实鼠标键盘事件 +
 | `AnnotationDrag.cs` | 拖拽 Ctrl 约束 (矩形/椭圆变正, 箭头吸附 8 方向; 预览与提交共用) |
 | `AnnotationEngine.cs` | 渲染引擎 (八种工具 + 马赛克像素化 + 箭头几何 + 马克笔宽度/序号徽标几何) |
 | `AnnotationHistory.cs` | 撤销/重做 (快照模型, 深度上限 100) |
+| `AnnotationHit.cs` | 命中入口 (容差 + 自上而下找最上层) |
+| `AnnotationOrder.cs` | 层级调整 (纯列表重排, 不克隆不入历史) |
+| `AnnotationSelection.cs` | 选中装饰绘制 (虚线框 + 8 手柄; **只在覆盖层调用, 绝不进 Draw**) |
+| `SelectionResize.cs` | 选区 8 手柄的命中与拖拽几何 (逻辑像素; 逻辑→物理仍走 `SnipGeometry.ExportRect`) |
 | `AnnotationToolbar.cs` | 自绘工具栏 (图标全矢量) |
 | `TextEditorOverlay.cs` | 文字输入**接收**载体(不负责显示) |
 | `UiFont.cs` | 界面字体探测与回退 |
@@ -82,10 +86,10 @@ dotnet publish src/SnipasteOcr.csproj -c Release -r win-x64 --self-contained -p:
 ```
 
 ```powershell
-# 离线自检 (508 项), 无需桌面会话 —— 改完必跑
+# 离线自检 (551 项), 无需桌面会话 —— 改完必跑
 dotnet run --project tests/AnnotationTests              # 期望输出「全部通过」, 退出码 0
 dotnet run --project tests/AnnotationTests -- sample    # 额外输出八种标注样例图
-# 交互自检 (172 项) —— 需要可用的桌面会话
+# 交互自检 (188 项) —— 需要可用的桌面会话
 dotnet run --project tests/InteractiveTests
 # 端到端驱动实际 exe (可选)
 dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
@@ -157,6 +161,8 @@ dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
 | --- | --- |
 | `OcrTableBuilder.ClusterRows`(内部共用) | 阅读顺序排序 **和** 表格网格 **和** 段落/Markdown 导出的分行 |
 | `OcrTableBuilder.Build` | 表格网格 → CSV **和** Markdown 表格 **和** XLSX 导出 (三种格式不得各自重算分行分列) |
+| `AnnotationHit.Tolerance` | 点选 **和** 拖动 **和** 悬停光标命中判定 (容差不得各取常数) |
+| `SelectionResize` | 选区 8 手柄的命中 **和** 拖拽几何 (纯逻辑像素; 导出换算仍只走 `SnipGeometry.ExportRect`) |
 | `OcrText.BuildParagraphs`(私有,内部共用) | `ToPlainText` **和** `ToMarkdown` 的段落构造与行内接续 |
 | `OcrBox`(`Corners`/`TopEdge`/`BottomEdge`/`AxisAligned`/`Contains`) | 画框、命中测试、字符范围高亮、包围盒、轴对齐 |
 | `AnnotationEngine.ArrowGeometry.TryCreate` | 标注箭头 **和** 工具栏箭头图标 |
@@ -248,6 +254,18 @@ dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
   `SW_SHOWNA` 恢复(不抢焦点); 区域只记录真正送 OCR 的路径, 且必须完整落在当前虚拟屏内。
 - **Ctrl 约束拖拽只有一份几何**: 实时预览与松手提交都走 `AnnotationDrag.ConstrainEnd`;
   两边各算一份会在松手瞬间跳变。
+- **选中态必须存索引, 不能存 Annotation 引用**: `AnnotationHistory.Replace` 里是
+  `target.Add(a.Clone())`, 撤销/重做后整表对象全部换新。持有引用的表现是"选中框还在,
+  拖动却不生效", 因为拖的是已被丢弃的副本。所有改动标注集合的路径 (新增/删除/清空/撤销/重做)
+  都必须让 `_selected` 失效。
+- **选中装饰不得进入 `AnnotationEngine.Draw`**: 该函数同时服务覆盖层预览与 `RenderResult` 导出,
+  把手柄/虚线框写进去会被烧录到用户保存或复制的图片上。装饰只在 `SnipOverlayForm.DrawAnnotations`
+  里额外调一次 `AnnotationSelectionPainter.Draw`, 且不参与导出。
+  交互自检有逐像素断言守着这一条。
+- **拖动标注只压一次历史**: 首次真正位移时 `Push`, 之后按增量 `Offset`; 每帧 Push 会让一次
+  Ctrl+Z 只回退一个像素。已在层级端点时也不压, 避免出现"什么都没变"的空撤销步。
+- **选区手柄只产出 Rectangle**: `SelectionResize` 工作在逻辑像素, 不自行换算物理像素 ——
+  导出尺寸始终只由 `SnipGeometry.ExportRect` 决定, 否则尺寸徽标与实裁结果会分叉。
 - **延时截图必须用 WinForms Timer**: 覆盖层是 WinForms 窗体, 必须在创建托盘/热键的 UI 线程构造;
   `Task.Delay` + 后台线程会跨线程建窗体。延时入口只放托盘菜单, 不改变 F1/F3 的即时性;
   直接按热键会取消尚未到期的延时, 避免稍后突然弹出第二个覆盖层。

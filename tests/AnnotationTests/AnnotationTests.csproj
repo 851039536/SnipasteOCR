@@ -27,6 +27,11 @@
     <Compile Include="..\..\src\Annotations\AnnotationToolbar.cs" Link="Engine\AnnotationToolbar.cs" />
     <Compile Include="..\..\src\Annotations\TextEditorOverlay.cs" Link="Engine\TextEditorOverlay.cs" />
     <Compile Include="..\..\src\Annotations\UiFont.cs" Link="Engine\UiFont.cs" />
+    <!-- 标注选中 / 层级 / 选区手柄 (纯几何, 与窗体状态机解耦) -->
+    <Compile Include="..\..\src\Annotations\AnnotationHit.cs" Link="Engine\AnnotationHit.cs" />
+    <Compile Include="..\..\src\Annotations\AnnotationOrder.cs" Link="Engine\AnnotationOrder.cs" />
+    <Compile Include="..\..\src\Annotations\AnnotationSelection.cs" Link="Engine\AnnotationSelection.cs" />
+    <Compile Include="..\..\src\Annotations\SelectionResize.cs" Link="Engine\SelectionResize.cs" />
     <!-- 界面配色唯一来源 (标注工具栏/尺寸徽标引用) -->
     <Compile Include="..\..\src\UiTheme.cs" Link="Engine\UiTheme.cs" />
     <!-- 高倍缩放平移的夹紧几何 (结果窗口与离线断言共用) -->
