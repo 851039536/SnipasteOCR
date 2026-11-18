@@ -20,7 +20,9 @@ src/                       产品代码 (唯一的出货工程, 也是唯一的 
   OcrService.cs            OCR 引擎封装 (懒加载 / 档位切换 / 独立线程推理)
   OcrModelProfile.cs       模型档位枚举 (单独成文件, 便于设置自检不链接 OCR 引擎)
   OcrResultForm.cs         结果窗口: 框叠加、字符级拖选、缩放联动
-  OcrText.cs               结果后处理: 阅读顺序排序、表格/CSV 重建 (纯函数)
+  OcrText.cs               结果后处理: 阅读顺序排序、段落/CSV/Markdown 导出 (纯函数)
+  OcrTable.cs              表格网格中间模型 (CSV/XLSX/Markdown 表格的唯一来源)
+  AtomicFile.cs            原子写入 (同目录临时文件 + Move; 图片与字节)
   OcrBox.cs                检测框四角几何辅助 (5 处调用点共用)
   OcrSelection.cs          选词几何纯函数 (字符索引反解 / 多选阅读顺序名次)
   OcrGlyphLayout.cs        CTC 字符框布局 (真实字符边界/高亮; 缺失时回退权重)
@@ -44,7 +46,7 @@ src/                       产品代码 (唯一的出货工程, 也是唯一的 
   ProtectedKey.cs          API Key 的 DPAPI 加密/解密 (CryptProtectData)
   ClipboardText.cs         剪贴板文本写入唯一入口 (统一 CRLF)
   NativeMethods.cs         Win32 P/Invoke (消息/热键/窗口/菜单/托盘/输入模拟)
-tests/AnnotationTests/     离线自检, 476 项 (几何/标注拖拽约束/马克笔与序号/命中/历史/渲染/工具栏/尺寸徽标/放大镜取色/多屏定位/缩放平移/置信度展示/设置迁移/编辑框/OCR 后处理/选词几何/双击选词/CTC 字符框/翻译客户端/译文条布局)
+tests/AnnotationTests/     离线自检, 508 项 (几何/标注拖拽约束/马克笔与序号/命中/历史/渲染/工具栏/尺寸徽标/放大镜取色/多屏定位/缩放平移/置信度展示/设置迁移/编辑框/OCR 后处理/表格中间模型/选词几何/双击选词/CTC 字符框/翻译客户端/译文条布局)
 tests/InteractiveTests/    交互自检, 172 项 (真实窗口 + 真实按键 + Ctrl 约束绘制 + 马克笔/序号 + 重复上次识别 + 拖拽实时尺寸 + 多屏定位 + 工具栏 tooltip + 提示文案 + 状态栏省略号 + 托盘菜单文案 + 结果窗口单击复制/单击翻译 + 底部译文条 + 双击选词/三击选行 + 放大镜/取色 + DPI 基准 + CTC 选词 + 拖出收尾 + 缩放平移 + 置信度可视化 + 绘制缓存失效 + IME + 翻译窗口与居中 + Ctrl+回车直接识别 + 延时截图 + 贴图 DPI, 需要桌面会话)
 tools/DriveTest/           端到端驱动实际 exe (真实鼠标键盘事件 + 抓屏取证 + 校验导出图)
 ```
@@ -80,7 +82,7 @@ dotnet publish src/SnipasteOcr.csproj -c Release -r win-x64 --self-contained -p:
 ```
 
 ```powershell
-# 离线自检 (476 项), 无需桌面会话 —— 改完必跑
+# 离线自检 (508 项), 无需桌面会话 —— 改完必跑
 dotnet run --project tests/AnnotationTests              # 期望输出「全部通过」, 退出码 0
 dotnet run --project tests/AnnotationTests -- sample    # 额外输出八种标注样例图
 # 交互自检 (172 项) —— 需要可用的桌面会话
@@ -153,7 +155,8 @@ dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
 
 | 唯一来源 | 覆盖的调用点 |
 | --- | --- |
-| `OcrText.ClusterRows`(私有,内部共用) | 阅读顺序排序 **和** 表格/CSV 重建 **和** 段落/Markdown 导出的分行 |
+| `OcrTableBuilder.ClusterRows`(内部共用) | 阅读顺序排序 **和** 表格网格 **和** 段落/Markdown 导出的分行 |
+| `OcrTableBuilder.Build` | 表格网格 → CSV **和** Markdown 表格 **和** XLSX 导出 (三种格式不得各自重算分行分列) |
 | `OcrText.BuildParagraphs`(私有,内部共用) | `ToPlainText` **和** `ToMarkdown` 的段落构造与行内接续 |
 | `OcrBox`(`Corners`/`TopEdge`/`BottomEdge`/`AxisAligned`/`Contains`) | 画框、命中测试、字符范围高亮、包围盒、轴对齐 |
 | `AnnotationEngine.ArrowGeometry.TryCreate` | 标注箭头 **和** 工具栏箭头图标 |
