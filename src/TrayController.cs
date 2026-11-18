@@ -29,6 +29,8 @@ public sealed class TrayController : IDisposable
     private const int CMD_DELAY_5_OCR = 0x100D;
     private const int CMD_DELAY_5_IMAGE = 0x100E;
     private const int CMD_REPEAT_LAST_OCR = 0x100F;
+    private const int CMD_PIN_CLOSE_ALL = 0x1010;
+    private const int CMD_PIN_CLEAR_CLICK_THROUGH = 0x1011;
     private static readonly uint TRAY_CALLBACK = User32.WM_APP + 1;
 
     // 静态持有: 窗口过程委托必须防止被 GC; 单实例引用用于回调
@@ -40,6 +42,7 @@ public sealed class TrayController : IDisposable
     private readonly IntPtr _hMenu;
     private readonly IntPtr _hModelMenu;
     private readonly IntPtr _hDelayMenu;
+    private readonly IntPtr _hPinMenu;
     private Icon? _icon;
 
     /// <summary>宿主窗口句柄 (热键也注册在这里)</summary>
@@ -57,6 +60,15 @@ public sealed class TrayController : IDisposable
 
     /// <summary>用户要求重复上一次 OCR 的屏幕区域</summary>
     public event Action? RepeatLastOcrRequested;
+
+    /// <summary>用户要求关闭全部贴图</summary>
+    public event Action? PinCloseAllRequested;
+
+    /// <summary>
+    /// 用户要求取消全部贴图的鼠标穿透。
+    /// 穿透后窗口收不到任何鼠标消息, 这是唯一的"逃生口"。
+    /// </summary>
+    public event Action? PinClearClickThroughRequested;
     /// <summary>
     /// 用户切换"开机自动启动" (参数为期望的新状态)。
     /// 实际写注册表由 Program 处理, 并回读真实结果后回调 <see cref="SyncStartupCheck"/> 纠正勾选,
@@ -107,9 +119,13 @@ public sealed class TrayController : IDisposable
         if (atom == 0)
             throw new Win32Exception(Marshal.GetLastWin32Error(), "RegisterClassEx 失败");
 
-        // 可见但移到屏幕外: TrackPopupMenu 需要 SetForegroundWindow 成功, 而隐藏窗口无法设为前台
+        // 可见但移到屏幕外: TrackPopupMenu 需要 SetForegroundWindow 成功, 而隐藏窗口无法设为前台。
+        //
+        // 这里**不能**加 WS_EX_NOACTIVATE: 不可激活的窗口无法成为前台窗口, 右键菜单会弹出后立刻消失。
+        // 旧代码传的是 0x0800 (并非任何有效的 WS_EX 位), 所以"碰巧"没生效; 常量修正为
+        // 0x08000000 之后若继续传它就会真的禁用激活 —— 因此这里显式只传 TOOLWINDOW。
         _hwnd = User32.CreateWindowEx(
-            User32.WS_EX_TOOLWINDOW | User32.WS_EX_NOACTIVATE, "SnipasteOcr.Host", "SnipasteOcr", 0,
+            User32.WS_EX_TOOLWINDOW, "SnipasteOcr.Host", "SnipasteOcr", 0,
             -20000, -20000, 1, 1, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
         if (_hwnd == IntPtr.Zero)
             throw new Win32Exception(Marshal.GetLastWin32Error(), "CreateWindowEx 失败");
@@ -144,11 +160,21 @@ public sealed class TrayController : IDisposable
         User32.AppendMenu(_hDelayMenu, User32.MF_STRING, (IntPtr)CMD_DELAY_5_OCR, "5 秒后截图识别");
         User32.AppendMenu(_hDelayMenu, User32.MF_STRING, (IntPtr)CMD_DELAY_5_IMAGE, "5 秒后截图标注");
 
+        // 贴图子菜单。为什么必须有托盘入口:
+        // 贴图是置顶无边框窗口, 没有这个入口用户只能一个个右键关;
+        // 而"鼠标穿透"开启后窗口连右键都收不到, 只能从这里恢复。
+        _hPinMenu = User32.CreatePopupMenu();
+        if (_hPinMenu == IntPtr.Zero)
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "CreatePopupMenu(贴图) 失败");
+        User32.AppendMenu(_hPinMenu, User32.MF_STRING, (IntPtr)CMD_PIN_CLOSE_ALL, "关闭全部贴图");
+        User32.AppendMenu(_hPinMenu, User32.MF_STRING, (IntPtr)CMD_PIN_CLEAR_CLICK_THROUGH, "取消全部鼠标穿透");
+
         User32.AppendMenu(_hMenu, User32.MF_STRING, (IntPtr)CMD_SNIP_OCR, "截图识别 (F1)");
         User32.AppendMenu(_hMenu, User32.MF_STRING, (IntPtr)CMD_SNIP_IMAGE, "截图标注 (F3)");
         User32.AppendMenu(_hMenu, User32.MF_STRING, (IntPtr)CMD_OCR_CLIPBOARD, "识别剪贴板图片");
         User32.AppendMenu(_hMenu, User32.MF_STRING, (IntPtr)CMD_REPEAT_LAST_OCR, "重复上次识别");
         User32.AppendMenu(_hMenu, User32.MF_SEPARATOR, IntPtr.Zero, null);
+        User32.AppendMenu(_hMenu, User32.MF_STRING | User32.MF_POPUP, _hPinMenu, "贴图");
         User32.AppendMenu(_hMenu, User32.MF_STRING | User32.MF_POPUP, _hModelMenu, "识别模型");
         User32.AppendMenu(_hMenu, User32.MF_STRING | User32.MF_POPUP, _hDelayMenu, "延时截图");
         User32.AppendMenu(_hMenu, User32.MF_STRING, (IntPtr)CMD_HOTKEY_SETTINGS, "热键设置…");
@@ -261,6 +287,12 @@ public sealed class TrayController : IDisposable
                 break;
             case CMD_REPEAT_LAST_OCR:
                 _instance?.RepeatLastOcrRequested?.Invoke();
+                break;
+            case CMD_PIN_CLOSE_ALL:
+                _instance?.PinCloseAllRequested?.Invoke();
+                break;
+            case CMD_PIN_CLEAR_CLICK_THROUGH:
+                _instance?.PinClearClickThroughRequested?.Invoke();
                 break;
             case CMD_DELAY_3_OCR:
                 _instance?.DelayedSnipRequested?.Invoke(SnipMode.Ocr, 3);

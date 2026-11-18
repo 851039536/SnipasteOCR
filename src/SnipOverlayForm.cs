@@ -894,7 +894,11 @@ public sealed class SnipOverlayForm : Form
                 return;
 
             case Keys.C when !e.Control && !e.Alt:
-                CopyColorAtCursor();
+                // Shift+C = 把当前像素贴成色块; C = 只复制色值
+                if (e.Shift)
+                    PinColorAtCursor();
+                else
+                    CopyColorAtCursor();
                 e.Handled = true;
                 return;
 
@@ -1001,6 +1005,33 @@ public sealed class SnipOverlayForm : Form
             // 剪贴板被其它进程占用: 不打断截图流程, 但必须让用户知道没复制成功
             ShowToast("颜色复制失败");
         }
+    }
+
+    /// <summary>
+    /// Shift+C: 把光标处的颜色贴成色块。
+    ///
+    /// 取样源与取色共用 <see cref="_screen"/> (覆盖层启动时抓的底图), 不重新抓屏 ——
+    /// 那时候屏幕上已经有覆盖层与放大镜, 会把界面自己的颜色取走。
+    /// </summary>
+    private void PinColorAtCursor()
+    {
+        if (!IsHandleCreated)
+            return;
+
+        Point client = PointToClient(Cursor.Position);
+        if (!ClientRectangle.Contains(client))
+            return;
+        if (_toolbar.Visible && _toolbar.Bounds.Contains(client))
+            return;   // 工具栏盖住的位置不是用户看到的屏幕内容
+
+        PointF physical = ToPhysical(client);
+        var point = new Point((int)Math.Floor(physical.X), (int)Math.Floor(physical.Y));
+        Color color = SnipMagnifier.Sample(_screen, point);
+
+        // 贴在光标右下方一点, 避免正好盖住用户正在看的那个像素
+        new PinnedColorForm(color, new Point(Cursor.Position.X + 18, Cursor.Position.Y + 18)).Show();
+
+        ShowToast($"已贴色块 {SnipMagnifier.FormatHex(color)}");
     }
 
     /// <summary>短暂显示底部状态, 由 <see cref="_toastTimer"/> 恢复为常规提示</summary>

@@ -25,7 +25,25 @@ public static class User32
     public const int HTCAPTION = 2;
     public const uint WM_RBUTTONUP = 0x0205;
     public const uint WS_EX_TOOLWINDOW = 0x0080;
-    public const uint WS_EX_NOACTIVATE = 0x0800;
+    /// <summary>
+    /// 不激活: 点击窗口不会抢走焦点。
+    /// 正确值是 <b>0x08000000</b> —— 旧代码写成 0x0800, 那不是任何有效的 WS_EX 位,
+    /// 等于从未设置过 (贴图用字面量躲开了, 托盘宿主窗口则一直是"可激活"状态)。
+    /// </summary>
+    public const uint WS_EX_NOACTIVATE = 0x08000000;
+    /// <summary>分层窗口; 设置透明度或鼠标穿透的前提</summary>
+    public const uint WS_EX_LAYERED = 0x00080000;
+    /// <summary>鼠标穿透: 命中测试直接落到下层窗口, 本窗口收不到任何鼠标消息</summary>
+    public const uint WS_EX_TRANSPARENT = 0x00000020;
+    /// <summary>扩展样式索引 (GetWindowLongPtr / SetWindowLongPtr)</summary>
+    public const int GWL_EXSTYLE = -20;
+
+    // SetWindowPos 标志 (winuser.h)
+    public const uint SWP_NOSIZE = 0x0001;
+    public const uint SWP_NOMOVE = 0x0002;
+    public const uint SWP_NOZORDER = 0x0004;
+    public const uint SWP_NOACTIVATE = 0x0010;
+    public const uint SWP_FRAMECHANGED = 0x0020;
     public const uint WM_LBUTTONDBLCLK = 0x0203;
     public const uint TPM_LEFTALIGN = 0;
     public const uint TPM_TOPMOST = 0x0200;
@@ -182,6 +200,21 @@ public static class User32
     /// <summary>把窗口设为前台 (弹菜单前必须, 否则菜单立即消失)</summary>
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    // 本项目仅发布 win-x64, 因此直接绑 *PtrW 版本 (32 位下这两个入口不存在)
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW", SetLastError = true)]
+    /// <summary>读取窗口属性 (扩展样式用 <see cref="GWL_EXSTYLE"/>)</summary>
+    public static extern IntPtr GetWindowLongPtr(IntPtr hWnd, int nIndex);
+
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW", SetLastError = true)]
+    /// <summary>写入窗口属性; 改样式后必须再 SetWindowPos(SWP_FRAMECHANGED) 才会生效</summary>
+    public static extern IntPtr SetWindowLongPtr(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    /// <summary>改变窗口位置/尺寸/Z 序/样式生效; 鼠标穿透切换后必须调一次</summary>
+    public static extern bool SetWindowPos(
+        IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint uFlags);
 
     // ===== 菜单 =====
 

@@ -32,7 +32,12 @@ src/                       产品代码 (唯一的出货工程, 也是唯一的 
   TrayController.cs        Win32 托盘图标 + 菜单
   StartupRegistration.cs   开机自启 (写 HKCU 的 Run 键, 无管理员权限)
   SleepPreventer.cs        防休眠 (SetThreadExecutionState; 不移动鼠标)
-  PinnedImageForm.cs       贴图窗口 (钉在屏幕上的置顶小窗, 可拖动/右键关闭)
+  PinnedWindowBase.cs      贴图窗口基类 (置顶/不激活/标题栏拖拽/DPI 落尺寸/鼠标穿透)
+  PinnedImageForm.cs       图片贴图 (滚轮缩放 / Ctrl+滚轮透明度 / 双击复位 / 右键关闭)
+  PinnedTextForm.cs        文字贴图 (GDI+ DrawString; 分层窗口上不能用 ClearType)
+  PinnedColorForm.cs       颜色贴图 (双击复制 HEX)
+  PinnedRegistry.cs        贴图登记表 (关闭全部 / 取消全部穿透的唯一出口)
+  PinnedImageLayout.cs     贴图尺寸/缩放/透明度/锚点纯函数
   SnipSizeBadge.cs         框选实时尺寸徽标 (宽 × 高, 物理像素; 纯函数布局 + 自绘)
   SnipMagnifier.cs         放大镜/取色器纯逻辑 (面板定位/底图采样/颜色格式化)
   SnipMagnifierControl.cs  放大镜子控件 (显示层; 不参与 RenderResult)
@@ -46,8 +51,8 @@ src/                       产品代码 (唯一的出货工程, 也是唯一的 
   ProtectedKey.cs          API Key 的 DPAPI 加密/解密 (CryptProtectData)
   ClipboardText.cs         剪贴板文本写入唯一入口 (统一 CRLF)
   NativeMethods.cs         Win32 P/Invoke (消息/热键/窗口/菜单/托盘/输入模拟)
-tests/AnnotationTests/     离线自检, 551 项 (几何/标注拖拽约束/标注选中与手柄/马克笔与序号/命中/历史/渲染/工具栏/尺寸徽标/放大镜取色/多屏定位/缩放平移/置信度展示/设置迁移/编辑框/OCR 后处理/表格中间模型/选词几何/双击选词/CTC 字符框/翻译客户端/译文条布局)
-tests/InteractiveTests/    交互自检, 188 项 (真实窗口 + 真实按键 + Ctrl 约束绘制 + 马克笔/序号 + 标注选中/拖动/层级/选区手柄 + 重复上次识别 + 拖拽实时尺寸 + 多屏定位 + 工具栏 tooltip + 提示文案 + 状态栏省略号 + 托盘菜单文案 + 结果窗口单击复制/单击翻译 + 底部译文条 + 双击选词/三击选行 + 放大镜/取色 + DPI 基准 + CTC 选词 + 拖出收尾 + 缩放平移 + 置信度可视化 + 绘制缓存失效 + IME + 翻译窗口与居中 + Ctrl+回车直接识别 + 延时截图 + 贴图 DPI, 需要桌面会话)
+tests/AnnotationTests/     离线自检, 576 项 (几何/标注拖拽约束/标注选中与手柄/马克笔与序号/命中/历史/渲染/工具栏/尺寸徽标/放大镜取色/贴图布局/多屏定位/缩放平移/置信度展示/设置迁移/编辑框/OCR 后处理/表格中间模型/选词几何/双击选词/CTC 字符框/翻译客户端/译文条布局)
+tests/InteractiveTests/    交互自检, 202 项 (真实窗口 + 真实按键 + Ctrl 约束绘制 + 马克笔/序号 + 标注选中/拖动/层级/选区手柄 + 贴图缩放/穿透 + 重复上次识别 + 拖拽实时尺寸 + 多屏定位 + 工具栏 tooltip + 提示文案 + 状态栏省略号 + 托盘菜单文案 + 结果窗口单击复制/单击翻译 + 底部译文条 + 双击选词/三击选行 + 放大镜/取色 + DPI 基准 + CTC 选词 + 拖出收尾 + 缩放平移 + 置信度可视化 + 绘制缓存失效 + IME + 翻译窗口与居中 + Ctrl+回车直接识别 + 延时截图 + 贴图 DPI, 需要桌面会话)
 tools/DriveTest/           端到端驱动实际 exe (真实鼠标键盘事件 + 抓屏取证 + 校验导出图)
 ```
 
@@ -86,10 +91,10 @@ dotnet publish src/SnipasteOcr.csproj -c Release -r win-x64 --self-contained -p:
 ```
 
 ```powershell
-# 离线自检 (551 项), 无需桌面会话 —— 改完必跑
+# 离线自检 (576 项), 无需桌面会话 —— 改完必跑
 dotnet run --project tests/AnnotationTests              # 期望输出「全部通过」, 退出码 0
 dotnet run --project tests/AnnotationTests -- sample    # 额外输出八种标注样例图
-# 交互自检 (188 项) —— 需要可用的桌面会话
+# 交互自检 (202 项) —— 需要可用的桌面会话
 dotnet run --project tests/InteractiveTests
 # 端到端驱动实际 exe (可选)
 dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
@@ -163,6 +168,7 @@ dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
 | `OcrTableBuilder.Build` | 表格网格 → CSV **和** Markdown 表格 **和** XLSX 导出 (三种格式不得各自重算分行分列) |
 | `AnnotationHit.Tolerance` | 点选 **和** 拖动 **和** 悬停光标命中判定 (容差不得各取常数) |
 | `SelectionResize` | 选区 8 手柄的命中 **和** 拖拽几何 (纯逻辑像素; 导出换算仍只走 `SnipGeometry.ExportRect`) |
+| `PinnedImageLayout` | 贴图初始尺寸 **和** 滚轮缩放 **和** DPI 变化 **和** 缩放锚点 (同一套换算) |
 | `OcrText.BuildParagraphs`(私有,内部共用) | `ToPlainText` **和** `ToMarkdown` 的段落构造与行内接续 |
 | `OcrBox`(`Corners`/`TopEdge`/`BottomEdge`/`AxisAligned`/`Contains`) | 画框、命中测试、字符范围高亮、包围盒、轴对齐 |
 | `AnnotationEngine.ArrowGeometry.TryCreate` | 标注箭头 **和** 工具栏箭头图标 |
@@ -297,6 +303,18 @@ dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
   且 `ClientSize` 要在 `OnLoad` / `OnDpiChanged` 落 —— `OnHandleCreated` 太早:
   `CreateHandle` 之后还会执行 ApplyClientSize/UpdateStylesCore 再改一次尺寸
   (实测 300x200 被改成 300x239)。
+- **贴图的窗口语义已收进 `PinnedWindowBase`**: 三种贴图 (图片/文字/色块) 只在"画什么"上不同,
+  置顶/不激活/标题栏拖拽/DPI 落尺寸/鼠标穿透都在基类。新增贴图类型不要另抄一份 `CreateParams`
+  或 `OnDpiChanged` —— 上面那些坑已经踩过一遍。
+- **鼠标穿透必须留托盘出口**: `WS_EX_TRANSPARENT` 生效后窗口收不到任何鼠标消息, 用户既右键不了,
+  也点不到菜单。`PinnedRegistry` 静态持有活着的贴图, 托盘「贴图 → 取消全部鼠标穿透」是唯一恢复途径。
+  新增任何"可穿透"的窗口类型都必须 `PinnedRegistry.Register(this)`, 否则穿透后无法收回。
+- **`WS_EX_NOACTIVATE` 的正确值是 `0x08000000`**: 旧代码写成 `0x0800`, 那不是任何有效的 WS_EX 位,
+  等于从未设置过 (贴图用字面量躲开了)。修正常量后 `TrayController` 的宿主窗口**必须去掉该标志** ——
+  不可激活的窗口无法成为前台窗口, 右键菜单会弹出后立刻消失。贴图窗口要用它 (不抢输入焦点),
+  托盘宿主窗口不能用它。
+- **文字贴图不要用 `TextRenderer`**: 分层/半透明窗口上 ClearType 会产生彩边,
+  用 `Graphics.DrawString` (GDI+ 灰度抗锯齿) 与 `MeasureString` 测量。
 - **多屏定位必须夹紧到"目标屏",不能按虚拟屏**:覆盖层客户区横跨整个虚拟屏,提示条按 `ClientSize`
   居中会横跨接缝,工具栏按虚拟屏夹紧则贴着左屏右边缘框选时会整条跑到右屏。统一走
   `SnipGeometry.PickScreen`(取重叠面积最大的屏) + `ToolbarLocation`;屏幕矩形换算到客户区必须

@@ -74,6 +74,7 @@ public sealed class OcrResultForm : Form
     private readonly ToolStripButton _copyCsvComma = new();
     private readonly ToolStripButton _copyPlain = new();
     private readonly ToolStripButton _copyMarkdown = new();
+    private readonly ToolStripButton _pinText = new();
     private readonly ToolStripButton _copySelection = new();
     private readonly ToolStripButton _saveImage = new();
     private readonly ToolStripButton _translateButton = new();
@@ -248,6 +249,12 @@ public sealed class OcrResultForm : Form
         _copyMarkdown.ToolTipText = "导出为 Markdown（段落间空行分隔）";
         _copyMarkdown.Click += (_, _) => CopyText(OcrText.ToMarkdown(CurrentLines()));
 
+        // 贴文字: 把识别结果变成桌面便签, 不用先复制再找记事本。
+        // 放在导出下拉里而不是工具栏 —— 工具栏宽度已经吃紧, 加按钮会撑破小截图的窗口。
+        _pinText.Text = "贴到屏幕";
+        _pinText.ToolTipText = "把识别文本贴为置顶便签（有选中则贴选中）";
+        _pinText.Click += (_, _) => PinTextToScreen();
+
         _copyMenu.DropDownItems.AddRange(
         [
             _copyAll,
@@ -256,6 +263,8 @@ public sealed class OcrResultForm : Form
             _copyCsvComma,
             _copyPlain,
             _copyMarkdown,
+            new ToolStripSeparator(),
+            _pinText,
         ]);
 
         _saveImage.Text = "保存图片";
@@ -1409,6 +1418,24 @@ public sealed class OcrResultForm : Form
     {
         var rows = _lines.Where(l => !string.IsNullOrEmpty(l.Text)).Select(OcrText.ToLine).ToList();
         return _wordOrder ? OcrText.SortReadingOrder(rows) : rows;
+    }
+
+    /// <summary>
+    /// 把识别文本贴成桌面便签 (文字贴图)。
+    /// 有选中贴选中, 无选中贴全部 —— 与「翻译」按钮的选择语义保持一致。
+    /// 字体所有权转移给贴图窗口, 这里不要再释放。
+    /// </summary>
+    private void PinTextToScreen()
+    {
+        string text = GetSelectedText();
+        if (string.IsNullOrWhiteSpace(text))
+            text = GetAllText();
+        if (string.IsNullOrWhiteSpace(text))
+            return;
+
+        // 贴在本窗口左上方一点, 关掉结果窗口后便签仍在原位附近
+        var location = new Point(Math.Max(0, Left + 40), Math.Max(0, Top + 40));
+        new PinnedTextForm(text.Trim(), UiFont.Create(13f), location).Show();
     }
 
     /// <summary>全部识别文本 (换行拼接, 忽略空行)</summary>

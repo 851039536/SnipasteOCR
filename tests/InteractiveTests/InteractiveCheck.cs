@@ -1413,6 +1413,9 @@ internal static class InteractiveCheck
         // 23. 标注选中 / 拖动 / 层级 / 删除 / 选区手柄, 以及导出图不含选中装饰
         SelectionInteractionChecks.Run(runner);
 
+        // 24. 贴图缩放 / 鼠标穿透 / 注册表 (关闭全部、取消穿透)
+        PinnedInteractionChecks.Run(runner);
+
         return runner.ToResult();
     }
 

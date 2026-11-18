@@ -173,6 +173,7 @@ RunGroup("渲染校验", RenderChecks.Run);
 RunGroup("工具栏校验", ToolbarCheck.Run);
 RunGroup("尺寸徽标校验", SnipSizeCheck.Run);
 RunGroup("放大镜取色校验", MagnifierCheck.Run);
+RunGroup("贴图布局校验", PinnedLayoutCheck.Run);
 RunGroup("多屏定位校验", MultiScreenCheck.Run);
 RunGroup("缩放平移校验", OcrPanCheck.Run);
 RunGroup("置信度展示校验", OcrConfidenceCheck.Run);

@@ -79,6 +79,16 @@ internal static class Program
                 }
             };
 
+            // 贴图管理: 关闭全部 / 取消鼠标穿透。
+            // 穿透后窗口收不到任何鼠标消息, 这个菜单项是用户唯一的"逃生口"。
+            tray.PinCloseAllRequested += () => PinnedRegistry.CloseAll();
+            tray.PinClearClickThroughRequested += () =>
+            {
+                int restored = PinnedRegistry.ClearClickThrough();
+                if (restored == 0)
+                    tray.ShowBalloon("SnipasteOCR", "没有处于鼠标穿透状态的贴图。");
+            };
+
             // 延时截图: 给用户时间先打开要截的菜单/下拉框; 气泡提示倒计时开始
             tray.DelayedSnipRequested += (mode, seconds) =>
             {

@@ -43,6 +43,8 @@
     <Compile Include="..\..\src\SnipSizeBadge.cs" Link="Engine\SnipSizeBadge.cs" />
     <!-- 放大镜/取色器纯逻辑 (布局/采样/格式化) -->
     <Compile Include="..\..\src\SnipMagnifier.cs" Link="Engine\SnipMagnifier.cs" />
+    <!-- 贴图窗口的尺寸/缩放/透明度/锚点纯函数 -->
+    <Compile Include="..\..\src\PinnedImageLayout.cs" Link="Engine\PinnedImageLayout.cs" />
     <!-- 设置模型与迁移 (不依赖 OCR 引擎, 故枚举单独成文件) -->
     <Compile Include="..\..\src\AppSettings.cs" Link="Engine\AppSettings.cs" />
     <Compile Include="..\..\src\OcrModelProfile.cs" Link="Engine\OcrModelProfile.cs" />
