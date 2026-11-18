@@ -282,6 +282,7 @@ dotnet publish src/SnipasteOcr.csproj -c Release -r win-x64 --self-contained -p:
 | `-IncludePdb` | 打包时附带 46MB 调试符号(默认不带,分发不需要) |
 | `-NoZip` | 只输出目录,不压缩 |
 | `-SkipClean` | 跳过清理。省几十秒,但 `LNK1104` 会原样复现 |
+| `-NoLaunch` | 发布成功后**不**自动启动产物。默认会启动,便于双击 `publish.cmd` 后立刻验收;只想出包时加这个开关 |
 | `-Configuration <配置>` | 构建配置,默认 `Release` |
 
 > 脚本不受调用目录限制(以自身位置推导仓库根),但需 **PowerShell 5.1+**。

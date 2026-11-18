@@ -41,6 +41,11 @@
 .PARAMETER NoZip
     打包时只复制文件到输出目录, 不生成 zip。
 
+.PARAMETER NoLaunch
+    发布成功后不自动启动产物。
+    默认会启动 PublishDir 里的 SnipasteOcr.exe, 便于双击 publish.cmd 后直接验收;
+    只想出包、不想被弹出来的托盘程序打断时加这个开关。
+
 .NOTES
     Windows 下 .ps1 双击默认是用记事本打开, 并不会执行。
     要"双击就发布", 请双击同目录的 publish.cmd (或在资源管理器里右键
@@ -57,6 +62,10 @@
 .EXAMPLE
     # 只要发布产物, 不打包
     .\scripts\publish.ps1 -OutputDir '' -SelfTest
+
+.EXAMPLE
+    # 只出包, 不自动启动程序
+    .\scripts\publish.ps1 -NoLaunch
 #>
 [CmdletBinding()]
 param(
@@ -68,7 +77,9 @@ param(
     [switch]$SkipClean,
     [switch]$SelfTest,
     [switch]$IncludePdb,
-    [switch]$NoZip
+    [switch]$NoZip,
+    # 发布成功后不自动启动产物。默认启动 —— 双击 publish.cmd 就能立刻验收效果。
+    [switch]$NoLaunch
 )
 
 Set-StrictMode -Version Latest
@@ -291,3 +302,23 @@ Write-Host ""
 Write-Host '  提醒: 发布只证明能编译并产出 exe。首次出包请手工验收一遍 ——' -ForegroundColor DarkGray
 Write-Host '        托盘图标出现 -> F1 框选出文字 -> 右键托盘切换一次模型档位' -ForegroundColor DarkGray
 Write-Host '        (切档位能验证 Medium/Tiny 两套模型程序集都被正确保留)' -ForegroundColor DarkGray
+
+# ---------------------------------------------------------------------------
+Write-Step '启动'
+if ($NoLaunch) {
+    Write-Host '  已跳过 (-NoLaunch)' -ForegroundColor DarkGray
+}
+elseif (-not (Test-Path $ExePath)) {
+    Write-Warn "找不到产物, 未启动: $ExePath"
+}
+else {
+    # 用 Start-Process 而不是 &: 脚本还要走完收尾, 不能被前台进程阻塞。
+    # 工作目录设成产物目录, 避免相对路径落到调用者的当前目录。
+    try {
+        Start-Process -FilePath $ExePath -WorkingDirectory $PublishDir | Out-Null
+        Write-Ok "已启动程序: $ExePath"
+    }
+    catch {
+        Write-Warn "启动失败: $($_.Exception.Message)"
+    }
+}
