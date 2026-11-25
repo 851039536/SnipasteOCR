@@ -16,7 +16,6 @@ public sealed class TranslateSettingsForm : Form
     private readonly TextBox _modelBox = new();
     private readonly ComboBox _targetBox = new();
     private readonly CheckBox _consent = new();
-    private readonly CheckBox _clickToTranslate = new();
 
     private bool _clearPending;
 
@@ -35,7 +34,7 @@ public sealed class TranslateSettingsForm : Form
         MaximizeBox = false;
         MinimizeBox = false;
         ShowInTaskbar = true;
-        ClientSize = new Size(520, 340);
+        ClientSize = new Size(520, 356);
         Font = UiFont.Create(12f);
         AutoScaleMode = AutoScaleMode.Dpi;
         AutoScaleDimensions = new SizeF(96f, 96f);
@@ -131,16 +130,20 @@ public sealed class TranslateSettingsForm : Form
         _consent.Text = "允许把识别出的文字发送到 DeepSeek 进行翻译";
         _consent.Checked = settings.TranslateConsentGiven;
 
-        // 可选交互: 默认关闭, 不改变原来的"单击复制"习惯
-        _clickToTranslate.Location = new Point(18, 250);
-        _clickToTranslate.Size = new Size(484, 26);
-        _clickToTranslate.Text = "单击文字块翻译，结果显示在窗口底部（不再自动复制）";
-        _clickToTranslate.Checked = settings.ClickToTranslate;
+        // 用法只在这里说一次: 结果窗口里"单击=复制"不会变, 翻译靠悬停按钮/右键/T,
+        // 用户不必再去设置里二选一。
+        var usage = new Label
+        {
+            Text = "用法：鼠标移到识别结果中的文字块，点右侧「译」；也可右键菜单或按 T。",
+            Location = new Point(18, 250),
+            Size = new Size(484, 24),
+            ForeColor = Color.FromArgb(60, 60, 60),
+        };
 
         var keyHint = new Label
         {
             Text = "Key 只保存在本机（DPAPI 加密），换机器/账户后需重新输入。",
-            Location = new Point(18, 292),
+            Location = new Point(18, 278),
             Size = new Size(290, 24),
             ForeColor = Color.FromArgb(120, 120, 120),
         };
@@ -149,14 +152,14 @@ public sealed class TranslateSettingsForm : Form
         {
             Text = "保存",
             DialogResult = DialogResult.OK,
-            Location = new Point(320, 290),
+            Location = new Point(320, 306),
             Size = new Size(80, 30),
         };
         var cancel = new Button
         {
             Text = "取消",
             DialogResult = DialogResult.Cancel,
-            Location = new Point(410, 290),
+            Location = new Point(410, 306),
             Size = new Size(80, 30),
         };
         ok.Click += (_, _) => SaveSettings();
@@ -164,7 +167,7 @@ public sealed class TranslateSettingsForm : Form
         Controls.AddRange([
             tip, keyLabel, _keyBox, _clear, _keyStatus,
             modelLabel, _modelBox, targetLabel, _targetBox,
-            _consent, _clickToTranslate, keyHint, ok, cancel,
+            _consent, usage, keyHint, ok, cancel,
         ]);
         AcceptButton = ok;
         CancelButton = cancel;
@@ -199,42 +202,12 @@ public sealed class TranslateSettingsForm : Form
             }
         }
 
-        bool clickTranslate = _clickToTranslate.Checked;
-
-        // 开启「单击翻译」前必须真正可用: 否则每点一个文字块都会弹一次同意/设置框,
-        // 而且单击不再复制 —— 用户会觉得点了没反应。
-        if (clickTranslate)
-        {
-            if (!_consent.Checked)
-            {
-                MessageBox.Show(this,
-                    "开启「单击文字块翻译」前，请先勾选上方的联网同意项。",
-                    "SnipasteOCR", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                DialogResult = DialogResult.None;
-                return;
-            }
-
-            bool hasUsableKey = TranslateClient.IsReady(protectedKey, consentGiven: true);
-            if (!hasUsableKey)
-            {
-                MessageBox.Show(this,
-                    "开启「单击文字块翻译」前，请先填写可用的 API Key。",
-                    "SnipasteOCR", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                DialogResult = DialogResult.None;
-                return;
-            }
-        }
-
         SettingsStore.Update(s =>
         {
             s.TranslateApiKeyProtected = protectedKey;
             s.TranslateModel = model;
             s.TranslateTargetLanguage = target;
             s.TranslateConsentGiven = _consent.Checked;
-            s.ClickToTranslate = clickTranslate;
-            // 两个单击行为互斥: 保留复制会让托盘勾选与实际行为不一致
-            if (clickTranslate)
-                s.ClickToCopy = false;
         });
 
         DialogResult = DialogResult.OK;

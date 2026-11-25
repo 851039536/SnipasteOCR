@@ -128,23 +128,16 @@ internal static class Program
             };
 
             // 单击复制识别结果: 纯设置项, 落盘即可; 结果窗口每次单击都读取当前设置。
-            // 两个单击行为互斥: 重新开启复制就关闭单击翻译, 否则托盘勾选会与实际行为不符。
+            // 单击现在只负责复制, 翻译有独立入口 (悬停「译」/ 右键 / T), 不再需要互斥收敛。
             tray.ClickToCopyToggleRequested += want =>
-                SettingsStore.Update(s =>
-                {
-                    s.ClickToCopy = want;
-                    if (want)
-                        s.ClickToTranslate = false;
-                });
+                SettingsStore.Update(s => s.ClickToCopy = want);
 
             // 翻译设置: 纯 Win32 菜单无法输入 Key, 必须弹真实对话框。
-            // 这里只保存配置; 真正发请求发生在用户点结果窗口的「翻译」按钮时。
+            // 这里只保存配置; 真正发请求发生在用户点结果窗口的「翻译」/悬停「译」时。
             tray.TranslateSettingsRequested += () =>
             {
                 using var dlg = new TranslateSettingsForm();
                 dlg.ShowDialog();
-                // 对话框里开启「单击翻译」会关掉「单击复制」, 托盘勾选必须立即跟上
-                tray.SyncClickToCopyCheck();
             };
 
             IntPtr hwnd = tray.WindowHandle;

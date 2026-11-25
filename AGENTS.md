@@ -46,13 +46,14 @@ src/                       产品代码 (唯一的出货工程, 也是唯一的 
   OcrConfidence.cs         置信度展示规则 (低分阈值/百分比格式; 只提示不过滤)
   TranslateClient.cs       DeepSeek 翻译客户端 (请求/解析/错误映射; JSON 源生成)
   TranslateForm.cs         独立译文窗口 (只读/复制/Esc; 居中于 owner 所在屏; 与结果窗口解耦)
-  TranslateSettingsForm.cs 翻译设置对话框 (Key/模型/目标语言/同意状态/单击翻译)
+  TranslateSettingsForm.cs 翻译设置对话框 (Key/模型/目标语言/同意状态; 不再有"单击翻译"开关)
   TranslateBarLayout.cs    结果窗口底部译文条布局 (绘制/命中/状态栏避让的唯一来源; 纯函数)
+  TranslateHoverButton.cs  悬停「译」按钮布局 (贴块/让开工具栏与译文条/粘滞区的唯一来源; 纯函数)
   ProtectedKey.cs          API Key 的 DPAPI 加密/解密 (CryptProtectData)
   ClipboardText.cs         剪贴板文本写入唯一入口 (统一 CRLF)
   NativeMethods.cs         Win32 P/Invoke (消息/热键/窗口/菜单/托盘/输入模拟)
-tests/AnnotationTests/     离线自检, 576 项 (几何/标注拖拽约束/标注选中与手柄/马克笔与序号/命中/历史/渲染/工具栏/尺寸徽标/放大镜取色/贴图布局/多屏定位/缩放平移/置信度展示/设置迁移/编辑框/OCR 后处理/表格中间模型/选词几何/双击选词/CTC 字符框/翻译客户端/译文条布局)
-tests/InteractiveTests/    交互自检, 202 项 (真实窗口 + 真实按键 + Ctrl 约束绘制 + 马克笔/序号 + 标注选中/拖动/层级/选区手柄 + 贴图缩放/穿透 + 重复上次识别 + 拖拽实时尺寸 + 多屏定位 + 工具栏 tooltip + 提示文案 + 状态栏省略号 + 托盘菜单文案 + 结果窗口单击复制/单击翻译 + 底部译文条 + 双击选词/三击选行 + 放大镜/取色 + DPI 基准 + CTC 选词 + 拖出收尾 + 缩放平移 + 置信度可视化 + 绘制缓存失效 + IME + 翻译窗口与居中 + Ctrl+回车直接识别 + 延时截图 + 贴图 DPI, 需要桌面会话)
+tests/AnnotationTests/     离线自检, 589 项 (几何/标注拖拽约束/标注选中与手柄/马克笔与序号/命中/历史/渲染/工具栏/尺寸徽标/放大镜取色/贴图布局/多屏定位/缩放平移/置信度展示/设置迁移/编辑框/OCR 后处理/表格中间模型/选词几何/双击选词/CTC 字符框/翻译客户端/译文条布局/悬停译按钮布局)
+tests/InteractiveTests/    交互自检, 206 项 (真实窗口 + 真实按键 + Ctrl 约束绘制 + 马克笔/序号 + 标注选中/拖动/层级/选区手柄 + 贴图缩放/穿透 + 重复上次识别 + 拖拽实时尺寸 + 多屏定位 + 工具栏 tooltip + 提示文案 + 状态栏省略号 + 托盘菜单文案 + 结果窗口单击复制 + 悬停「译」翻译 + 底部译文条 + 双击选词/三击选行 + 放大镜/取色 + DPI 基准 + CTC 选词 + 拖出收尾 + 缩放平移 + 置信度可视化 + 绘制缓存失效 + IME + 翻译窗口与居中 + Ctrl+回车直接识别 + 延时截图 + 贴图 DPI, 需要桌面会话)
 tools/DriveTest/           端到端驱动实际 exe (真实鼠标键盘事件 + 抓屏取证 + 校验导出图)
 ```
 
@@ -91,10 +92,10 @@ dotnet publish src/SnipasteOcr.csproj -c Release -r win-x64 --self-contained -p:
 ```
 
 ```powershell
-# 离线自检 (576 项), 无需桌面会话 —— 改完必跑
+# 离线自检 (589 项), 无需桌面会话 —— 改完必跑
 dotnet run --project tests/AnnotationTests              # 期望输出「全部通过」, 退出码 0
 dotnet run --project tests/AnnotationTests -- sample    # 额外输出八种标注样例图
-# 交互自检 (202 项) —— 需要可用的桌面会话
+# 交互自检 (206 项) —— 需要可用的桌面会话
 dotnet run --project tests/InteractiveTests
 # 端到端驱动实际 exe (可选)
 dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
@@ -192,6 +193,7 @@ dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
 | `SnipMagnifier.Sample` / `FormatHex` / `FormatRgb` | 放大镜显示 **和** `C` 键剪贴板 **和** 离线断言 |
 | `ClipboardText.Normalize` | 结果窗口复制 **和** 译文窗口复制 (统一 Windows CRLF, 避免不同入口换行不一致) |
 | `TranslationBarLayout.Compute` | 底部译文条绘制 **和** 鼠标命中/关闭图标 **和** 状态栏避让 (三处不得各算一份矩形) |
+| `TranslateHoverButton.Compute` | 悬停「译」按钮绘制 **和** 点击命中 **和** hover 粘滞判定 (三处不得各算一份矩形) |
 
 - `OcrBox.TopEdge` 与 `BottomEdge` 的取点顺序必须**同向**(`X1→X2` 与 `X4→X3`),
   否则按同一参数 `u` 插值出的高亮四边形会自交。
@@ -275,8 +277,9 @@ dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
 - **延时截图必须用 WinForms Timer**: 覆盖层是 WinForms 窗体, 必须在创建托盘/热键的 UI 线程构造;
   `Task.Delay` + 后台线程会跨线程建窗体。延时入口只放托盘菜单, 不改变 F1/F3 的即时性;
   直接按热键会取消尚未到期的延时, 避免稍后突然弹出第二个覆盖层。
-- **单击只能有一种行为**: `ClickToTranslate` 与 `ClickToCopy` 互斥 (加载 `Normalize` + 设置对话框 + 托盘切换三处)。
-  否则托盘勾着「单击复制」、实际却翻译。未配置 Key/未同意联网时, 单击只给状态提示, 不弹模态框。
+- **单击只做一件事**: 选中 + 复制(受 `ClickToCopy` 控制)。翻译**不得**再挂到单击上 ——
+  曾经的 `ClickToTranslate` 与复制互斥, 用户想复制就得再按 `Ctrl+C`, 这是明确被否掉的设计。
+  翻译入口固定为: 悬停「译」圆钮 / 右键菜单 / `T` 键 / 工具栏「翻译」, 全部是显式动作。
 
 ### 坐标系与 DPI
 
@@ -389,19 +392,24 @@ dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
 ### 翻译 (可选联网)
 
 - **默认不联网**: OCR / 标注路径不得引用网络代码;只有结果窗口的「翻译」按钮、
-  或用户显式开启的「单击文字块翻译」发请求。新增任何自动化触发都必须经过显式用户动作。
-- **单击翻译默认关闭且与单击复制互斥**: `AppSettings.ClickToTranslate` 为 true 时,
-  单击文本块只翻译该块(显示在窗口底部)、不再写剪贴板;复制仍可用 `Ctrl+C`/工具栏。
-  切换开关后已打开的结果窗口立即生效(每次单击重读 `SettingsStore.Current`)。
+  悬停「译」圆钮、右键「翻译此块」或 `T` 键发请求。新增任何自动化触发都必须经过显式用户动作。
+- **翻译不占用单击**: 单击永远是"选中 + 复制"。悬停按钮画在检测框外侧, 因此指针移上去时
+  `HitTest` 会返回 -1 —— 命中必须靠 `TranslateHoverButton.Compute` 的粘滞区 (`Hover`) 把行号留住,
+  否则按钮会在指针碰到的瞬间消失。点击也在**松手**时触发 (`_hintPressLine`),
+  不能在 `MouseDown` 里直接发请求: 首次翻译会弹同意/Key 对话框, 那时左键还没松。
+- **呈现规则**: 恰好一个整块 → 底部译文条; 多行/部分选中/全部 → 独立译文窗口。
+  三种入口 (悬停/右键/`T`) 必须走同一套判定 (`TranslateCurrent` / `TranslateBlock`),
+  不要各自决定开窗还是贴条。
 - **底部译文条不参与图片坐标**: 它是结果窗口 `OnPaint` 的覆盖层,不改变 `ImageRect`/缩放/平移;
   命中必须先于文字块 (`HitTranslationBar`),否则点关闭/复制会选中背后的文字。
   条内文字必须裁到正文矩形 (`SetClip`),长译文不能压到状态栏或窗口边缘。
-- **译文条必须能复制译文**: 条上提供「复制」按钮 (关闭图标左侧);加载中/失败态置灰且
-  命中退化为拖动,不得把"正在翻译…"或错误提示复制出去。不要依赖整条单击复制 ——
+- **译文条必须能复制译文**: 条上提供「复制译文」按钮 (关闭图标左侧);加载中/失败态置灰且
+  命中退化为拖动,不得把"正在翻译…"或错误提示复制出去。按钮文案必须写明"译文" ——
+  原文在单击时已经进了剪贴板, 两个"复制"看起来一样才让人以为功能冲突。不要依赖整条单击复制 ——
   条内拖动窗口与复制是两种意图。
 - **译文窗体居中到 owner 所在屏**: 用 `Screen.FromControl(Owner).WorkingArea` 手工居中,
   不要用 `CenterParent` —— 结果窗口无边框且常贴屏幕边,以它为基准会把译文窗体推出屏幕。
-- **单击翻译的取消要成套**: 连点别的块先 `Cancel` 上一次请求(旧译文不得后到覆盖新译文);
+- **单块翻译的取消要成套**: 连点别的块先 `Cancel` 上一次请求(旧译文不得后到覆盖新译文);
   窗口关闭只 `Cancel` 不提前 `Dispose` CTS,由请求任务的 `finally` 释放。
 - **首次知情同意**: `TranslateConsentGiven` 未置位不得发送;只发 OCR 文字,不发截图;
   同意状态持久化,剪贴板识别路径复用同一状态,不能每个窗口弹一次。
@@ -419,9 +427,9 @@ dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
   不把原始 JSON / 异常栈直接抛到界面。
 - **测试不联网**: 离线自检用固定 JSON 断言请求体/解析/错误映射;交互自检向 `TranslateForm`
   注入假翻译回调,不得发起真实请求。
-- **交互自检必须显式关掉用户配置里的 `ClickToTranslate`**: 测试读到的是真实 `settings.json`,
-  用户开启过该开关时, "单击复制"用例会走翻译分支, 甚至真的发出网络请求。
-  只测剪贴板/拖选的段落要先把它置 false, 结束时还原。
+- **交互自检必须用 `TranslateForTest` 注入假回调**: 结果窗口的悬停「译」/`T` 键用例只能断言
+  "译文条出现/剪贴板未变/不重复计费", 不得向真实 API 发请求。测试通过反射取
+  `TranslatePlacement` 拿到按钮矩形, 并把鼠标先移到块上 —— 按钮在块外侧, 没有 hover 行就点不到。
 
 ### 开机自启 (`StartupRegistration`)
 

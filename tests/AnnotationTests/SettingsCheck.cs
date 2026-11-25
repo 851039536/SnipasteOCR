@@ -93,17 +93,14 @@ internal static class SettingsCheck
             Check(!back.ClickToCopy, "单击复制开关往返一致");
         }
 
-        // ===== 6. 单击行为互斥: 翻译开启时必须关闭复制 =====
-        // 旧版本允许两个开关同时为 true, 实际以翻译优先, 但托盘仍显示"单击复制"已勾选。
-        // 加载时收敛为互斥, 保证勾选与实际行为一致。
+        // ===== 6. 旧配置里的 clickToTranslate 字段: 已废弃, 加载时被忽略且不报错 =====
+        // 单击现在固定为"选中 + 复制", 翻译走悬停「译」/右键/T —— 不再有两个开关互斥。
         {
-            var both = Normalize(new AppSettings { ClickToCopy = true, ClickToTranslate = true });
-            Check(!both.ClickToCopy, "单击翻译开启时自动关闭单击复制");
-            Check(both.ClickToTranslate, "单击翻译开关本身保持不变");
-
-            var copyOnly = Normalize(new AppSettings { ClickToCopy = true, ClickToTranslate = false });
-            Check(copyOnly.ClickToCopy && !copyOnly.ClickToTranslate,
-                "仅开启单击复制时两项状态不变");
+            var legacy = JsonSerializer.Deserialize(
+                """{ "clickToCopy": true, "clickToTranslate": true }""",
+                SettingsJsonContext.Default.AppSettings)!;
+            Check(legacy.ClickToCopy, "旧配置的单击复制保持开启");
+            Check(Normalize(legacy).ClickToCopy, "废弃的 clickToTranslate 不再关掉单击复制");
         }
 
         return runner.ToResult();

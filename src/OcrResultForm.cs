@@ -83,8 +83,20 @@ public sealed class OcrResultForm : Form
     /// <summary>当前打开的译文窗口; 再次点「翻译」时先关旧窗, 避免多个窗口显示不同选区</summary>
     private TranslateForm? _translateForm;
 
-    // ===== 底部译文条 (单击翻译) =====
-    /// <summary>单击翻译的进行中请求; 连点别的块时取消上一次, 避免旧译文后到覆盖新译文</summary>
+    // ===== 悬停「译」按钮 =====
+    /// <summary>指针正压在「译」按钮上 (绘制用高亮态; 不用 _hover, 那表示"在文字块上")</summary>
+    private bool _translateHover;
+
+    /// <summary>
+    /// 已在「译」按钮上按下、等松手再翻译的行号。
+    ///
+    /// 不能在 MouseDown 里直接发起: 首次翻译会弹联网同意/Key 设置对话框,
+    /// 而按下时左键仍处于按下状态, 对话框弹出后这次松手会落到对话框上 (可能误点默认按钮)。
+    /// </summary>
+    private int _hintPressLine = -1;
+
+    // ===== 底部译文条 =====
+    /// <summary>进行中的翻译请求; 连点别的块时取消上一次, 避免旧译文后到覆盖新译文</summary>
     private CancellationTokenSource? _clickTranslateCts;
     private string _barTitle = "";
     private string _barText = "";
@@ -271,11 +283,12 @@ public sealed class OcrResultForm : Form
         _saveImage.ToolTipText = "保存截图为 PNG";
         _saveImage.Click += (_, _) => SaveImage();
 
-        // 翻译是显式联网动作: 按钮常驻但识别完成前禁用; 未配置 Key 时点击会打开设置
+        // 翻译是显式联网动作: 按钮常驻但识别完成前禁用; 未配置 Key 时点击会打开设置。
+        // 入口与悬停「译」/T 键一致: 单块看译进底部条, 多行/全部开独立窗口。
         _translateButton.Text = "翻译";
-        _translateButton.ToolTipText = "翻译选中文本；未选中时翻译全部（需联网）";
+        _translateButton.ToolTipText = "翻译选中或全部（单块贴在底部，多行开独立窗口；需联网）";
         _translateButton.Enabled = false;
-        _translateButton.Click += (_, _) => TranslateSelectionOrAll();
+        _translateButton.Click += (_, _) => TranslateCurrent();
 
         _closeButton.Text = "关闭";
         _closeButton.ToolTipText = "关闭当前窗口";
@@ -646,6 +659,7 @@ public sealed class OcrResultForm : Form
                     g.DrawPolygon(idlePen, pts);
             }
         }
+        DrawTranslateHint(g);
         DrawTranslationBar(g);
         DrawStatus(g);
     }
@@ -714,6 +728,9 @@ public sealed class OcrResultForm : Form
     private static readonly Color BarTextColor = Color.FromArgb(226, 230, 236);
     private static readonly Color BarErrorColor = Color.FromArgb(255, 196, 120);
 
+    /// <summary>译文条上的复制按钮文案; 测量与绘制共用, 改文案时宽度自动跟上</summary>
+    private const string CopyBarLabel = "复制译文";
+
     /// <summary>
     /// 量出译文条布局。绘制、命中、状态栏避让都从这里取, 不各自算一份。
     /// 译文条只在可见时参与测量, 且文本很短, 直接量比维护缓存的失效逻辑更可靠。
@@ -724,7 +741,9 @@ public sealed class OcrResultForm : Form
         using var bodyFont = UiFont.Create(12f);
         Size titleSize = TextRenderer.MeasureText(_barTitle, titleFont, new Size(int.MaxValue, int.MaxValue),
             TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
-        Size copySize = TextRenderer.MeasureText("复制", titleFont, new Size(int.MaxValue, int.MaxValue),
+        // 按钮文字必须写明"复制的是译文": 原文已在单击时进了剪贴板,
+        // 两个"复制"看起来一样才让人以为冲突。
+        Size copySize = TextRenderer.MeasureText(CopyBarLabel, titleFont, new Size(int.MaxValue, int.MaxValue),
             TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
         // 正文必须按"扣掉内边距后的实际宽度"换行: 按 int.MaxValue 量会得到一行, 高度就永远不增高
         Size bodySize = TextRenderer.MeasureText(_barText, bodyFont,
@@ -758,7 +777,7 @@ public sealed class OcrResultForm : Form
         Color copyColor = !CanCopyBarTranslation
             ? Color.FromArgb(110, UiTheme.MutedText)
             : _barCopyHover ? UiTheme.Accent : UiTheme.MutedText;
-        TextRenderer.DrawText(g, "复制", titleFont, lay.Copy, copyColor,
+        TextRenderer.DrawText(g, CopyBarLabel, titleFont, lay.Copy, copyColor,
             TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter |
             TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
 
@@ -823,6 +842,59 @@ public sealed class OcrResultForm : Form
         if (lay.Copy.Contains(clientPoint) && CanCopyBarTranslation)
             return TranslationBarHit.Copy;
         return TranslationBarHit.Body;
+    }
+
+    // ===== 悬停「译」按钮 (翻译的独立入口) =====
+
+    /// <summary>按钮底色: 比画布亮一档, 不抢识读, 又能在深色底上看出边界</summary>
+    private static readonly Color HintSurface = Color.FromArgb(238, 30, 33, 38);
+
+    /// <summary>
+    /// 指定检测行的「译」按钮位置 (逻辑像素); 行无效/无文本/未识别完成时返回 null。
+    /// 布局全部交给 <see cref="TranslateHoverButton"/>, 绘制与命中取同一份结果。
+    /// </summary>
+    private TranslateHoverButton.Placement? TranslatePlacement(int line)
+    {
+        if (!_ocrDone || line < 0 || line >= _lines.Length || string.IsNullOrEmpty(_lines[line].Text))
+            return null;
+
+        EnsureLineCorners();
+        var ir = ImageRect();
+        float dpi = DpiFactor();
+        // MapCorners 复用同一个 4 点缓冲: 必须立刻取包围盒, 不要把返回值留到后面
+        var pts = MapCorners(_lineCorners[line], ir, dpi);
+        float l = float.MaxValue, t = float.MaxValue, r = float.MinValue, b = float.MinValue;
+        for (int i = 0; i < 4; i++)
+        {
+            l = Math.Min(l, pts[i].X);
+            t = Math.Min(t, pts[i].Y);
+            r = Math.Max(r, pts[i].X);
+            b = Math.Max(b, pts[i].Y);
+        }
+
+        // 译文条可见时按钮让开它, 否则会画在译文上并被译文条的命中抢先吃掉
+        int bottomLimit = _barText.Length > 0 ? MeasureTranslationBar().Box.Top : ClientSize.Height;
+        return TranslateHoverButton.Compute(
+            RectangleF.FromLTRB(l, t, r, b), ClientSize, _toolStrip.Height, bottomLimit);
+    }
+
+    /// <summary>画悬停「译」: 只在指针所在块旁边出现, 移开即消失, 不占任何常驻空间</summary>
+    private void DrawTranslateHint(Graphics g)
+    {
+        if (TranslatePlacement(_hover) is not { } pl)
+            return;
+
+        var box = pl.Button;
+        using (var back = new SolidBrush(_translateHover ? UiTheme.Accent : HintSurface))
+            g.FillEllipse(back, box);
+        using (var pen = new Pen(Color.FromArgb(220, UiTheme.Accent), 1.2f))
+            g.DrawEllipse(pen, box);
+
+        using var font = UiFont.Create(12f);
+        TextRenderer.DrawText(g, "译", font, box,
+            _translateHover ? Color.White : Color.FromArgb(232, 236, 242),
+            TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter |
+            TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
     }
 
     // ===== 鼠标交互 =====
@@ -1022,8 +1094,12 @@ public sealed class OcrResultForm : Form
             return;
         }
 
+        // 右键菜单在松手时才弹 (见 OnMouseUp): 按下即弹会让这次松手落到菜单上,
+        // 相当于直接选中了指针下的第一项。
         if (e.Button != MouseButtons.Left)
             return;
+
+        _hintPressLine = -1; // 新的按下作废上一次未完成的「译」点击
 
         // 译文条盖在图片上方: 命中必须先于文字块, 否则点关闭/复制会选中它背后的文字
         switch (HitTranslationBar(e.Location))
@@ -1044,6 +1120,16 @@ public sealed class OcrResultForm : Form
         }
 
         int hit = HitTest(e.Location);
+
+        // 「译」按钮必须先于文字块命中: 它可能压在块的边角上, 点它不能变成选词/拖选。
+        // 指针在按钮粘滞区里时 HitTest 已返回 -1, 这里用 _hover 兜住。
+        int hintLine = hit >= 0 ? hit : _hover;
+        if (hintLine >= 0 && TranslatePlacement(hintLine) is { } hint && hint.Hover.Contains(e.Location))
+        {
+            // 只记下意图, 松手时才真正翻译 (理由见 _hintPressLine)
+            _hintPressLine = hintLine;
+            return;
+        }
 
         // 双击选词 / 三击选整行。必须在 MouseUp 之前截住: 第二下 MouseDown 若走正常
         // 单击分支, 松手时会把整行当"单击"自动复制, 覆盖掉刚选好的词。
@@ -1189,6 +1275,7 @@ public sealed class OcrResultForm : Form
             if (_hover != -1)
             {
                 _hover = -1;
+                _translateHover = false;
                 Invalidate();
             }
             return;
@@ -1200,6 +1287,14 @@ public sealed class OcrResultForm : Form
         }
 
         int hit = HitTest(e.Location);
+        // 指针移到「译」按钮上时, 块本身已不在指针下: 用按钮的粘滞区把行号留住,
+        // 否则按钮会在指针刚碰到的瞬间消失 (绘制与命中都依赖 hover 行), 永远点不到。
+        if (hit < 0 && TranslatePlacement(_hover) is { } sticky && sticky.Hover.Contains(e.Location))
+            hit = _hover;
+
+        var placement = TranslatePlacement(hit);
+        bool onButton = placement?.Button.Contains(e.Location) == true;
+
         if (hit != _hover)
         {
             _hover = hit;
@@ -1214,6 +1309,17 @@ public sealed class OcrResultForm : Form
                 Cursor = Cursors.Default;
                 UpdateIdleStatus();
             }
+            Invalidate();
+        }
+        else if (onButton)
+        {
+            // 同一块内移到按钮上: 状态栏要说明这个圆钮是干什么的, 否则它只是块边一个奇怪的蓝点
+            SetStatus("点击「译」翻译此块（不改剪贴板）");
+        }
+
+        if (onButton != _translateHover)
+        {
+            _translateHover = onButton;
             Invalidate();
         }
     }
@@ -1262,6 +1368,7 @@ public sealed class OcrResultForm : Form
     {
         base.OnDeactivate(e);
         _spaceHeld = false;
+        _hintPressLine = -1;
         if (_panning)
         {
             _panning = false;
@@ -1276,6 +1383,28 @@ public sealed class OcrResultForm : Form
     protected override void OnMouseUp(MouseEventArgs e)
     {
         base.OnMouseUp(e);
+
+        // 右键菜单: 这是结果窗口里唯一没被占用的手势, 给"不想追着悬停按钮跑"的用户
+        // 一条固定路径。放在松手而不是按下, 否则这次松手会被菜单吃掉。
+        if (e.Button == MouseButtons.Right)
+        {
+            // 译文条自己已经带有复制/关闭, 右键不叠菜单 (否则条上会浮出"翻译全部"这种无关项)
+            if (HitTranslationBar(e.Location) == TranslationBarHit.None)
+                ShowResultMenu(e.Location);
+            return;
+        }
+
+        // 「译」按钮: 按下只记录, 松手且仍在按钮粘滞区内才翻译 (移开等于取消)
+        if (e.Button == MouseButtons.Left && _hintPressLine >= 0)
+        {
+            int hintLine = _hintPressLine;
+            _hintPressLine = -1;
+            _draggingMove = false;
+            if (TranslatePlacement(hintLine) is { } pl && pl.Hover.Contains(e.Location))
+                TranslateBlock(hintLine);
+            return;
+        }
+
         if (_panning && (e.Button is MouseButtons.Middle or MouseButtons.Left))
         {
             _panning = false;
@@ -1299,23 +1428,8 @@ public sealed class OcrResultForm : Form
             _selected.Add(clickedLine);
             Invalidate();
 
-            // 单击翻译优先于单击复制: 开启后单击只翻译, 不再自动写剪贴板
-            // (每次单击都冲掉用户剪贴板代价太大); 复制仍可用 Ctrl+C 或工具栏。
-            if (SettingsStore.Current.ClickToTranslate)
-            {
-                // 未配置 Key/未同意联网时不再走 EnsureTranslationReady 的模态框 ——
-                // 否则每点一个块都会弹一次设置/同意对话框。测试注入不受此门限制。
-                if (TranslateForTest is not null || ClickTranslationReady())
-                {
-                    TranslateLine(clickedLine);
-                    return;
-                }
-
-                SetStatus("单击翻译未就绪（缺 API Key 或未同意联网）· Ctrl+C 复制");
-                return;
-            }
-
-            // 只在"单击检测块"时复制: 拖选、Shift 多选、空白单击都不复制。
+            // 单击只做一件事: 选中并复制。翻译不再占用这个手势 ——
+            // 它有自己的入口 (悬停「译」按钮 / 右键菜单 / T 键), 二者不再互相顶掉。
             // 复制后不要调用 UpdateIdleStatus, 否则"已复制 N 字符"会立刻被"已选 N 字符"覆盖;
             // 鼠标移到别的块时 OnMouseMove 会自然刷新状态。
             if (SettingsStore.Current.ClickToCopy)
@@ -1385,6 +1499,11 @@ public sealed class OcrResultForm : Form
                 return true;
             case Keys.Control | Keys.A:
                 SelectAll();
+                return true;
+            // 翻译不再占用单击: T 是它自己的键 (单块贴底部条, 多行/全部开独立窗口)
+            case Keys.T:
+            case Keys.Control | Keys.T:
+                TranslateCurrent();
                 return true;
             case Keys.Add:
             case Keys.Oemplus:
@@ -1499,12 +1618,79 @@ public sealed class OcrResultForm : Form
         {
             // 只有放大到超出视口时才提示平移, 平时不占用状态栏
             string panHint = _scale > _minScale + 0.001f ? " · 中键平移" : string.Empty;
-            // 单击的行为随设置变化: 提示必须如实反映当前开关, 否则用户不知道单击会发生什么
-            string clickHint = SettingsStore.Current.ClickToTranslate
-                ? "单击翻译"
-                : SettingsStore.Current.ClickToCopy ? "单击复制" : "单击/拖选";
-            SetStatus($"{_lines.Length} 个文本块 · {clickHint} · 拖选 · Shift 多选 · Ctrl+滚轮缩放" + panHint);
+            // 单击只复制; 翻译有独立入口 (悬停「译」/ 右键 / T)。提示必须与实际行为一致。
+            string clickHint = SettingsStore.Current.ClickToCopy ? "单击复制" : "单击选中";
+            SetStatus($"{_lines.Length} 个文本块 · {clickHint} · 悬停「译」或 T 翻译 · Shift 多选 · Ctrl+滚轮缩放" + panHint);
         }
+    }
+
+    /// <summary>
+    /// 翻译的默认入口 (工具栏「翻译」/ T 键 / 右键「翻译」)。
+    ///
+    /// 呈现规则可感知: <b>恰好选中一个整块</b>时贴在窗口底部 (轻量看译), 多块/部分选中/无选中
+    /// 时开独立译文窗口 (读长文、复制全文)。单块不去开窗, 是因为看一行译文不需要多一个窗口。
+    /// </summary>
+    private void TranslateCurrent()
+    {
+        if (!_ocrDone)
+            return;
+
+        if (_selected.Count == 1 && _partial is null)
+        {
+            TranslateLine(_selected.First());
+            return;
+        }
+        TranslateSelectionOrAll();
+    }
+
+    /// <summary>
+    /// 翻译指定块 (悬停「译」/ 右键「翻译此块」)。选中它只为给出视觉上下文,
+    /// 不写剪贴板 —— 翻译是"看一眼", 不该顺手改掉用户的剪贴板。
+    /// </summary>
+    private void TranslateBlock(int line)
+    {
+        if (!_ocrDone || line < 0 || line >= _lines.Length)
+            return;
+
+        ClearSelection();
+        _selected.Add(line);
+        Invalidate();
+        TranslateLine(line);
+    }
+
+    /// <summary>
+    /// 右键菜单: 结果窗口里唯一没被占用的手势, 给"不想追着悬停按钮跑"的用户一条固定路径。
+    /// 单击已经固定为"选中 + 复制", 所以翻译必须有这样独立的显式入口。
+    /// </summary>
+    private void ShowResultMenu(Point client)
+    {
+        if (!_ocrDone)
+            return;
+
+        int hit = HitTest(client);
+        var menu = new ContextMenuStrip
+        {
+            Font = _toolStrip.Font,
+            ShowImageMargin = false,
+        };
+
+        if (hit >= 0)
+        {
+            // 右键即选中落点所在块 (只选中不复制): 菜单动作作用于"看到的这一块"
+            ClearSelection();
+            _selected.Add(hit);
+            Invalidate();
+
+            menu.Items.Add("复制此块", null, (_, _) => CopyText(_lines[hit].Text));
+            menu.Items.Add("翻译此块", null, (_, _) => TranslateBlock(hit));
+            menu.Items.Add(new ToolStripSeparator());
+        }
+
+        menu.Items.Add("翻译选中/全部", null, (_, _) => TranslateCurrent());
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add("全选", null, (_, _) => SelectAll());
+        menu.Closed += (_, _) => menu.Dispose();
+        menu.Show(this, client);
     }
 
     /// <summary>
@@ -1567,16 +1753,6 @@ public sealed class OcrResultForm : Form
     }
 
     /// <summary>
-    /// 单击翻译是否真正可用: 已同意联网且 Key 能解密。
-    /// 只做只读检查, 不弹任何对话框 —— 单击路径不能每次都打断用户。
-    /// </summary>
-    private static bool ClickTranslationReady()
-    {
-        var s = SettingsStore.Current;
-        return TranslateClient.IsReady(s.TranslateApiKeyProtected, s.TranslateConsentGiven);
-    }
-
-    /// <summary>
     /// 翻译前的两道门: 首次知情同意 + 可用的 API Key。
     /// 任一不满足都返回 false 并已在界面给出提示, 调用方直接停止。
     /// </summary>
@@ -1619,7 +1795,7 @@ public sealed class OcrResultForm : Form
     }
 
     /// <summary>
-    /// 单击某个文字块直接翻译, 结果贴在窗口底部 (可选设置, 默认关闭)。
+    /// 翻译单个检测块, 结果贴在窗口底部 (悬停「译」/ 右键「翻译此块」/ 单块时按 T)。
     /// 请求与工具栏入口相互独立: 关闭译文条不影响独立译文窗口, 反之亦然。
     /// </summary>
     private void TranslateLine(int line)

@@ -62,6 +62,8 @@
     <Compile Include="..\..\src\ProtectedKey.cs" Link="Engine\ProtectedKey.cs" />
     <!-- 结果窗口底部译文条的布局 (绘制/命中/状态栏避让的唯一来源) -->
     <Compile Include="..\..\src\TranslateBarLayout.cs" Link="Engine\TranslateBarLayout.cs" />
+    <!-- 悬停「译」按钮的布局 (翻译的独立入口; 绘制与命中取同一份几何) -->
+    <Compile Include="..\..\src\TranslateHoverButton.cs" Link="Engine\TranslateHoverButton.cs" />
   </ItemGroup>
 
   <ItemGroup>

@@ -185,6 +185,7 @@ RunGroup("选词几何校验", OcrSelectionChecks.Run);
 RunGroup("CTC 字符框校验", OcrGlyphLayoutChecks.Run);
 RunGroup("翻译客户端校验", TranslateCheck.Run);
 RunGroup("译文条布局校验", TranslateBarCheck.Run);
+RunGroup("悬停译按钮布局校验", TranslateHoverCheck.Run);
 
 Console.WriteLine();
 Console.WriteLine(failures == 0 ? "全部通过" : $"{failures} 项失败");

@@ -53,16 +53,12 @@ public sealed class AppSettings
     /// 单击识别结果窗口中的文本块时自动复制该块。
     /// 默认开启 —— 这是用户最常用的动作; 但单击就改写剪贴板是副作用,
     /// 托盘菜单提供开关, 便于只想浏览结果的用户关掉。旧配置没有该字段时靠属性初值得到 true。
+    ///
+    /// 单击<b>只</b>做这一件事: 翻译曾经也挂在单击上 (ClickToTranslate) 且与复制互斥,
+    /// 结果是想复制就得再按一次 Ctrl+C。现在翻译有独立入口 (悬停「译」/ 右键 / T 键),
+    /// 互斥设置已删除; 旧配置里残留的 clickToTranslate 字段反序列化时被忽略。
     /// </summary>
     public bool ClickToCopy { get; set; } = true;
-
-    /// <summary>
-    /// 单击识别结果中的文字块时直接翻译, 译文显示在结果窗口底部。
-    ///
-    /// 默认关闭: 默认行为必须保持原来的"单击复制"; 开启后单击<b>只翻译不复制</b>
-    /// (复制仍可用 Ctrl+C), 否则每次单击都会冲掉用户剪贴板。旧配置没有该字段时靠属性初值为 false。
-    /// </summary>
-    public bool ClickToTranslate { get; set; }
 
     /// <summary>
     /// 翻译 API Key 的 DPAPI 密文 (Base64)。
@@ -210,12 +206,6 @@ public static class SettingsStore
             s.TranslateModel = AppSettings.DefaultTranslateModel;
         if (string.IsNullOrWhiteSpace(s.TranslateTargetLanguage))
             s.TranslateTargetLanguage = AppSettings.AutoTranslateTarget;
-
-        // 单击只能有一种行为。旧配置里两个开关可能同时为 true (实际以翻译优先),
-        // 但托盘菜单仍把「单击复制识别结果」显示为勾选 —— 界面在骗人。
-        // 加载时统一收敛为互斥: 翻译开启即关闭复制; 用户想改回复制需显式操作。
-        if (s.ClickToTranslate)
-            s.ClickToCopy = false;
 
         return s;
     }

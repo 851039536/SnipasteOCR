@@ -200,7 +200,6 @@ internal static class TranslateCheck
             Check(legacy.TranslateTargetLanguage == AppSettings.AutoTranslateTarget,
                 "旧配置缺目标语言时默认自动中↔英");
             Check(!legacy.TranslateConsentGiven, "旧配置默认未同意联网翻译");
-            Check(!legacy.ClickToTranslate, "旧配置默认不开启单击翻译 (保持单击复制)");
 
             var saved = JsonSerializer.Deserialize(
                 JsonSerializer.Serialize(new AppSettings { TranslateConsentGiven = true },
@@ -208,11 +207,15 @@ internal static class TranslateCheck
                 SettingsJsonContext.Default.AppSettings)!;
             Check(saved.TranslateConsentGiven, "同意状态可 JSON 往返");
 
-            var savedClick = JsonSerializer.Deserialize(
-                JsonSerializer.Serialize(new AppSettings { ClickToTranslate = true },
-                    SettingsJsonContext.Default.AppSettings),
+            // 单击翻译与单击复制互斥的旧模型已删除: 配置里不该再出现该字段,
+            // 旧文件里残留的同名字段也必须在反序列化时被安全忽略。
+            string fresh = JsonSerializer.Serialize(new AppSettings(), SettingsJsonContext.Default.AppSettings);
+            Check(!fresh.Contains("clickToTranslate", StringComparison.OrdinalIgnoreCase),
+                "配置不再写入废弃的 clickToTranslate");
+            var stale = JsonSerializer.Deserialize(
+                """{ "clickToTranslate": true }""",
                 SettingsJsonContext.Default.AppSettings)!;
-            Check(savedClick.ClickToTranslate, "单击翻译开关可 JSON 往返");
+            Check(stale.ClickToCopy, "残留 clickToTranslate 的旧配置仍按单击复制加载");
         }
 
         // ===== 13. 自动方向: 中文→英文, 英文→中文; 显式目标语言不猜 =====

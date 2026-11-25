@@ -524,10 +524,6 @@ internal static class InteractiveCheck
             var resultForm = new OcrResultForm(src);
             var settings = SettingsStore.Current;
             bool savedClickToCopy = settings.ClickToCopy;
-            bool savedClickToTranslate = settings.ClickToTranslate;
-            // 用户可能在真实配置里开了「单击翻译」: 这里必须强制关闭,
-            // 否则 13.1「单击复制」会走翻译分支, 甚至真的发网络请求。
-            settings.ClickToTranslate = false;
             string? originalClip = GetClipboardTextSafe();
 
             try
@@ -633,14 +629,13 @@ internal static class InteractiveCheck
                 Check(copied == expectedAll,
                     $"Ctrl+A / Ctrl+C 按阅读顺序输出且换行为 CRLF (实得 \"{copied?.Replace("\r\n", "\\r\\n").Replace("\n", "\\n")}\")");
 
-                // 13.7 可选设置「单击翻译」: 译文贴在窗口底部, 且不再自动复制
+                // 13.7 翻译的独立入口: 悬停「译」按钮。单击仍然只复制, 两者不再互斥。
                 var barTextField = typeof(OcrResultForm).GetField("_barText", Priv)!;
                 var barErrorField = typeof(OcrResultForm).GetField("_barError", Priv)!;
                 string BarText() => (string)barTextField.GetValue(resultForm)!;
                 string Status() => (string)typeof(OcrResultForm).GetField("_statusText", Priv)!.GetValue(resultForm)!;
 
-                settings.ClickToTranslate = true;
-                settings.ClickToCopy = true; // 两个都开时以翻译为准, 剪贴板不能被写
+                settings.ClickToCopy = true;
                 int translateCalls = 0;
                 resultForm.TranslateForTest = (text, _) =>
                 {
@@ -648,24 +643,38 @@ internal static class InteractiveCheck
                     return Task.FromResult(new TranslateResult(true, "译文:" + text, null, 1, 2));
                 };
 
+                var placementMethod = typeof(OcrResultForm).GetMethod("TranslatePlacement", Priv)!;
+                Point HintCenter(int line)
+                {
+                    var place = (TranslateHoverButton.Placement)placementMethod.Invoke(resultForm, [line])!;
+                    return new Point(place.Button.Left + place.Button.Width / 2,
+                                     place.Button.Top + place.Button.Height / 2);
+                }
+
+                // 必须先 hover 到块上: 按钮画在块外侧, 点在按钮上时 HitTest 返回 -1,
+                // 命中靠的就是 _hover 记住的行号
+                mouseMove.Invoke(resultForm, [new MouseEventArgs(MouseButtons.None, 0, topPoint.X, topPoint.Y, 0)]);
+                var topHint = HintCenter(1);
+                Check(topHint.X > topPoint.X, $"「译」按钮出现在块右侧 (hint={topHint}, block={topPoint})");
+
                 SetClipboardTextSafe("--marker--");
-                ClickAt(topPoint);
+                ClickAt(topHint);
                 PumpUntil(() => BarText().Length > 0, 2000);
                 Check(BarText() == "译文:Top",
-                    $"单击翻译把译文显示在窗口底部 (实得 \"{BarText()}\")");
+                    $"点「译」把译文显示在窗口底部 (实得 \"{BarText()}\")");
                 Check(GetClipboardTextSafe() == "--marker--",
-                    "开启单击翻译后单击不再写剪贴板");
-                Check(selected.SetEquals([1]), "单击翻译时仍整行选中被翻译的块");
+                    "点「译」只翻译, 不改剪贴板");
+                Check(selected.SetEquals([1]), "翻译时选中被翻译的块作为上下文");
                 Check(Status().Contains("翻译完成"),
                     $"状态栏反馈翻译完成 (实得 \"{Status()}\")");
 
                 // 同一块再点一次: 译文条已显示该块结果, 不再重复发请求 (每次请求都计费)
-                ClickAt(topPoint);
+                ClickAt(topHint);
                 Application.DoEvents();
                 Check(translateCalls == 1,
-                    $"同一文字块重复单击不重复请求 (请求次数={translateCalls})");
+                    $"同一文字块重复点「译」不重复请求 (请求次数={translateCalls})");
 
-                // 13.7.1 译文条「复制」: 直接把译文写进剪贴板 (反馈走状态栏)
+                // 13.7.1 译文条「复制译文」: 直接写剪贴板 (反馈走状态栏)
                 SetClipboardTextSafe("--marker--");
                 var copyLayout = (TranslationBarLayout.Layout)typeof(OcrResultForm)
                     .GetMethod("MeasureTranslationBar", Priv)!.Invoke(resultForm, null)!;
@@ -674,9 +683,23 @@ internal static class InteractiveCheck
                 mouseDown.Invoke(resultForm, [new MouseEventArgs(MouseButtons.Left, 1, copyCenter.X, copyCenter.Y, 0)]);
                 mouseUp.Invoke(resultForm, [new MouseEventArgs(MouseButtons.Left, 1, copyCenter.X, copyCenter.Y, 0)]);
                 Check(GetClipboardTextSafe() == "译文:Top",
-                    $"译文条「复制」把译文写进剪贴板 (实得 \"{GetClipboardTextSafe()}\")");
+                    $"译文条「复制译文」把译文写进剪贴板 (实得 \"{GetClipboardTextSafe()}\")");
                 Check(Status().Contains("已复制"),
                     $"复制译文后状态栏反馈 (实得 \"{Status()}\")");
+
+                // 13.7.2 关键回归: 翻译入口存在时, 单击仍然是复制 (不再被翻译顶掉)
+                SetClipboardTextSafe("--marker--");
+                ClickAt(middlePoint);
+                Check(GetClipboardTextSafe() == "Middle",
+                    $"有翻译入口时单击仍复制原文 (实得 \"{GetClipboardTextSafe()}\")");
+
+                // 13.7.3 T 键: 单块选中时译文贴在底部条, 同样不碰剪贴板
+                SetClipboardTextSafe("--marker--");
+                InvokeCmdKey(resultForm, Keys.T);
+                PumpUntil(() => BarText() == "译文:Middle", 2000);
+                Check(BarText() == "译文:Middle",
+                    $"T 键翻译当前选中块 (实得 \"{BarText()}\")");
+                Check(GetClipboardTextSafe() == "--marker--", "T 键翻译不改剪贴板");
 
                 // 13.8 译文条自己的命中优先于背后的图片/文字块
                 var measureBar = typeof(OcrResultForm).GetMethod("MeasureTranslationBar", Priv)!;
@@ -685,8 +708,8 @@ internal static class InteractiveCheck
                                           barLayout.Box.Top + barLayout.Box.Height / 2);
                 mouseDown.Invoke(resultForm, [new MouseEventArgs(MouseButtons.Left, 1, barCenter.X, barCenter.Y, 0)]);
                 mouseUp.Invoke(resultForm, [new MouseEventArgs(MouseButtons.Left, 1, barCenter.X, barCenter.Y, 0)]);
-                Check(BarText() == "译文:Top", "点击译文条本体不会关闭/误改译文");
-                Check(selected.SetEquals([1]), "点击译文条不会清空选区 (没有透传给空白处逻辑)");
+                Check(BarText() == "译文:Middle", "点击译文条本体不会关闭/误改译文");
+                Check(selected.SetEquals([2]), "点击译文条不会清空选区 (没有透传给空白处逻辑)");
 
                 // 关闭图标: 清空译文条 (文字块选中保留)
                 var closeCenter = new Point(barLayout.Close.Left + barLayout.Close.Width / 2,
@@ -697,8 +720,8 @@ internal static class InteractiveCheck
                 // 13.9 失败信息同样只落在译文条, 不冒充成功
                 resultForm.TranslateForTest = (_, _) =>
                     Task.FromResult(TranslateResult.Fail("网络不可用"));
-                settings.ClickToTranslate = true;
-                ClickAt(middlePoint);
+                mouseMove.Invoke(resultForm, [new MouseEventArgs(MouseButtons.None, 0, bottomPoint.X, bottomPoint.Y, 0)]);
+                ClickAt(HintCenter(0));
                 PumpUntil(() => BarText() == "网络不可用", 2000);
                 Check(BarText() == "网络不可用",
                     $"失败提示显示在译文条 (实得 \"{BarText()}\")");
@@ -725,7 +748,6 @@ internal static class InteractiveCheck
             finally
             {
                 settings.ClickToCopy = savedClickToCopy;
-                settings.ClickToTranslate = savedClickToTranslate;
                 RestoreClipboard(originalClip);
                 resultForm.Dispose();
                 src.Dispose();
@@ -738,9 +760,6 @@ internal static class InteractiveCheck
             var resultForm = new OcrResultForm(src);
             var settings = SettingsStore.Current;
             bool savedClickToCopy = settings.ClickToCopy;
-            bool savedClickToTranslate = settings.ClickToTranslate;
-            // 本段只测拖选/DPI: 关掉单击翻译, 避免误发真实请求
-            settings.ClickToTranslate = false;
             string? originalClip = GetClipboardTextSafe();
 
             try
@@ -813,7 +832,6 @@ internal static class InteractiveCheck
             finally
             {
                 settings.ClickToCopy = savedClickToCopy;
-                settings.ClickToTranslate = savedClickToTranslate;
                 RestoreClipboard(originalClip);
                 resultForm.Dispose();
                 src.Dispose();
