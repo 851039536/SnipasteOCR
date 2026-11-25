@@ -94,13 +94,6 @@ internal sealed class TranslateForm : Form
     /// 居中到 owner (结果窗口) 所在屏的工作区; 没有 owner 时用光标所在屏。
     /// 多屏下不能按主屏居中, 否则副屏截图时译文窗口会跑到另一块屏。
     /// </summary>
-    protected override void OnHandleCreated(EventArgs e)
-    {
-        base.OnHandleCreated(e);
-        // 无边框/自绘窗口不参与 Win11 系统圆角, 显式声明 (Win10 忽略)
-        SnipasteOcr.Native.Dwmapi.TryRoundCorners(Handle);
-    }
-
     protected override void OnLoad(EventArgs e)
     {
         base.OnLoad(e);

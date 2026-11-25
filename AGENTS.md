@@ -43,6 +43,7 @@ src/                       产品代码 (唯一的出货工程, 也是唯一的 
   SnipMagnifierControl.cs  放大镜子控件 (显示层; 不参与 RenderResult)
   UiTheme.cs               界面配色唯一来源 (强调蓝/深色底; 改主题只改这里)
   DialogTheme.cs           设置对话框的深色外观 (与主界面同一套 token; 含深色标题栏)
+  WindowChrome.cs          无边框窗口圆角 (Win11 原生 / Win10 Region 兜底; 贴图窗口不用)
   OcrPan.cs                结果窗口高倍缩放的平移夹紧 (纯函数; 图片覆盖视口, 小图居中)
   OcrConfidence.cs         置信度展示规则 (低分阈值/百分比格式; 只提示不过滤)
   TranslateClient.cs       DeepSeek 翻译客户端 (请求/解析/错误映射; JSON 源生成)
@@ -257,6 +258,10 @@ dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
   8 个工具 + 样式 + 撤销组 + 3 个文字按钮 = **632px** (上限 650)。这份空间是靠把颜色与线宽
   收进「样式」弹层 (106px → 32px) 换来的, 不要再靠缩按钮/缩间距去塞新东西;
   真要加常驻控件, 先做分组或溢出菜单。
+- **无边框窗口的圆角只有 `WindowChrome` 一处**: Win11 走 DWM (`DWMWA_WINDOW_CORNER_PREFERENCE`),
+  Win10 没有该能力, 退回 `Form.Region` 硬裁剪 (8px, 边缘是 1px 台阶)。Region 必须在
+  **尺寸/DPI 变化时重建并释放旧对象**; 只对 `FormBorderStyle.None` 生效 (带边框窗口硬裁会把边框线切掉)。
+  **贴图窗口不要用**: 它展示的是截图原像素, 圆角会把图片四角裁掉。
 - **样式弹层的关闭必须成套**: 绘制选中态看 `StylePopupOpen`; Esc 由覆盖层先关它
   (否则一次 Esc 会把整个截图关掉); 点到别处由覆盖层 `OnMouseDown` 关; 工具栏其它动作
   与 `SetTool` 也要关。弹层是 `WS_EX_NOACTIVATE` 的顶层窗口, **`Deactivate` 不会触发**,

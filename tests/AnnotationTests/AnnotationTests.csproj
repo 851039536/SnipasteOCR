@@ -29,8 +29,10 @@
     <Compile Include="..\..\src\Annotations\AnnotationPalette.cs" Link="Engine\AnnotationPalette.cs" />
     <!-- 颜色与线宽弹层 (布局/绘制/命中; 打开时才创建窗口, 离线断言直接调 OnPaint) -->
     <Compile Include="..\..\src\Annotations\StylePopupForm.cs" Link="Engine\StylePopupForm.cs" />
-    <!-- 弹层在句柄创建后申请 Win11 圆角 (DwmSetWindowAttribute); 纯 P/Invoke, 无窗体依赖 -->
+    <!-- 弹层在句柄创建后申请圆角 (Win11 DWM / Win10 Region); 纯 P/Invoke, 无窗体依赖 -->
     <Compile Include="..\..\src\NativeMethods.cs" Link="Engine\NativeMethods.cs" />
+    <!-- 无边框窗口圆角 (弹层构造时挂载; 离线断言不建窗口, 只做编译验证) -->
+    <Compile Include="..\..\src\WindowChrome.cs" Link="Engine\WindowChrome.cs" />
     <Compile Include="..\..\src\Annotations\TextEditorOverlay.cs" Link="Engine\TextEditorOverlay.cs" />
     <Compile Include="..\..\src\Annotations\UiFont.cs" Link="Engine\UiFont.cs" />
     <!-- 标注选中 / 层级 / 选区手柄 (纯几何, 与窗体状态机解耦) -->

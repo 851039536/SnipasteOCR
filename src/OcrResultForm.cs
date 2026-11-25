@@ -171,6 +171,8 @@ public sealed class OcrResultForm : Form
 
         BuildToolStrip();
         Controls.Add(_toolStrip);
+        // 无边框窗口的圆角: Win11 走 DWM, Win10 退回 Region 裁剪 (见 WindowChrome)
+        WindowChrome.Attach(this);
         // 最小宽度 = 工具栏完整宽度, 小截图时按钮不会被挤掉/折叠进溢出菜单
         MinimumSize = new Size(Math.Max(320, _toolStrip.GetPreferredSize(new Size(0, _toolStrip.Height)).Width + 16), 140);
         // 初始大小: 图片原始尺寸 (1:1 显示) + 工具栏
@@ -511,8 +513,6 @@ public sealed class OcrResultForm : Form
     protected override void OnHandleCreated(EventArgs e)
     {
         base.OnHandleCreated(e);
-        // 无边框窗口默认不参与 Win11 的系统圆角, 显式声明一次 (Win10 静默忽略)
-        Dwmapi.TryRoundCorners(Handle);
         _dpi = DeviceDpi / 96f;
         if (!_dpiInitialized)
         {

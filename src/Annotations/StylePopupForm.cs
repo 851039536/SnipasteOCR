@@ -60,17 +60,12 @@ internal sealed class StylePopupForm : Form
             ControlStyles.OptimizedDoubleBuffer,
             true);
         ClientSize = PanelSize;
+        // 与工具栏同一套圆角 (Win11 原生 / Win10 Region 裁剪)
+        WindowChrome.Attach(this);
     }
 
     /// <summary>不抢焦点: 覆盖层必须继续接收 1..8 / Esc 等键盘操作</summary>
     protected override bool ShowWithoutActivation => true;
-
-    protected override void OnHandleCreated(EventArgs e)
-    {
-        base.OnHandleCreated(e);
-        // 与工具栏/结果窗口同一套 8px 圆角 (Win10 忽略)
-        SnipasteOcr.Native.Dwmapi.TryRoundCorners(Handle);
-    }
 
     protected override CreateParams CreateParams
     {
