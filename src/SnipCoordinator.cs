@@ -35,15 +35,7 @@ public static class SnipCoordinator
     {
         // 用户直接按热键 = 立即截图, 取消尚未到期的延时请求, 避免稍后突然弹出第二个覆盖层
         CancelDelayed();
-
-        // 已有截图层在用时忽略
-        if (_openForms.OfType<SnipOverlayForm>().Any())
-            return;
-
-        var overlay = new SnipOverlayForm(mode);
-        _openForms.Add(overlay);
-        overlay.FormClosed += (_, _) => _openForms.Remove(overlay);
-        overlay.Show();
+        StartCore(mode);
     }
 
     /// <summary>
@@ -88,10 +80,30 @@ public static class SnipCoordinator
         if (_openForms.OfType<SnipOverlayForm>().Any())
             return;
 
-        var overlay = new SnipOverlayForm(mode);
-        _openForms.Add(overlay);
-        overlay.FormClosed += (_, _) => _openForms.Remove(overlay);
-        overlay.Show();
+        SnipOverlayForm? overlay = null;
+        try
+        {
+            overlay = new SnipOverlayForm(mode);
+            _openForms.Add(overlay);
+            overlay.FormClosed += (_, _) => _openForms.Remove(overlay);
+            overlay.Show();
+        }
+        catch (Exception ex)
+        {
+            // 抓屏失败不代表程序坏了: 实测副屏休眠/刚断开、锁屏、远程会话切换时,
+            // 对整个虚拟屏 CopyFromScreen 会抛 Win32Exception "句柄无效"。
+            // 这一步绝不能让热键变成崩溃或"按了没反应" —— 保住托盘进程并给出可操作的提示。
+            if (overlay is { IsDisposed: false })
+            {
+                overlay.Dispose();
+                _openForms.Remove(overlay);
+            }
+            MessageBox.Show(
+                "无法截取屏幕画面，本次截图已取消。\n" +
+                "常见原因：显示器刚唤醒或已断开、屏幕锁定、远程会话未连接。\n" +
+                "请确认显示器状态后重试。\n\n" + ex.Message,
+                "SnipasteOCR", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
     }
 
     /// <summary>

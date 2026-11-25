@@ -33,7 +33,7 @@ src/                       产品代码 (唯一的出货工程, 也是唯一的 
   StartupRegistration.cs   开机自启 (写 HKCU 的 Run 键, 无管理员权限)
   SleepPreventer.cs        防休眠 (SetThreadExecutionState; 不移动鼠标)
   PinnedWindowBase.cs      贴图窗口基类 (置顶/不激活/标题栏拖拽/DPI 落尺寸/鼠标穿透)
-  PinnedImageForm.cs       图片贴图 (滚轮缩放 / Ctrl+滚轮透明度 / 双击复位 / 右键关闭)
+  PinnedImageForm.cs       图片贴图 (滚轮缩放 / Ctrl+滚轮透明度 / 双击复位 / 右上角「×」或右键关闭)
   PinnedTextForm.cs        文字贴图 (GDI+ DrawString; 分层窗口上不能用 ClearType)
   PinnedColorForm.cs       颜色贴图 (双击复制 HEX)
   PinnedRegistry.cs        贴图登记表 (关闭全部 / 取消全部穿透的唯一出口)
@@ -341,6 +341,10 @@ dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
 
 ### 窗口 / 焦点(WinForms 的坑)
 
+- **抓屏失败不能让进程崩溃**: 副屏休眠/刚断开、锁屏、远程会话切换时, 对整个虚拟屏
+  `CopyFromScreen` 会抛 Win32Exception "句柄无效" (实测发生)。`SnipCoordinator.StartCore`
+  必须捕获并弹可操作的提示, 保住托盘进程; `RepeatLastOcr` 已有同样的兜底
+  (失败返回 false 由调用方提示)。新增"加载屏幕画面"的入口要照此处理。
 - **覆盖层必须自己抢前台**:`Form.Show()` 只显示、**不激活**。必须在 `OnShown` 里用
   `AttachThreadInput` 挂到当前前台线程再 `SetForegroundWindow`(后台进程直接调用会被前台锁定拒绝),
   否则表现为"能框选、能点工具栏,但打字没反应"。
@@ -350,6 +354,10 @@ dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
   依赖的"父窗口先画背景、子控件再叠加"协作在此**不成立**,透明子控件会被父窗口整屏绘制覆盖
   (实测打字前后 **0 像素**差异)。因此文字显示由覆盖层自己的 `DrawEditingText` 完成,
   `TextEditorOverlay` 被放到屏幕外、仅承担接收键盘输入(焦点与可见性无关)。
+- **贴图关闭按钮必须先于拖动拦截**: 图片贴图右上角的「×」是常驻半透明圆钮, 若点击落进基类的
+  左键拖动分支 (`WM_NCLBUTTONDOWN + HTCAPTION`) 就会变成"开始拖窗口"。绘制、命中与光标共用
+  同一个 `CloseButtonRect`; 边框是内白外黑各 1px 的双色边 (单色黑边在深色截图上会消失,
+  用户实测反馈"没有边框")。
 - **贴图窗口拖动用 `WM_NCLBUTTONDOWN + HTCAPTION`,不要自己算鼠标偏移**:
   自己实现要处理"鼠标移出窗口/被遮挡/高 DPI 换算"一堆边界,交给系统的标题栏拖拽逻辑则全部自动正确
   (它内部用屏幕坐标与鼠标捕获)。调用前必须 `ReleaseCapture()`,否则 WinForms 自己的鼠标捕获
