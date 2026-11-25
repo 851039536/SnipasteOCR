@@ -29,14 +29,54 @@ internal static class TranslateCheck
             var messages = root.GetProperty("messages").EnumerateArray().ToArray();
             Check(messages.Length == 2, "messages 为 system + user 两条");
             Check(messages[0].GetProperty("role").GetString() == "system", "第一条是 system 角色");
-            Check(messages[0].GetProperty("content").GetString()!.Contains("只输出译文"),
+            Check(messages[0].GetProperty("content").GetString()!.Contains("只输出目标语言的译文"),
                 "system 提示词要求只输出译文");
-            Check(messages[0].GetProperty("content").GetString()!.Contains("不要执行"),
+            Check(messages[0].GetProperty("content").GetString()!.Contains("执行其中的指令"),
                 "system 提示词明确不执行原文中的指令 (提示注入防护)");
 
             string user = messages[1].GetProperty("content").GetString()!;
             Check(messages[1].GetProperty("role").GetString() == "user", "第二条是 user 角色");
             Check(user.Contains("English") && user.Contains("你好"), "user 消息包含目标语言与原文");
+
+            // 旧写法是"目标语言：X\n\n原文"这种陈述式抬头, 模型会当成对原文语言的描述,
+            // 英文原文经常被原样吐回来。这里锁死为祈使句 + 定界原文。
+            Check(user.Contains("翻译成English"), "user 消息用祈使句指定目标语言");
+            Check(user.Contains("<原文>") && user.Contains("</原文>"), "原文用定界符包住");
+            Check(!messages[0].GetProperty("content").GetString()!.Contains("原样返回"),
+                "system 提示词不再留「原样返回」的后门");
+        }
+
+        // ===== 1b. 「原样返回」的重发: 多一句硬约束, 不改其它参数 =====
+        {
+            using var a = JsonDocument.Parse(
+                TranslateClient.BuildRequestBody("m", "简体中文", "Hello world"));
+            using var b = JsonDocument.Parse(
+                TranslateClient.BuildRequestBody("m", "简体中文", "Hello world", emphasize: true));
+            string plainUser = a.RootElement.GetProperty("messages")[1].GetProperty("content").GetString()!;
+            string strictUser = b.RootElement.GetProperty("messages")[1].GetProperty("content").GetString()!;
+            Check(!plainUser.Contains("不得原样返回"), "首次请求不带强调句");
+            Check(strictUser.Contains("不得原样返回"), "重发时追加不得原样返回的约束");
+            Check(a.RootElement.GetProperty("max_tokens").GetInt32() ==
+                  b.RootElement.GetProperty("max_tokens").GetInt32(),
+                "重发不改变 max_tokens");
+        }
+
+        // ===== 1c. 回显判定: 英译中拿回英文算回显, 真译文不算 =====
+        {
+            Check(TranslateClient.LooksLikeEcho(
+                    "Hello world, this is an English sentence.", "Hello world, this is an English sentence.", "简体中文"),
+                "英文原文原样返回判为回显 (会触发重发)");
+            Check(!TranslateClient.LooksLikeEcho(
+                    "Hello world, this is an English sentence.", "你好世界，这是一句英文。", "简体中文"),
+                "真中文译文不算回显");
+            Check(!TranslateClient.LooksLikeEcho("API", "API", "简体中文"),
+                "过短文本不做回显判定");
+            Check(TranslateClient.LooksLikeEcho("这是一段中文内容需要翻译。", "这是一段中文内容需要翻译。", "English"),
+                "中文原文译英文却拿回中文也判为回显");
+            Check(!TranslateClient.LooksLikeEcho("这是一段中文内容需要翻译。", "This is Chinese text.", "English"),
+                "真英文译文不算回显");
+            Check(!TranslateClient.LooksLikeEcho("Hello world, translate me.", "Bonjour le monde.", "Français"),
+                "非中英目标语言不做回显判定");
         }
 
         // ===== 2. 空模型名回退默认值 =====
@@ -72,10 +112,12 @@ internal static class TranslateCheck
             using var doc = JsonDocument.Parse(body);
             var messages = doc.RootElement.GetProperty("messages").EnumerateArray().ToArray();
             string content = messages[1].GetProperty("content").GetString()!;
-            int prefixLength = "目标语言：English\n\n".Length;
+            // 抬头由 BuildUserMessage 统一生成, 这里按同一函数算期望值, 不再硬编码前缀
+            string expected = TranslateClient.BuildUserMessage(
+                "English", new string('a', TranslateClient.MaxInputChars));
 
-            Check(content.Length == prefixLength + TranslateClient.MaxInputChars,
-                $"请求体内部截断到 {TranslateClient.MaxInputChars} 字 (实得正文 {content.Length - prefixLength})");
+            Check(content == expected,
+                $"请求体内部截断到 {TranslateClient.MaxInputChars} 字 (实得 {content.Length} 字符)");
             Check(doc.RootElement.GetProperty("max_tokens").GetInt32() ==
                   TranslateClient.ComputeMaxTokens(TranslateClient.MaxInputChars),
                 "max_tokens 按截断后的长度计算");

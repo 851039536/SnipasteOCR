@@ -95,12 +95,30 @@ public sealed class OcrResultForm : Form
     /// </summary>
     private int _hintPressLine = -1;
 
-    // ===== 底部译文条 =====
+    // ===== 底部译文面板 =====
     /// <summary>进行中的翻译请求; 连点别的块时取消上一次, 避免旧译文后到覆盖新译文</summary>
     private CancellationTokenSource? _clickTranslateCts;
+
+    /// <summary>
+    /// 译文面板高度 (逻辑像素); 0 = 隐藏。
+    /// 图片视口会扣掉它 (见 <see cref="ImageViewport"/>) —— 面板永远不覆盖截图。
+    /// </summary>
+    private int _panelHeight;
+
+    /// <summary>为了放下面板而额外增加的窗口高度; 收起时按这个值减回去</summary>
+    private int _panelGrowth;
+
+    /// <summary>同步面板高度时正在改窗口尺寸, 避免 OnClientSizeChanged 递归</summary>
+    private bool _syncingPanel;
+
+    /// <summary>关闭图标的悬停态 (只有它和「复制译文」需要额外反馈)</summary>
+    private bool _barCloseHover;
     private string _barTitle = "";
     private string _barText = "";
     private bool _barError;
+
+    /// <summary>当前译文"疑似仍是原文" (模型没翻); 这种结果允许同一块再点一次重试, 不受去重拦截</summary>
+    private bool _barEcho;
     /// <summary>译文条当前对应的检测行: 同一块连点不重复发请求 (失败后允许重点重试)</summary>
     private int _barLine = -1;
     private bool _barPending;
@@ -324,7 +342,8 @@ public sealed class OcrResultForm : Form
     {
         float dpi = DpiFactor();
         float availW = Math.Max(100f, (ClientSize.Width - 4) * dpi);
-        float availH = Math.Max(100f, (ClientSize.Height - _toolStrip.Height - 4) * dpi);
+        // 图片视口 = 客户区 − 工具栏 − 译文面板: 面板不能靠压图片来腾地方
+        float availH = Math.Max(100f, (ClientSize.Height - _toolStrip.Height - _panelHeight - 4) * dpi);
         return Math.Min(1f, Math.Min(availW / _src.Width, availH / _src.Height));
     }
 
@@ -378,10 +397,10 @@ public sealed class OcrResultForm : Form
         float oldScale = _scale;
         float dpi = DpiFactor();
         var oldRect = ImageRect();
-        // 默认锚点 = 图片区中心 (工具栏按钮 / 键盘)
+        // 默认锚点 = 图片视口中心 (工具栏与译文面板之间的那块区域)
         Point anchor = anchorClient ?? new Point(
             ClientSize.Width / 2,
-            _toolStrip.Height + Math.Max(0, ClientSize.Height - _toolStrip.Height) / 2);
+            _toolStrip.Height + Math.Max(0, ClientSize.Height - _toolStrip.Height - _panelHeight) / 2);
         float imageX = (anchor.X * dpi - oldRect.X) / oldScale;
         float imageY = (anchor.Y * dpi - oldRect.Y) / oldScale;
 
@@ -394,7 +413,7 @@ public sealed class OcrResultForm : Form
         float newW = _src.Width * _scale;
         float newH = _src.Height * _scale;
         float baseX = (ClientSize.Width * newDpi - newW) / 2f;
-        float viewH = Math.Max(0, (ClientSize.Height - _toolStrip.Height) * newDpi);
+        float viewH = Math.Max(0, (ClientSize.Height - _toolStrip.Height - _panelHeight) * newDpi);
         float baseY = _toolStrip.Height * newDpi + (viewH - newH) / 2f;
         _panOffset = new PointF(
             anchor.X * newDpi - baseX - imageX * _scale,
@@ -411,7 +430,9 @@ public sealed class OcrResultForm : Form
     {
         float dpi = DpiFactor();
         int newW = Math.Max(MinimumSize.Width, (int)Math.Round(_src.Width * _scale / dpi) + 8);
-        int newH = Math.Max(MinimumSize.Height, (int)Math.Round(_src.Height * _scale / dpi) + _toolStrip.Height + 8);
+        // 高度要带上译文面板: 面板是图片之外的常驻区域, 不能被缩放"吃掉"
+        int newH = Math.Max(MinimumSize.Height,
+            (int)Math.Round(_src.Height * _scale / dpi) + _toolStrip.Height + _panelHeight + 8);
         if (newW == ClientSize.Width && newH == ClientSize.Height)
             return; // 尺寸没变
         // 必须用窗口所在屏幕的工作区: SystemInformation.WorkingArea 永远是主屏,
@@ -432,6 +453,12 @@ public sealed class OcrResultForm : Form
     protected override void OnClientSizeChanged(EventArgs e)
     {
         base.OnClientSizeChanged(e);
+
+        // 用户手动缩放窗口时, 面板要按新宽度重新换行 (只重排高度, 不再改窗口尺寸,
+        // 否则"改尺寸 → 重算面板 → 再改尺寸"会互相追)。我们自己为面板加高时用 _syncingPanel 跳过。
+        if (!_syncingPanel && _barText.Length > 0)
+            _panelHeight = DesiredPanelHeight();
+
         float fit = ComputeFitScale();
         _minScale = fit;
         if (_scale < fit)
@@ -521,17 +548,20 @@ public sealed class OcrResultForm : Form
         float w = _src.Width * _scale;
         float h = _src.Height * _scale;
         float x = (ClientSize.Width * dpi - w) / 2f + _panOffset.X;
-        float y = _toolStrip.Height * dpi + (ClientSize.Height * dpi - _toolStrip.Height * dpi - h) / 2f + _panOffset.Y;
+        // 垂直居中于"工具栏与译文面板之间": 面板出现时图片会往上让, 而不是被压住
+        float viewTop = _toolStrip.Height * dpi;
+        float viewH = Math.Max(0f, (ClientSize.Height - _toolStrip.Height - _panelHeight) * dpi);
+        float y = viewTop + (viewH - h) / 2f + _panOffset.Y;
         return new RectangleF(x, y, w, h);
     }
 
-    /// <summary>图片可用视口 (物理像素): 客户区减去顶部工具栏</summary>
+    /// <summary>图片可用视口 (物理像素): 客户区减去顶部工具栏与底部译文面板</summary>
     private SizeF ImageViewport()
     {
         float dpi = DpiFactor();
         return new SizeF(
             Math.Max(0f, ClientSize.Width * dpi),
-            Math.Max(0f, (ClientSize.Height - _toolStrip.Height) * dpi));
+            Math.Max(0f, (ClientSize.Height - _toolStrip.Height - _panelHeight) * dpi));
     }
 
     /// <summary>夹紧平移偏移: 图片边缘不能进入视口内侧, 小图保持居中</summary>
@@ -702,10 +732,8 @@ public sealed class OcrResultForm : Form
         using var font = UiFont.Create(12f);
         Size ts = TextRenderer.MeasureText(_statusText, font, new Size(int.MaxValue, int.MaxValue),
             TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
-        // 译文条可见时, 状态栏让到它上方 (二者都在底部右侧, 否则会叠在一起)
-        int bottomInset = _barText.Length == 0
-            ? 0
-            : Math.Max(0, ClientSize.Height - MeasureTranslationBar().Box.Top + 4);
+        // 译文面板在图片之外: 状态栏抬到面板上方 (仍落在图片区内), 两者不会叠在一起
+        int bottomInset = _panelHeight > 0 ? _panelHeight + 8 : 0;
         var (box, textRect) = ComputeStatusLayout(ts, ClientSize, bottomInset);
 
         using var bg = new SolidBrush(UiTheme.StatusSurface);
@@ -732,56 +760,162 @@ public sealed class OcrResultForm : Form
     private const string CopyBarLabel = "复制译文";
 
     /// <summary>
-    /// 量出译文条布局。绘制、命中、状态栏避让都从这里取, 不各自算一份。
-    /// 译文条只在可见时参与测量, 且文本很短, 直接量比维护缓存的失效逻辑更可靠。
+    /// 量出译文面板布局。绘制、命中、状态栏避让都从这里取, 不各自算一份。
+    /// 面板高度由 <see cref="_panelHeight"/> 决定 (已按内容算好), 这里只负责切成矩形。
     /// </summary>
     private TranslationBarLayout.Layout MeasureTranslationBar()
     {
-        using var titleFont = UiFont.Create(10f);
-        using var bodyFont = UiFont.Create(12f);
-        Size titleSize = TextRenderer.MeasureText(_barTitle, titleFont, new Size(int.MaxValue, int.MaxValue),
+        var (title, copy, body) = MeasurePanelContent();
+        return TranslationBarLayout.Compute(ClientSize, _panelHeight, title, copy, body);
+    }
+
+    /// <summary>
+    /// 量标题 / 按钮 / 正文。
+    /// 正文必须按"扣掉内边距后的实际宽度"换行: 按 int.MaxValue 量会得到一行, 高度就永远不增高。
+    /// </summary>
+    private (Size Title, Size Copy, Size Body) MeasurePanelContent()
+    {
+        using var titleFont = UiFont.Create(12f);
+        using var bodyFont = UiFont.Create(13f);
+        Size title = TextRenderer.MeasureText(_barTitle, titleFont, new Size(int.MaxValue, int.MaxValue),
             TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
         // 按钮文字必须写明"复制的是译文": 原文已在单击时进了剪贴板,
         // 两个"复制"看起来一样才让人以为冲突。
-        Size copySize = TextRenderer.MeasureText(CopyBarLabel, titleFont, new Size(int.MaxValue, int.MaxValue),
+        Size copy = TextRenderer.MeasureText(CopyBarLabel, titleFont, new Size(int.MaxValue, int.MaxValue),
             TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
-        // 正文必须按"扣掉内边距后的实际宽度"换行: 按 int.MaxValue 量会得到一行, 高度就永远不增高
-        Size bodySize = TextRenderer.MeasureText(_barText, bodyFont,
+        Size body = TextRenderer.MeasureText(_barText, bodyFont,
             new Size(TranslationBarLayout.ContentWidth(ClientSize.Width), int.MaxValue),
             TextFormatFlags.WordBreak | TextFormatFlags.NoPadding);
-
-        return TranslationBarLayout.Compute(
-            ClientSize, titleSize, copySize, bodySize,
-            TranslationBarLayout.MaxHeight(ClientSize.Height, _toolStrip.Height));
+        return (title, copy, body);
     }
 
-    private void DrawTranslationBar(Graphics g)
+    /// <summary>按内容算出的面板高度; 无译文时为 0, 超长时封顶 (正文会被裁切, 可复制)</summary>
+    private int DesiredPanelHeight()
     {
         if (_barText.Length == 0)
+            return 0;
+
+        var (title, _, body) = MeasurePanelContent();
+        int max = TranslationBarLayout.MaxPanelHeight(ClientSize.Height, _toolStrip.Height);
+        int want = TranslationBarLayout.DesiredHeight(title, body);
+        return Math.Clamp(want, Math.Min(TranslationBarLayout.MinHeight, max), max);
+    }
+
+    /// <summary>
+    /// 让面板高度跟上内容, 并把窗口高度一起加减。
+    ///
+    /// 面板出现/变高 → 窗口向下长 (底边贴屏时先把窗口上移, 实在放不下才让图片视口变矮);
+    /// 收起 → 减回当初为面板加的那部分。用户看到的窗口尺寸因此是可逆的。
+    /// </summary>
+    private void SyncPanelHeight()
+    {
+        int target = DesiredPanelHeight();
+        int delta = target - _panelHeight;
+        if (delta == 0)
+            return;
+
+        _panelHeight = target;
+
+        if (delta > 0)
+        {
+            int room = PanelGrowthRoom();
+            if (room < delta)
+            {
+                var wa = Screen.FromControl(this).WorkingArea;
+                int shift = Math.Min(delta - room, Math.Max(0, Top - wa.Top));
+                if (shift > 0)
+                {
+                    Top -= shift;
+                    room += shift;
+                }
+            }
+
+            int add = Math.Min(delta, room);
+            if (add > 0)
+            {
+                _panelGrowth += add;
+                ResizeForPanel(Height + add);
+            }
+        }
+        else
+        {
+            // 只减回"当初为了面板加的那部分", 不吞用户自己拉大的尺寸
+            int shrink = Math.Min(-delta, _panelGrowth);
+            if (shrink > 0)
+            {
+                _panelGrowth -= shrink;
+                ResizeForPanel(Math.Max(MinimumSize.Height, Height - shrink));
+            }
+        }
+
+        Invalidate();
+    }
+
+    /// <summary>改窗口高度; 期间不让 OnClientSizeChanged 反过来重算面板高度</summary>
+    private void ResizeForPanel(int height)
+    {
+        _syncingPanel = true;
+        try
+        {
+            Size = new Size(Width, height);
+        }
+        finally
+        {
+            _syncingPanel = false;
+        }
+    }
+
+    /// <summary>窗口下方还能长多高 (受所在屏工作区底边限制)</summary>
+    private int PanelGrowthRoom()
+    {
+        var wa = Screen.FromControl(this).WorkingArea;
+        return Math.Max(0, wa.Bottom - (Top + Height));
+    }
+
+
+    /// <summary>
+    /// 画窗口底部的译文面板。
+    ///
+    /// 它是图片<b>之外</b>的一块区域 (图片视口已经扣掉面板高度), 所以这里可以放心铺满整宽:
+    /// 顶部一条分隔线 + 略亮于画布的底色, 读起来是"窗口的下半部分", 而不是浮在截图上的条。
+    /// </summary>
+    private void DrawTranslationBar(Graphics g)
+    {
+        if (_panelHeight <= 0 || _barText.Length == 0)
             return;
 
         var lay = MeasureTranslationBar();
-        using (var bg = new SolidBrush(UiTheme.FloatingBar))
+
+        using (var bg = new SolidBrush(UiTheme.Surface))
             g.FillRectangle(bg, lay.Box);
+        // 与图片区之间的分隔线: 1px 足够, 深色主题下更细反而糊
+        using (var edge = new Pen(Color.FromArgb(255, 48, 53, 60), 1f))
+            g.DrawLine(edge, lay.Box.Left, lay.Box.Top, lay.Box.Right, lay.Box.Top);
         // 左侧强调条: 与深色底形成边界, 不额外引入新配色
         using (var strip = new SolidBrush(UiTheme.Accent))
             g.FillRectangle(strip, lay.Box.X, lay.Box.Y, 3, lay.Box.Height);
 
-        using var titleFont = UiFont.Create(10f);
-        using var bodyFont = UiFont.Create(12f);
+        using var titleFont = UiFont.Create(12f);
+        using var bodyFont = UiFont.Create(13f);
         TextRenderer.DrawText(g, _barTitle, titleFont, lay.Title, UiTheme.MutedText,
             TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis |
             TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
 
-        // 复制按钮: 只有拿到可复制的译文时才点亮; 加载中/失败态置灰, 避免复制走错误文字
-        Color copyColor = !CanCopyBarTranslation
+        // 「复制译文」: 拿到可复制内容时才点亮; 加载中/失败态置灰, 避免复制走错误文字
+        bool canCopy = CanCopyBarTranslation;
+        if (canCopy && _barCopyHover)
+        {
+            using var hover = new SolidBrush(Color.FromArgb(38, UiTheme.Accent));
+            g.FillRectangle(hover, lay.Copy);
+        }
+        Color copyColor = !canCopy
             ? Color.FromArgb(110, UiTheme.MutedText)
-            : _barCopyHover ? UiTheme.Accent : UiTheme.MutedText;
+            : _barCopyHover ? UiTheme.Accent : Color.FromArgb(210, 220, 232);
         TextRenderer.DrawText(g, CopyBarLabel, titleFont, lay.Copy, copyColor,
             TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter |
             TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
 
-        // 正文高度被条高夹紧, 超出的部分必须裁掉: 否则长译文会压到状态栏和窗口边缘
+        // 正文高度被面板夹紧, 超出的部分必须裁掉: 否则长译文会压到窗口边缘
         GraphicsState state = g.Save();
         g.SetClip(lay.Text);
         TextRenderer.DrawText(g, _barText, bodyFont, lay.Text,
@@ -790,7 +924,7 @@ public sealed class OcrResultForm : Form
         g.Restore(state);
 
         // 关闭图标用矢量线而不是字体字形: 缺字体时字形会画出 0 像素且不报错 (工具栏图标踩过)
-        using var closePen = new Pen(UiTheme.MutedText, 1.6f);
+        using var closePen = new Pen(_barCloseHover ? UiTheme.Accent : UiTheme.MutedText, 1.6f);
         const int pad = 5;
         g.DrawLine(closePen, lay.Close.Left + pad, lay.Close.Top + pad,
             lay.Close.Right - pad, lay.Close.Bottom - pad);
@@ -801,37 +935,44 @@ public sealed class OcrResultForm : Form
     /// <summary>只有成功拿到译文时才允许复制; 加载中/失败态的"复制"按钮置灰</summary>
     private bool CanCopyBarTranslation => _barText.Length > 0 && !_barError && !_barPending;
 
-    private void SetTranslationBar(string title, string text, bool error)
+    private void SetTranslationBar(string title, string text, bool error, bool echo = false)
     {
         _barTitle = title;
         _barText = text;
         _barError = error;
+        _barEcho = echo;
         _barCopyHover = false;
+        _barCloseHover = false;
+        // 内容变了 (例如"正在翻译…" → 多行译文) 面板高度也要跟着变, 窗口一起加高
+        SyncPanelHeight();
         Invalidate();
     }
 
     private void HideTranslationBar()
     {
-        if (_barText.Length == 0)
+        if (_barText.Length == 0 && _panelHeight == 0)
             return;
         _barTitle = "";
         _barText = "";
         _barError = false;
+        _barEcho = false;
         _barLine = -1;
         _barPending = false;
         _barCopyHover = false;
-        // 用户主动收起时取消进行中的请求: 否则结果回来后又会把条弹出来
+        _barCloseHover = false;
+        // 用户主动收起时取消进行中的请求: 否则结果回来后又会把面板弹出来
         _clickTranslateCts?.Cancel();
+        SyncPanelHeight(); // 高度归零并把窗口收回原尺寸
         Invalidate();
     }
 
     /// <summary>
-    /// 译文条命中: 关闭图标与「复制」优先于整条拖动。
-    /// 复制按钮在不可复制时退化为普通条内区域 (拖动窗口), 不会静默复制错误内容。
+    /// 译文面板命中: 关闭图标与「复制译文」优先于整块拖动。
+    /// 复制按钮在不可复制时退化为普通面板区域 (拖动窗口), 不会静默复制错误内容。
     /// </summary>
     private TranslationBarHit HitTranslationBar(Point clientPoint)
     {
-        if (_barText.Length == 0)
+        if (_barText.Length == 0 || _panelHeight <= 0)
             return TranslationBarHit.None;
 
         var lay = MeasureTranslationBar();
@@ -872,8 +1013,8 @@ public sealed class OcrResultForm : Form
             b = Math.Max(b, pts[i].Y);
         }
 
-        // 译文条可见时按钮让开它, 否则会画在译文上并被译文条的命中抢先吃掉
-        int bottomLimit = _barText.Length > 0 ? MeasureTranslationBar().Box.Top : ClientSize.Height;
+        // 译文面板可见时按钮让开它, 否则会画在面板上并被面板的命中抢先吃掉
+        int bottomLimit = ClientSize.Height - _panelHeight;
         return TranslateHoverButton.Compute(
             RectangleF.FromLTRB(l, t, r, b), ClientSize, _toolStrip.Height, bottomLimit);
     }
@@ -1264,9 +1405,11 @@ public sealed class OcrResultForm : Form
         if (barHit != TranslationBarHit.None)
         {
             bool copyHover = barHit == TranslationBarHit.Copy;
-            if (_barCopyHover != copyHover)
+            bool closeHover = barHit == TranslationBarHit.Close;
+            if (_barCopyHover != copyHover || _barCloseHover != closeHover)
             {
                 _barCopyHover = copyHover;
+                _barCloseHover = closeHover;
                 Invalidate();
             }
             Cursor = barHit is TranslationBarHit.Copy or TranslationBarHit.Close
@@ -1280,9 +1423,10 @@ public sealed class OcrResultForm : Form
             }
             return;
         }
-        if (_barCopyHover)
+        if (_barCopyHover || _barCloseHover)
         {
             _barCopyHover = false;
+            _barCloseHover = false;
             Invalidate();
         }
 
@@ -1627,7 +1771,7 @@ public sealed class OcrResultForm : Form
     /// <summary>
     /// 翻译的默认入口 (工具栏「翻译」/ T 键 / 右键「翻译」)。
     ///
-    /// 呈现规则可感知: <b>恰好选中一个整块</b>时贴在窗口底部 (轻量看译), 多块/部分选中/无选中
+    /// 呈现规则可感知: <b>恰好选中一个整块</b>时贴在图片下方 (轻量看译), 多块/部分选中/无选中
     /// 时开独立译文窗口 (读长文、复制全文)。单块不去开窗, 是因为看一行译文不需要多一个窗口。
     /// </summary>
     private void TranslateCurrent()
@@ -1795,7 +1939,7 @@ public sealed class OcrResultForm : Form
     }
 
     /// <summary>
-    /// 翻译单个检测块, 结果贴在窗口底部 (悬停「译」/ 右键「翻译此块」/ 单块时按 T)。
+    /// 翻译单个检测块, 结果贴在图片下方的面板 (悬停「译」/ 右键「翻译此块」/ 单块时按 T)。
     /// 请求与工具栏入口相互独立: 关闭译文条不影响独立译文窗口, 反之亦然。
     /// </summary>
     private void TranslateLine(int line)
@@ -1808,10 +1952,10 @@ public sealed class OcrResultForm : Form
             return;
 
         // 同一块已有译文/正在请求: 不重复发送 (每次请求都计费, 连点不该重复扣费);
-        // 失败后允许重点重试, 否则用户没有重试入口。
-        if (_barLine == line && (_barPending || !_barError))
+        // 失败后允许重点重试; "疑似未翻译"也允许 —— 状态栏正提示用户再点一次。
+        if (_barLine == line && (_barPending || (!_barError && !_barEcho)))
         {
-            SetStatus(_barPending ? "正在翻译\u2026" : "译文已显示在窗口底部");
+            SetStatus(_barPending ? "正在翻译\u2026" : "译文已显示在图片下方");
             return;
         }
 
@@ -1862,8 +2006,13 @@ public sealed class OcrResultForm : Form
 
             if (result.Ok)
             {
-                SetTranslationBar(title, result.Text, error: false);
-                SetStatus("翻译完成 · 译文显示在窗口底部");
+                // 模型把原文原样吐回来时如实标注: 标题加后缀, 状态栏给出重试提示。
+                // 静默显示英文会被当成"翻译功能坏了", 而且用户不知道该不该再点一次。
+                SetTranslationBar(result.Echo ? title + " · 疑似未翻译" : title, result.Text,
+                    error: false, echo: result.Echo);
+                SetStatus(result.Echo
+                    ? "译文可能仍是原文 · 再点一次「译」重试"
+                    : "翻译完成 · 译文显示在图片下方");
             }
             else
             {

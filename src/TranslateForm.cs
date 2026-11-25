@@ -188,7 +188,9 @@ internal sealed class TranslateForm : Form
                 _copy.Enabled = true;
                 int tokens = result.PromptTokens + result.CompletionTokens;
                 string tokenText = tokens > 0 ? $" · {tokens} tokens" : "";
-                _status.Text = "完成" + tokenText + (result.Truncated ? " · 译文可能被截断" : "");
+                _status.Text = "完成" + tokenText
+                    + (result.Truncated ? " · 译文可能被截断" : "")
+                    + (result.Echo ? " · 译文可能仍是原文" : "");
             }
             else
             {

@@ -657,11 +657,27 @@ internal static class InteractiveCheck
                 var topHint = HintCenter(1);
                 Check(topHint.X > topPoint.X, $"「译」按钮出现在块右侧 (hint={topHint}, block={topPoint})");
 
+                int heightBeforePanel = resultForm.ClientSize.Height;
                 SetClipboardTextSafe("--marker--");
                 ClickAt(topHint);
                 PumpUntil(() => BarText().Length > 0, 2000);
                 Check(BarText() == "译文:Top",
                     $"点「译」把译文显示在窗口底部 (实得 \"{BarText()}\")");
+
+                // 13.7.0 译文面板必须在图片之外: 图片底边不能压到面板顶边 (旧实现是浮层, 会盖住最后几行)
+                int panelH = (int)typeof(OcrResultForm).GetField("_panelHeight", Priv)!.GetValue(resultForm)!;
+                float dpiNow = (float)typeof(OcrResultForm).GetMethod("DpiFactor", Priv)!.Invoke(resultForm, null)!;
+                var imgRect = (RectangleF)typeof(OcrResultForm).GetMethod("ImageRect", Priv)!.Invoke(resultForm, null)!;
+                int panelTop = resultForm.ClientSize.Height - panelH;
+                Check(panelH > 0, $"译文面板高度为正 (实得 {panelH})");
+                Check(imgRect.Bottom / dpiNow <= panelTop + 1,
+                    $"图片不进入译文面板区域 (图片底边={imgRect.Bottom / dpiNow:F1}, 面板顶边={panelTop})");
+                Check(resultForm.ClientSize.Height > heightBeforePanel,
+                    $"面板出现时窗口向下加高, 而不是压图片 (高 {heightBeforePanel} → {resultForm.ClientSize.Height})");
+                var panelLayout = (TranslationBarLayout.Layout)typeof(OcrResultForm)
+                    .GetMethod("MeasureTranslationBar", Priv)!.Invoke(resultForm, null)!;
+                Check(panelLayout.Box.Width == resultForm.ClientSize.Width,
+                    $"译文面板占满客户区宽度 (panel={panelLayout.Box}, client={resultForm.ClientSize})");
                 Check(GetClipboardTextSafe() == "--marker--",
                     "点「译」只翻译, 不改剪贴板");
                 Check(selected.SetEquals([1]), "翻译时选中被翻译的块作为上下文");
@@ -737,9 +753,36 @@ internal static class InteractiveCheck
                 Check(GetClipboardTextSafe() == "--marker--",
                     "失败态「复制」不可用, 不会把错误提示写进剪贴板");
 
-                // 单击空白处: 清空选区的同时收起译文条, 画面与选区保持一致
+                // 13.10 模型把原文原样吐回来 (英译中还是英文): 不能静默当成好译文, 标题必须标注
+                int echoCalls = 0;
+                resultForm.TranslateForTest = (text, _) =>
+                {
+                    echoCalls++;
+                    return Task.FromResult(new TranslateResult(true, text, null, 1, 2, Echo: true));
+                };
+                mouseMove.Invoke(resultForm, [new MouseEventArgs(MouseButtons.None, 0, bottomPoint.X, bottomPoint.Y, 0)]);
+                ClickAt(HintCenter(0));
+                PumpUntil(() => BarText() == "Bottom", 2000);
+                var barTitleField = typeof(OcrResultForm).GetField("_barTitle", Priv)!;
+                string echoTitle = (string)barTitleField.GetValue(resultForm)!;
+                Check(echoTitle.Contains("疑似未翻译"),
+                    $"回显译文在标题上标注 (实得 \"{echoTitle}\")");
+                Check(Status().Contains("仍是原文"),
+                    $"回显译文在状态栏给出重试提示 (实得 \"{Status()}\")");
+                Check((bool)barErrorField.GetValue(resultForm)! == false,
+                    "回显不算失败: 译文仍可复制");
+
+                // 状态栏让用户"再点一次" —— 同一块的去重不能把这次重试拦掉
+                ClickAt(HintCenter(0));
+                PumpUntil(() => echoCalls >= 2, 2000);
+                Check(echoCalls >= 2,
+                    $"疑似未翻译允许同块再点重试 (请求次数={echoCalls})");
+
+                // 单击空白处: 清空选区的同时收起译文面板, 画面与选区保持一致
                 ClickAt(new Point(resultForm.ClientSize.Width - 30, resultForm.ClientSize.Height / 2));
-                Check(BarText().Length == 0, "单击空白处收起译文条");
+                Check(BarText().Length == 0, "单击空白处收起译文面板");
+                Check(resultForm.ClientSize.Height == heightBeforePanel,
+                    $"收起后窗口高度回到原值 ({heightBeforePanel} → {resultForm.ClientSize.Height})");
 
                 resultForm.TranslateForTest = null;
                 resultForm.Close();

@@ -1,33 +1,43 @@
 namespace SnipasteOcr;
 
 /// <summary>
-/// 结果窗口底部译文条的布局 (唯一来源)。
+/// 结果窗口底部译文面板的布局 (纯函数, 唯一来源)。
+///
+/// 面板<b>不覆盖图片</b>: 图片视口 = 客户区 − 工具栏 − 面板, 结果窗口在需要时向下加高。
+/// 早先的版本是贴在图片上的浮层, 会压住截图最后几行 —— 译文再好看, 遮住原文就是错的。
 ///
 /// 绘制、鼠标命中、状态栏避让都必须从 <see cref="Compute"/> 取矩形 ——
 /// 三处各写一份"宽度减内边距"很容易在改间距后错位: 画面上的关闭图标与
-/// 实际可点区域对不上, 或者状态栏叠在译文条上。
-/// 与 <see cref="SnipSizeBadge"/> 同一约定: 纯函数、不碰控件, 便于离线断言。
+/// 实际可点区域对不上, 或者状态栏叠在面板上。
+/// 与 <see cref="TranslateHoverButton"/> 同一约定: 纯函数、不碰控件, 便于离线断言。
 /// </summary>
 internal static class TranslationBarLayout
 {
-    /// <summary>译文条与客户区边缘的间距</summary>
-    public const int Margin = 8;
+    /// <summary>左右内边距。16 而不是 8: 面板是窗口的一部分, 需要一点呼吸感</summary>
+    public const int PadX = 16;
 
-    /// <summary>文本框内边距</summary>
-    public const int PadX = 10;
-    public const int PadY = 8;
+    /// <summary>上下内边距</summary>
+    public const int PadY = 12;
 
-    /// <summary>标题与正文之间的间距</summary>
-    public const int TitleGap = 4;
+    /// <summary>标题行与正文之间的间距</summary>
+    public const int TitleGap = 8;
 
-    private const int CloseSize = 16;
-    private const int CloseGap = 6;
+    /// <summary>面板最矮高度: 单行译文也要站得住</summary>
+    public const int MinHeight = 64;
 
-    /// <summary>「复制」按钮与关闭图标之间的间距</summary>
-    public const int CopyGap = 8;
+    /// <summary>面板最高高度: 再长也不让译文把截图挤没</summary>
+    public const int MaxHeight = 200;
 
-    /// <summary>「复制」按钮左右内边距 (文字宽度由调用方量好传入)</summary>
-    public const int CopyPadX = 6;
+    private const int CloseSize = 18;
+
+    /// <summary>「复制译文」与关闭图标之间的间距</summary>
+    public const int CloseGap = 10;
+
+    /// <summary>「复制译文」与关闭图标之间的间距</summary>
+    public const int CopyGap = 12;
+
+    /// <summary>「复制译文」按钮左右内边距 (文字宽度由调用方量好传入)</summary>
+    public const int CopyPadX = 8;
 
     public readonly record struct Layout(
         Rectangle Box,
@@ -36,46 +46,44 @@ internal static class TranslationBarLayout
         Rectangle Copy,
         Rectangle Close);
 
-    /// <summary>正文可用宽度 (客户区扣掉左右外边距与内边距)</summary>
+    /// <summary>正文可用宽度 (面板占满客户区宽度, 只扣左右内边距)</summary>
     public static int ContentWidth(int clientWidth)
-        => Math.Max(1, clientWidth - Margin * 2 - PadX * 2);
+        => Math.Max(1, clientWidth - PadX * 2);
 
     /// <summary>
-    /// 译文条最大高度: 不超过 120 逻辑像素, 也不超过图片视口的一半。
-    /// 上限是必要的 —— 长译文不能把整张截图盖住, 超出的部分宁可让用户去复制。
+    /// 面板高度上限: 不超过 <see cref="MaxHeight"/>, 也不超过图片视口的一半 ——
+    /// 译文再长也不能把截图挤成一条缝。
     /// </summary>
-    public static int MaxHeight(int clientHeight, int toolbarHeight)
-        => Math.Min(120, Math.Max(48, Math.Max(0, clientHeight - toolbarHeight) / 2));
-
-    /// <summary>
-    /// 贴住客户区底部计算各矩形。正文高度为 0 (例如空文本) 时仍然保留一条只有标题的窄条。
-    /// <paramref name="copySize"/> 是「复制」文字的测量尺寸; 按钮宽度 = 文字 + 左右内边距。
-    /// </summary>
-    public static Layout Compute(Size client, Size titleSize, Size copySize, Size bodySize, int maxHeight)
+    public static int MaxPanelHeight(int clientHeight, int toolbarHeight)
     {
-        int width = Math.Max(1, client.Width - Margin * 2);
-        int contentW = ContentWidth(client.Width);
+        int viewport = Math.Max(0, clientHeight - toolbarHeight);
+        return Math.Min(MaxHeight, Math.Max(MinHeight, viewport / 2));
+    }
 
-        // 先按客户区夹紧上限, 再让正文吃掉剩余空间: 小窗口里标题与内边距优先保留
-        int maxH = Math.Max(0, Math.Min(maxHeight, client.Height - Margin * 2));
-        int titleH = Math.Max(0, titleSize.Height);
-        int bodyAvail = Math.Max(0, maxH - PadY * 2 - titleH - TitleGap);
-        int bodyH = Math.Min(Math.Max(0, bodySize.Height), bodyAvail);
-        int h = Math.Min(maxH, PadY * 2 + titleH + TitleGap + bodyH);
+    /// <summary>按内容量出的理想高度 (未夹紧)</summary>
+    public static int DesiredHeight(Size titleSize, Size bodySize)
+        => PadY * 2 + Math.Max(0, titleSize.Height) + TitleGap + Math.Max(0, bodySize.Height);
 
-        int top = Math.Max(0, client.Height - Margin - h);
-        var box = new Rectangle(Margin, top, width, h);
+    /// <summary>
+    /// 贴住客户区底部、占满整宽计算各矩形。
+    /// <paramref name="panelHeight"/> 由调用方按内容算好 (见 <see cref="DesiredHeight"/>) 并夹紧。
+    /// </summary>
+    public static Layout Compute(Size client, int panelHeight, Size titleSize, Size copySize, Size bodySize)
+    {
+        int width = Math.Max(1, client.Width);
+        int h = Math.Clamp(panelHeight, 0, Math.Max(0, client.Height));
+        var box = new Rectangle(0, client.Height - h, width, h);
+
+        // 关闭图标贴右上角, 「复制译文」在它左侧; 标题再让出两者宽度
         var close = new Rectangle(box.Right - PadX - CloseSize, box.Y + PadY, CloseSize, CloseSize);
-
-        // 「复制」按钮贴在关闭图标左侧; 标题再让出它的宽度, 三者不会互相覆盖
         int copyW = Math.Max(0, copySize.Width) + CopyPadX * 2;
-        var copy = new Rectangle(close.Left - CopyGap - copyW, box.Y + PadY, copyW, CloseSize);
-        int titleW = Math.Max(1, Math.Min(contentW, copy.Left - (box.X + PadX) - CopyGap));
-        var title = new Rectangle(box.X + PadX, box.Y + PadY, titleW, titleH);
+        var copy = new Rectangle(close.Left - CloseGap - copyW, box.Y + PadY, copyW, CloseSize);
+        int titleW = Math.Max(1, Math.Min(ContentWidth(client.Width), copy.Left - (box.X + PadX) - CopyGap));
+        var title = new Rectangle(box.X + PadX, box.Y + PadY, titleW, Math.Max(0, titleSize.Height));
 
-        int textTop = title.Bottom + TitleGap;
+        int textTop = box.Y + PadY + Math.Max(0, titleSize.Height) + TitleGap;
         var text = new Rectangle(
-            box.X + PadX, textTop, contentW,
+            box.X + PadX, textTop, ContentWidth(client.Width),
             Math.Max(0, box.Bottom - PadY - textTop));
 
         return new Layout(box, title, text, copy, close);
