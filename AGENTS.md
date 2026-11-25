@@ -42,6 +42,7 @@ src/                       产品代码 (唯一的出货工程, 也是唯一的 
   SnipMagnifier.cs         放大镜/取色器纯逻辑 (面板定位/底图采样/颜色格式化)
   SnipMagnifierControl.cs  放大镜子控件 (显示层; 不参与 RenderResult)
   UiTheme.cs               界面配色唯一来源 (强调蓝/深色底; 改主题只改这里)
+  DialogTheme.cs           设置对话框的深色外观 (与主界面同一套 token; 含深色标题栏)
   OcrPan.cs                结果窗口高倍缩放的平移夹紧 (纯函数; 图片覆盖视口, 小图居中)
   OcrConfidence.cs         置信度展示规则 (低分阈值/百分比格式; 只提示不过滤)
   TranslateClient.cs       DeepSeek 翻译客户端 (请求/解析/错误映射; JSON 源生成)
@@ -52,7 +53,7 @@ src/                       产品代码 (唯一的出货工程, 也是唯一的 
   ProtectedKey.cs          API Key 的 DPAPI 加密/解密 (CryptProtectData)
   ClipboardText.cs         剪贴板文本写入唯一入口 (统一 CRLF)
   NativeMethods.cs         Win32 P/Invoke (消息/热键/窗口/菜单/托盘/输入模拟)
-tests/AnnotationTests/     离线自检, 607 项 (几何/标注拖拽约束/标注选中与手柄/马克笔与序号/命中/历史/渲染/工具栏/尺寸徽标/放大镜取色/贴图布局/多屏定位/缩放平移/置信度展示/设置迁移/编辑框/OCR 后处理/表格中间模型/选词几何/双击选词/CTC 字符框/翻译客户端/译文面板布局/悬停译按钮布局)
+tests/AnnotationTests/     离线自检, 610 项 (几何/标注拖拽约束/标注选中与手柄/马克笔与序号/命中/历史/渲染/工具栏/尺寸徽标/放大镜取色/贴图布局/多屏定位/缩放平移/置信度展示/设置迁移/编辑框/OCR 后处理/表格中间模型/选词几何/双击选词/CTC 字符框/翻译客户端/译文面板布局/悬停译按钮布局)
 tests/InteractiveTests/    交互自检, 215 项 (真实窗口 + 真实按键 + Ctrl 约束绘制 + 马克笔/序号 + 标注选中/拖动/层级/选区手柄 + 贴图缩放/穿透 + 重复上次识别 + 拖拽实时尺寸 + 多屏定位 + 工具栏 tooltip + 提示文案 + 状态栏省略号 + 托盘菜单文案 + 结果窗口单击复制 + 悬停「译」翻译 + 图片下方译文面板 + 双击选词/三击选行 + 放大镜/取色 + DPI 基准 + CTC 选词 + 拖出收尾 + 缩放平移 + 置信度可视化 + 绘制缓存失效 + IME + 翻译窗口与居中 + Ctrl+回车直接识别 + 延时截图 + 贴图 DPI, 需要桌面会话)
 tools/DriveTest/           端到端驱动实际 exe (真实鼠标键盘事件 + 抓屏取证 + 校验导出图)
 ```
@@ -70,7 +71,9 @@ tools/DriveTest/           端到端驱动实际 exe (真实鼠标键盘事件 +
 | `AnnotationOrder.cs` | 层级调整 (纯列表重排, 不克隆不入历史) |
 | `AnnotationSelection.cs` | 选中装饰绘制 (虚线框 + 8 手柄; **只在覆盖层调用, 绝不进 Draw**) |
 | `SelectionResize.cs` | 选区 8 手柄的命中与拖拽几何 (逻辑像素; 逻辑→物理仍走 `SnipGeometry.ExportRect`) |
-| `AnnotationToolbar.cs` | 自绘工具栏 (图标全矢量) |
+| `AnnotationToolbar.cs` | 自绘工具栏 (图标全矢量); 颜色/线宽收在「样式」按钮后 |
+| `AnnotationPalette.cs` | 可选颜色/线宽的唯一来源 (工具栏预览、样式弹层、断言共用) |
+| `StylePopupForm.cs` | 颜色与线宽弹层 (不抢焦点的顶层窗口; 与工具栏同一份布局常量) |
 | `TextEditorOverlay.cs` | 文字输入**接收**载体(不负责显示) |
 | `UiFont.cs` | 界面字体探测与回退 |
 
@@ -92,7 +95,7 @@ dotnet publish src/SnipasteOcr.csproj -c Release -r win-x64 --self-contained -p:
 ```
 
 ```powershell
-# 离线自检 (607 项), 无需桌面会话 —— 改完必跑
+# 离线自检 (610 项), 无需桌面会话 —— 改完必跑
 dotnet run --project tests/AnnotationTests              # 期望输出「全部通过」, 退出码 0
 dotnet run --project tests/AnnotationTests -- sample    # 额外输出八种标注样例图
 # 交互自检 (215 项) —— 需要可用的桌面会话
@@ -250,8 +253,14 @@ dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
 - **F3 直接识别复用确认入口**: 标注工具栏宽度有 650px 上限 (`ToolbarCheck` 守着), 不要再加文字按钮。
   `Ctrl+回车` / `Ctrl+点击「确认」` = 把标注后的图直接送 OCR, 普通回车/点击仍复制到剪贴板;
   两条路径共用 `ConfirmCore(toOcr)`。
-- **工具栏已放 8 个工具, 不要继续压缩按钮**: 马克笔/序号是通过收紧按钮(30px)、间距(2px)和分隔线
-  放进去的, 当前仍在 650px 内。再加工具必须做分组/溢出菜单, 不能一路缩小控件或抬宽上限。
+- **工具栏宽度是"预算", 不是"上限越紧越好"**: 当前 32px 按钮 / 4px 间距 / 8px 分组,
+  8 个工具 + 样式 + 撤销组 + 3 个文字按钮 = **632px** (上限 650)。这份空间是靠把颜色与线宽
+  收进「样式」弹层 (106px → 32px) 换来的, 不要再靠缩按钮/缩间距去塞新东西;
+  真要加常驻控件, 先做分组或溢出菜单。
+- **样式弹层的关闭必须成套**: 绘制选中态看 `StylePopupOpen`; Esc 由覆盖层先关它
+  (否则一次 Esc 会把整个截图关掉); 点到别处由覆盖层 `OnMouseDown` 关; 工具栏其它动作
+  与 `SetTool` 也要关。弹层是 `WS_EX_NOACTIVATE` 的顶层窗口, **`Deactivate` 不会触发**,
+  不能指望它自动收起。
 - **马克笔按画笔轨迹处理, 序号单击落点**: 马克笔走 `Points` 并在 `OnMouseMove/Up` 与画笔同分支;
   序号在 `BeginAnnotate` 中直接 `PlaceStepNumber`, 不进入拖拽。编号取现有最大值 + 1,
   撤销最后一个后复用该编号; 数字键 1..8 与工具栏按钮顺序一致。

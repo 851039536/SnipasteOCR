@@ -38,6 +38,7 @@ public sealed class TranslateSettingsForm : Form
         Font = UiFont.Create(12f);
         AutoScaleMode = AutoScaleMode.Dpi;
         AutoScaleDimensions = new SizeF(96f, 96f);
+        DialogTheme.StyleForm(this);
 
         var tip = new Label
         {
@@ -45,8 +46,8 @@ public sealed class TranslateSettingsForm : Form
                    "不会上传截图；识别本身仍全程离线。",
             Location = new Point(18, 14),
             Size = new Size(484, 48),
-            ForeColor = Color.FromArgb(60, 60, 60),
         };
+        DialogTheme.StyleMuted(tip);
 
         var keyLabel = new Label
         {
@@ -55,10 +56,12 @@ public sealed class TranslateSettingsForm : Form
             Size = new Size(90, 24),
             TextAlign = ContentAlignment.MiddleLeft,
         };
+        DialogTheme.StyleLabel(keyLabel);
         _keyBox.Location = new Point(112, 76);
-        _keyBox.Size = new Size(280, 28);
+        _keyBox.Size = new Size(256, 28);
         _keyBox.UseSystemPasswordChar = true;
         _keyBox.PlaceholderText = "留空表示不修改";
+        DialogTheme.StyleTextBox(_keyBox);
         _keyBox.TextChanged += (_, _) =>
         {
             if (_keyBox.TextLength > 0)
@@ -73,10 +76,11 @@ public sealed class TranslateSettingsForm : Form
             }
         };
 
-        _clear.Location = new Point(400, 76);
-        _clear.Size = new Size(102, 28);
+        _clear.Location = new Point(376, 76);
+        _clear.Size = new Size(126, 28);
         _clear.Text = "清除已保存的 Key";
         _clear.Enabled = settings.TranslateApiKeyProtected.Length > 0;
+        DialogTheme.StyleButton(_clear);
         _clear.Click += (_, _) =>
         {
             _clearPending = !_clearPending;
@@ -94,7 +98,7 @@ public sealed class TranslateSettingsForm : Form
 
         _keyStatus.Location = new Point(112, 108);
         _keyStatus.Size = new Size(390, 22);
-        _keyStatus.ForeColor = Color.FromArgb(100, 100, 100);
+        DialogTheme.StyleMuted(_keyStatus);
 
         var modelLabel = new Label
         {
@@ -103,10 +107,12 @@ public sealed class TranslateSettingsForm : Form
             Size = new Size(90, 24),
             TextAlign = ContentAlignment.MiddleLeft,
         };
+        DialogTheme.StyleLabel(modelLabel);
         _modelBox.Location = new Point(112, 140);
         _modelBox.Size = new Size(390, 28);
         _modelBox.Text = settings.TranslateModel;
         _modelBox.PlaceholderText = TranslateClient.DefaultModel;
+        DialogTheme.StyleTextBox(_modelBox);
 
         var targetLabel = new Label
         {
@@ -115,6 +121,7 @@ public sealed class TranslateSettingsForm : Form
             Size = new Size(90, 24),
             TextAlign = ContentAlignment.MiddleLeft,
         };
+        DialogTheme.StyleLabel(targetLabel);
         _targetBox.Location = new Point(112, 180);
         _targetBox.Size = new Size(390, 28);
         _targetBox.DropDownStyle = ComboBoxStyle.DropDown;
@@ -124,11 +131,13 @@ public sealed class TranslateSettingsForm : Form
         _targetBox.Text = string.IsNullOrWhiteSpace(settings.TranslateTargetLanguage)
             ? AppSettings.AutoTranslateTarget
             : settings.TranslateTargetLanguage;
+        DialogTheme.StyleComboBox(_targetBox);
 
         _consent.Location = new Point(18, 220);
         _consent.Size = new Size(484, 26);
         _consent.Text = "允许把识别出的文字发送到 DeepSeek 进行翻译";
         _consent.Checked = settings.TranslateConsentGiven;
+        DialogTheme.StyleCheckBox(_consent);
 
         // 用法只在这里说一次: 结果窗口里"单击=复制"不会变, 翻译靠悬停按钮/右键/T,
         // 用户不必再去设置里二选一。
@@ -137,16 +146,16 @@ public sealed class TranslateSettingsForm : Form
             Text = "用法：鼠标移到识别结果中的文字块，点右侧「译」；也可右键菜单或按 T。",
             Location = new Point(18, 250),
             Size = new Size(484, 24),
-            ForeColor = Color.FromArgb(60, 60, 60),
         };
+        DialogTheme.StyleMuted(usage);
 
         var keyHint = new Label
         {
             Text = "Key 只保存在本机（DPAPI 加密），换机器/账户后需重新输入。",
             Location = new Point(18, 278),
-            Size = new Size(290, 24),
-            ForeColor = Color.FromArgb(120, 120, 120),
+            Size = new Size(484, 24),
         };
+        DialogTheme.StyleMuted(keyHint);
 
         var ok = new Button
         {
@@ -163,6 +172,8 @@ public sealed class TranslateSettingsForm : Form
             Size = new Size(80, 30),
         };
         ok.Click += (_, _) => SaveSettings();
+        DialogTheme.StyleButton(ok, primary: true);
+        DialogTheme.StyleButton(cancel);
 
         Controls.AddRange([
             tip, keyLabel, _keyBox, _clear, _keyStatus,

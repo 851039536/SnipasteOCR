@@ -73,6 +73,8 @@ public abstract class PinnedWindowBase : Form
     protected override void OnHandleCreated(EventArgs e)
     {
         base.OnHandleCreated(e);
+        // 贴图窗口同样用 Win11 的 8px 圆角, 与结果窗口/弹层一致 (Win10 忽略)
+        SnipasteOcr.Native.Dwmapi.TryRoundCorners(Handle);
         DpiFactor = DeviceDpi / 96f;
         _dpiReady = true;
     }

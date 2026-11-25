@@ -446,3 +446,52 @@ public static class Menu
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool QueryMenuItemInfo(IntPtr hMenu, uint uItemID, bool fByPosition, ref MENUITEMINFOW lpmii);
 }
+
+/// <summary>
+/// DWM 窗口外观 (目前只用圆角)。
+///
+/// Win11 给顶级窗口 8px 圆角是系统行为, 但无边框窗体 (FormBorderStyle.None) 默认不参与,
+/// 需要显式声明 DWMWA_WINDOW_CORNER_PREFERENCE。Win10 上该属性不存在, 调用返回失败 ——
+/// 忽略即可, 窗口保持直角, 不能因此抛异常或影响启动。
+/// </summary>
+public static class Dwmapi
+{
+    private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
+    private const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
+    private const int DWMWCP_ROUND = 2;
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
+
+    /// <summary>请求系统圆角 (仅 Win11 生效; 其它系统静默忽略)</summary>
+    public static void TryRoundCorners(IntPtr hwnd)
+    {
+        if (hwnd == IntPtr.Zero)
+            return;
+        int preference = DWMWCP_ROUND;
+        try
+        {
+            _ = DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, ref preference, sizeof(int));
+        }
+        catch (DllNotFoundException) { }
+        catch (EntryPointNotFoundException) { }
+    }
+
+    /// <summary>
+    /// 让系统标题栏跟随深色主题。
+    /// 不设的话会出现"深色内容 + 白色标题栏"的割裂 (截图里一眼就能看到)。
+    /// Win10 1809 之前没有该属性, 返回失败忽略。
+    /// </summary>
+    public static void TryUseDarkTitleBar(IntPtr hwnd)
+    {
+        if (hwnd == IntPtr.Zero)
+            return;
+        int enabled = 1;
+        try
+        {
+            _ = DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, ref enabled, sizeof(int));
+        }
+        catch (DllNotFoundException) { }
+        catch (EntryPointNotFoundException) { }
+    }
+}

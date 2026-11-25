@@ -283,7 +283,7 @@ dotnet publish src/SnipasteOcr.csproj -c Release -r win-x64 --self-contained -p:
 | 参数 | 作用 |
 | --- | --- |
 | *(无参数)* | 发布 + 打包到 `dist\`(`-OutputDir` 默认即 `dist`) |
-| `-SelfTest` | 发布后跑离线自检(607 项,无需桌面会话)。**正式出包建议带上** |
+| `-SelfTest` | 发布后跑离线自检(610 项,无需桌面会话)。**正式出包建议带上** |
 | `-OutputDir <目录>` | 打包输出目录,默认 `dist`;传 `''` 则只发布不打包 |
 | `-IncludePdb` | 打包时附带 46MB 调试符号(默认不带,分发不需要) |
 | `-NoZip` | 只输出目录,不压缩 |
@@ -313,7 +313,7 @@ dotnet publish src/SnipasteOcr.csproj -c Release -r win-x64 --self-contained -p:
 标注引擎的几何、命中测试、撤销栈、渲染与交互都有自动化验证。两个工程都**链接产品源码**而非复制,保证验证对象即实际出货代码:
 
 ```powershell
-# 1) 离线自检 (607 项): 几何 / 标注拖拽约束 / 标注选中与手柄 / 马克笔与序号 / 命中 / 历史 / 像素级渲染 / 工具栏布局 / 尺寸徽标 / 贴图布局 / 设置迁移 / 文字编辑框 / OCR 后处理 / 表格中间模型 / 选词几何 / CTC 字符框 / 翻译客户端 / 译文面板布局 / 悬停译按钮布局
+# 1) 离线自检 (610 项): 几何 / 标注拖拽约束 / 标注选中与手柄 / 马克笔与序号 / 命中 / 历史 / 像素级渲染 / 工具栏布局 / 尺寸徽标 / 贴图布局 / 设置迁移 / 文字编辑框 / OCR 后处理 / 表格中间模型 / 选词几何 / CTC 字符框 / 翻译客户端 / 译文面板布局 / 悬停译按钮布局
 dotnet run --project tests/AnnotationTests                  # 无需桌面会话
 dotnet run --project tests/AnnotationTests -- sample        # 额外输出一张八种标注的样例图, 便于目视确认
 

@@ -169,6 +169,16 @@ public sealed class SnipOverlayForm : Form
         UpdateMagnifierAtCursor();
     }
 
+    /// <summary>
+    /// 切到别的程序时收起样式弹层。
+    /// 弹层是 TopMost + 不抢焦点, 覆盖层失活它不会自动消失 —— 否则会一直飘在别人窗口上。
+    /// </summary>
+    protected override void OnDeactivate(EventArgs e)
+    {
+        base.OnDeactivate(e);
+        _toolbar.CloseStylePopup();
+    }
+
     /// <summary>把本窗口强行置为前台并取得键盘焦点</summary>
     private void ForceActivate()
     {
@@ -481,6 +491,10 @@ public sealed class SnipOverlayForm : Form
     protected override void OnMouseDown(MouseEventArgs e)
     {
         base.OnMouseDown(e);
+
+        // 点击工具栏/弹层之外的任何位置都先收起样式弹层:
+        // 弹层是不抢焦点的顶层窗口, 点它自己不会经过这里, 所以这里等价于"点到了外面"。
+        _toolbar.CloseStylePopup();
 
         if (e.Button == MouseButtons.Right)
         {
@@ -871,6 +885,17 @@ public sealed class SnipOverlayForm : Form
         // 编辑文字时把所有按键交给编辑框处理
         if (_editor is not null)
             return;
+
+        // 样式弹层打开时, 第一次 Esc 只收起面板; 其它按键也先收起面板再按原逻辑处理
+        if (_toolbar.IsStylePopupOpen)
+        {
+            _toolbar.CloseStylePopup();
+            if (e.KeyCode == Keys.Escape)
+            {
+                e.Handled = true;
+                return;
+            }
+        }
 
         switch (e.KeyCode)
         {

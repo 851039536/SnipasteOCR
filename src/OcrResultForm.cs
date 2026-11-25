@@ -34,6 +34,15 @@ public sealed class OcrResultForm : Form
     private int _hover = -1;
     private CancellationTokenSource? _cts;
     private bool _ocrDone;
+    private bool _ocrRunning;
+    /// <summary>识别失败的原始信息 (非 null 表示失败态); 界面只显示精简版, 不把异常栈甩给用户</summary>
+    private string? _ocrError;
+    /// <summary>失败态「点击重试」的命中矩形 (逻辑像素); 空表示当前没有该按钮</summary>
+    private Rectangle _retryRect;
+
+    /// <summary>识别中提示的动画计时 (只在识别期间运行, 结束后立刻停, 不空转)</summary>
+    private readonly System.Windows.Forms.Timer _stateTimer = new() { Interval = 90 };
+    private int _statePhase;
     private bool _draggingMove; // 按住空白处拖动移动窗口
     private Point _dragStartScreen; // 按下时的鼠标屏幕坐标
     private Point _dragStartLoc;    // 按下时的窗口位置
@@ -64,10 +73,12 @@ public sealed class OcrResultForm : Form
     private readonly PointF[] _quadScratch = new PointF[4];
 
     private readonly ToolStrip _toolStrip = new();
-    private readonly ToolStripButton _zoomOut = new();
-    private readonly ToolStripButton _zoomIn = new();
-    private readonly ToolStripButton _zoomReset = new();
-    private readonly ToolStripLabel _zoomLabel = new();
+    /// <summary>
+    /// 缩放下拉: 一个控件替代「- / 100% / + / 适应」四个。
+    /// 这四个常驻占约 136px, 直接决定了窗口最小宽度 (小截图会带出一大片空白画布)。
+    /// 收进下拉后最小宽度降到 320px 下限, +/-/0/Ctrl+滚轮 快捷键全部保留。
+    /// </summary>
+    private readonly ToolStripDropDownButton _zoomMenu = new();
     private readonly ToolStripButton _selectAll = new();
     private readonly ToolStripButton _copyAll = new();
     private readonly ToolStripButton _copyCsv = new();
@@ -75,8 +86,8 @@ public sealed class OcrResultForm : Form
     private readonly ToolStripButton _copyPlain = new();
     private readonly ToolStripButton _copyMarkdown = new();
     private readonly ToolStripButton _pinText = new();
+    private readonly ToolStripButton _saveImageItem = new();
     private readonly ToolStripButton _copySelection = new();
-    private readonly ToolStripButton _saveImage = new();
     private readonly ToolStripButton _translateButton = new();
     private readonly ToolStripButton _closeButton = new();
 
@@ -130,12 +141,11 @@ public sealed class OcrResultForm : Form
     /// <summary>
     /// 工具栏字号 (逻辑像素, 非 pt)。
     ///
-    /// 注意 GraphicsUnit.Pixel 的实际观感: <c>UiFont.Create(10f)</c> 得到 Height=13px,
-    /// 而 ToolStrip 未设字体时的系统默认是 9pt/16px —— 也就是说不缩小数值反而会**变大**。
-    /// 这里取 10f (13px) 比原默认略小一档, 让按钮更紧凑、文字仍清晰可读。
+    /// 10px 时工具栏文字比状态栏 (12px) 还小 —— 主操作区是全窗口最小的字, 层级是反的。
+    /// 现在统一到 12px; 工具栏已把缩放与"保存图片"收进下拉, 宽度仍有富余。
     /// 改这个值要连带看工具栏首选宽度 (它直接决定窗口最小宽度)。
     /// </summary>
-    private const float UiFontSize = 10f;
+    private const float UiFontSize = 12f;
 
     /// <summary>「导出」下拉: 把 5 种导出格式收进一个按钮, 避免工具栏被 5 个按钮撑满</summary>
     private readonly ToolStripDropDownButton _copyMenu = new();
@@ -171,8 +181,20 @@ public sealed class OcrResultForm : Form
         _scale = _minScale;
         UpdateZoomLabel();
         // 无边框窗口没有标题栏可抓, 移动方式不写出来用户很难发现;
-        // 只在识别期间显示 (识别完成后回落到常驻操作提示, 不长期占用状态栏)
-        SetStatus("正在识别\u2026 · 拖动空白处移动窗口");
+        // 识别进度由画布中央的胶囊表示 (见 DrawRecognitionState), 状态栏只留移动提示。
+        SetStatus("拖动空白处移动窗口");
+
+        // 识别中的动画: 只在 _ocrRunning 期间跑, 结束立刻停, 不空转
+        _stateTimer.Tick += (_, _) =>
+        {
+            if (!_ocrRunning)
+            {
+                _stateTimer.Stop();
+                return;
+            }
+            _statePhase = (_statePhase + 1) % 4;
+            Invalidate();
+        };
 
         // 单例事件链会随窗口打开次数增长: 必须用具名方法订阅, 并在 OnFormClosed 退订,
         // 否则每次打开结果窗口都会留下一个捕获 this 的委托, 窗体无法回收。
@@ -198,8 +220,24 @@ public sealed class OcrResultForm : Form
         catch (InvalidOperationException) { return false; }
     }
 
+    /// <summary>
+    /// 引擎状态 (加载模型 / 切换档位)。
+    /// 识别期间由画布中央的胶囊承载 —— 右下角再显示一遍会与"正在识别…"重复,
+    /// 而且那行字正好压在截图上。
+    /// </summary>
+    private string _serviceStatus = string.Empty;
+
     /// <summary>把引擎状态切回 UI 线程; 句柄已销毁时静默丢弃 (后台线程仍在识别的收尾阶段)</summary>
-    private void OnServiceStatus(string text) => TryBeginInvoke(() => SetStatus(text));
+    private void OnServiceStatus(string text) => TryBeginInvoke(() =>
+    {
+        _serviceStatus = text;
+        if (_ocrRunning)
+        {
+            Invalidate();
+            return;
+        }
+        SetStatus(text);
+    });
 
     /// <summary>构建工具栏: 缩放 / 全选 / 复制 / 保存 / 关闭</summary>
     private void BuildToolStrip()
@@ -226,22 +264,22 @@ public sealed class OcrResultForm : Form
         // CanOverflow=false 同时消除了这条线与"按钮被折叠"的可能。
         _toolStrip.CanOverflow = false;
 
-        _zoomOut.Text = "-";
-        _zoomOut.ToolTipText = "缩小（-）";
-        _zoomOut.Click += (_, _) => Zoom(1f / 1.25f);
-
-        _zoomLabel.Text = "100%";
-        _zoomLabel.AutoSize = false;
-        _zoomLabel.Width = 52;
-        _zoomLabel.TextAlign = ContentAlignment.MiddleCenter;
-
-        _zoomIn.Text = "+";
-        _zoomIn.ToolTipText = "放大（+）";
-        _zoomIn.Click += (_, _) => Zoom(1.25f);
-
-        _zoomReset.Text = "适应";
-        _zoomReset.ToolTipText = "适应窗口（0）";
-        _zoomReset.Click += (_, _) => { _scale = _minScale; FitWindowToImage(); UpdateZoomLabel(); Invalidate(); };
+        // 缩放下拉: 一个按钮替代「- / 100% / + / 适应」四项, 给窗口最小宽度腾出 ~76px。
+        // 快捷键 (Ctrl+滚轮 / + / - / 0) 全部保留, 下拉只是把"当前比例"与"常用档位"收在一处。
+        _zoomMenu.Text = "100%";
+        _zoomMenu.ToolTipText = "缩放比例（Ctrl+滚轮 / + - / 0 适应窗口）";
+        _zoomMenu.DropDownDirection = ToolStripDropDownDirection.BelowRight;
+        foreach (int percent in new[] { 50, 75, 100, 150, 200, 400 })
+        {
+            int target = percent;
+            var item = new ToolStripMenuItem($"{percent}%");
+            item.Click += (_, _) => SetZoomPercent(target);
+            _zoomMenu.DropDownItems.Add(item);
+        }
+        _zoomMenu.DropDownItems.Add(new ToolStripSeparator());
+        var fitItem = new ToolStripMenuItem("适应窗口（0）");
+        fitItem.Click += (_, _) => ResetZoom();
+        _zoomMenu.DropDownItems.Add(fitItem);
 
         _selectAll.Text = "全选";
         _selectAll.ToolTipText = "选择全部识别结果（Ctrl+A）";
@@ -249,6 +287,7 @@ public sealed class OcrResultForm : Form
 
         _copySelection.Text = "复制选中";
         _copySelection.ToolTipText = "复制选中文本（Ctrl+C）";
+        _copySelection.Enabled = false;   // 没有选区时不可点: 与「翻译」同一套可用态规则
         _copySelection.Click += (_, _) => CopyText(GetSelectedText());
 
         _copyAll.Text = "复制全部";
@@ -285,6 +324,11 @@ public sealed class OcrResultForm : Form
         _pinText.ToolTipText = "把识别文本贴为置顶便签（有选中则贴选中）";
         _pinText.Click += (_, _) => PinTextToScreen();
 
+        // 保存原图也是"导出"的一种: 并进下拉后工具栏少一个常驻按钮 (小截图窗口因此更窄)
+        _saveImageItem.Text = "保存图片";
+        _saveImageItem.ToolTipText = "保存截图为 PNG";
+        _saveImageItem.Click += (_, _) => SaveImage();
+
         _copyMenu.DropDownItems.AddRange(
         [
             _copyAll,
@@ -294,15 +338,10 @@ public sealed class OcrResultForm : Form
             _copyPlain,
             _copyMarkdown,
             new ToolStripSeparator(),
+            _saveImageItem,
             _pinText,
         ]);
 
-        _saveImage.Text = "保存图片";
-        _saveImage.ToolTipText = "保存截图为 PNG";
-        _saveImage.Click += (_, _) => SaveImage();
-
-        // 翻译是显式联网动作: 按钮常驻但识别完成前禁用; 未配置 Key 时点击会打开设置。
-        // 入口与悬停「译」/T 键一致: 单块看译进底部条, 多行/全部开独立窗口。
         _translateButton.Text = "翻译";
         _translateButton.ToolTipText = "翻译选中或全部（单块贴在底部，多行开独立窗口；需联网）";
         _translateButton.Enabled = false;
@@ -319,19 +358,14 @@ public sealed class OcrResultForm : Form
 
         var closeSep = new ToolStripSeparator { Alignment = ToolStripItemAlignment.Right };
 
-        _toolStrip.Items.Add(_zoomOut);
-        _toolStrip.Items.Add(_zoomLabel);
-        _toolStrip.Items.Add(_zoomIn);
-        _toolStrip.Items.Add(_zoomReset);
+        _toolStrip.Items.Add(_zoomMenu);
         _toolStrip.Items.Add(new ToolStripSeparator());
         _toolStrip.Items.Add(_selectAll);
         _toolStrip.Items.Add(_copySelection);
         _toolStrip.Items.Add(_copyMenu);
         _toolStrip.Items.Add(_translateButton);
-        _toolStrip.Items.Add(new ToolStripSeparator());
-        _toolStrip.Items.Add(_saveImage);
         // 右侧组: 分隔线在最左, 因此按"右对齐项从右往左依次排布"的顺序加入,
-        // 先加关闭、再加分隔线, 视觉上才是 [保存图片] | [关闭]
+        // 先加关闭、再加分隔线, 视觉上才是 […… ] | [关闭]
         _toolStrip.Items.Add(_closeButton);
         _toolStrip.Items.Add(closeSep);
 
@@ -477,6 +511,8 @@ public sealed class OcrResultForm : Form
     protected override void OnHandleCreated(EventArgs e)
     {
         base.OnHandleCreated(e);
+        // 无边框窗口默认不参与 Win11 的系统圆角, 显式声明一次 (Win10 静默忽略)
+        Dwmapi.TryRoundCorners(Handle);
         _dpi = DeviceDpi / 96f;
         if (!_dpiInitialized)
         {
@@ -535,7 +571,27 @@ public sealed class OcrResultForm : Form
     /// <summary>更新工具栏上的缩放比例标签</summary>
     private void UpdateZoomLabel()
     {
-        _zoomLabel.Text = $"{(int)Math.Round(_scale * 100)}%";
+        _zoomMenu.Text = $"{(int)Math.Round(_scale * 100)}%";
+    }
+
+    /// <summary>按百分比设置缩放 (下拉项); 夹紧到"适应窗口"下限与 8 倍上限</summary>
+    private void SetZoomPercent(int percent)
+    {
+        _scale = Math.Clamp(percent / 100f, _minScale, 8f);
+        FitWindowToImage();
+        ClampPan();
+        UpdateZoomLabel();
+        Invalidate();
+    }
+
+    /// <summary>适应窗口 (= 下拉「适应窗口」与 0 键)</summary>
+    private void ResetZoom()
+    {
+        _scale = _minScale;
+        FitWindowToImage();
+        ClampPan();
+        UpdateZoomLabel();
+        Invalidate();
     }
 
     // ===== 坐标换算 (图片以缩放后尺寸居中绘制) =====
@@ -689,6 +745,7 @@ public sealed class OcrResultForm : Form
                     g.DrawPolygon(idlePen, pts);
             }
         }
+        DrawRecognitionState(g);
         DrawTranslateHint(g);
         DrawTranslationBar(g);
         DrawStatus(g);
@@ -696,8 +753,127 @@ public sealed class OcrResultForm : Form
 
     protected override void OnPaintBackground(PaintEventArgs e) { /* OnPaint 内已填充背景 */ }
 
-    private const int StatusPadX = 10;
-    private const int StatusPadY = 4;
+    /// <summary>
+    /// 识别过程的三态: 进行中 / 无文字 / 失败。
+    ///
+    /// 为什么不能只靠状态栏那行小字: 窗口一出现图片就是完整的, 右下角 12px 的"正在识别…"
+    /// 很容易被理解成"已经识别完, 只是没框到字"。空结果与失败同样需要一个明确的落点。
+    /// 三态都画在图片视口中央, 不占工具栏, 也不参与导出。
+    /// </summary>
+    private void DrawRecognitionState(Graphics g)
+    {
+        if (_ocrRunning)
+        {
+            // 引擎在加载模型/切档位时会把状态报上来, 直接作为胶囊的副标题, 不再占用状态栏
+            DrawStatePill(g, "正在识别\u2026",
+                _serviceStatus.Length > 0 ? _serviceStatus : null, StateKind.Busy);
+            return;
+        }
+        if (_ocrError is not null)
+        {
+            DrawStatePill(g, "识别失败 · 点击重试", CompactError(_ocrError), StateKind.Error);
+            return;
+        }
+        if (_ocrDone && _lines.Length == 0)
+            DrawStatePill(g, "未识别到文字", "可尝试放大截图，或切换到高精度模型", StateKind.Empty);
+    }
+
+    private enum StateKind
+    {
+        Busy,
+        Empty,
+        Error,
+    }
+
+    /// <summary>状态胶囊; Error 时整块可点 (命中矩形记在 <see cref="_retryRect"/>)</summary>
+    private void DrawStatePill(Graphics g, string title, string? subtitle, StateKind kind)
+    {
+        using var titleFont = UiFont.Create(12f);
+        using var subFont = UiFont.Create(11f);
+
+        Size titleSize = TextRenderer.MeasureText(title, titleFont,
+            new Size(int.MaxValue, int.MaxValue), TextFormatFlags.NoPadding | TextFormatFlags.SingleLine);
+        Size subSize = subtitle is null
+            ? Size.Empty
+            : TextRenderer.MeasureText(subtitle, subFont,
+                new Size(int.MaxValue, int.MaxValue), TextFormatFlags.NoPadding | TextFormatFlags.SingleLine);
+
+        int maxW = Math.Max(140, ClientSize.Width - 24);
+        int width = Math.Min(maxW, Math.Max(titleSize.Width, subSize.Width) + 40);
+        int height = subtitle is null ? 44 : 66;
+
+        // 居中于"工具栏与译文面板之间"的图片视口
+        int viewTop = _toolStrip.Height;
+        int viewH = Math.Max(0, ClientSize.Height - _toolStrip.Height - _panelHeight);
+        var box = new Rectangle((ClientSize.Width - width) / 2, viewTop + (viewH - height) / 2, width, height);
+        _retryRect = kind == StateKind.Error ? box : Rectangle.Empty;
+
+        using (var bg = new SolidBrush(UiTheme.Surface))
+        using (var path = RoundedRect(box, 8))
+        {
+            g.FillPath(bg, path);
+            using var edge = new Pen(
+                kind == StateKind.Error ? UiTheme.Danger : Color.FromArgb(255, 58, 63, 71), 1f);
+            g.DrawPath(edge, path);
+        }
+
+        Color titleColor = kind == StateKind.Error ? UiTheme.Danger : Color.FromArgb(255, 226, 230, 236);
+        int titleY = subtitle is null ? box.Y + (height - titleSize.Height) / 2 : box.Y + 11;
+        TextRenderer.DrawText(g, title, titleFont,
+            new Rectangle(box.X + 12, titleY, box.Width - 24, titleSize.Height + 2), titleColor,
+            TextFormatFlags.HorizontalCenter | TextFormatFlags.SingleLine |
+            TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
+
+        if (subtitle is not null)
+        {
+            TextRenderer.DrawText(g, subtitle, subFont,
+                new Rectangle(box.X + 14, box.Y + 34, box.Width - 28, 18), UiTheme.MutedText,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.SingleLine |
+                TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
+        }
+
+        if (kind != StateKind.Busy)
+            return;
+
+        // 不定长进度条: 只表达"还在动", 不假装知道进度百分比
+        int trackW = Math.Min(104, box.Width - 40);
+        int trackX = box.X + (box.Width - trackW) / 2;
+        int trackY = box.Bottom - 13;
+        using (var track = new SolidBrush(Color.FromArgb(38, 255, 255, 255)))
+            g.FillRectangle(track, trackX, trackY, trackW, 3);
+        const int segW = 26;
+        int segX = trackX + _statePhase * (trackW - segW) / 3;
+        using var seg = new SolidBrush(UiTheme.Accent);
+        g.FillRectangle(seg, segX, trackY, segW, 3);
+    }
+
+    /// <summary>错误信息只取首行并截断: 界面上不该出现多行异常栈</summary>
+    private static string CompactError(string error)
+    {
+        int cut = error.IndexOfAny(['\r', '\n']);
+        string line = (cut >= 0 ? error[..cut] : error).Trim();
+        return line.Length <= 46 ? line : line[..46] + "\u2026";
+    }
+
+    /// <summary>圆角矩形路径 (半径自动收缩到短边以内)</summary>
+    private static GraphicsPath RoundedRect(Rectangle r, int radius)
+    {
+        int d = Math.Min(radius * 2, Math.Min(r.Width, r.Height));
+        var path = new GraphicsPath();
+        if (d <= 0)
+        {
+            path.AddRectangle(r);
+            return path;
+        }
+        path.AddArc(r.Left, r.Top, d, d, 180, 90);
+        path.AddArc(r.Right - d, r.Top, d, d, 270, 90);
+        path.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
+        path.AddArc(r.Left, r.Bottom - d, d, d, 90, 90);
+        path.CloseFigure();
+        return path;
+    }
+
+    private const int StatusPadX = 10;    private const int StatusPadY = 4;
     private const int StatusMargin = 8;
 
     /// <summary>
@@ -729,15 +905,17 @@ public sealed class OcrResultForm : Form
     {
         if (string.IsNullOrEmpty(_statusText))
             return;
-        using var font = UiFont.Create(12f);
+        using var font = UiFont.Create(11f);
         Size ts = TextRenderer.MeasureText(_statusText, font, new Size(int.MaxValue, int.MaxValue),
             TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
         // 译文面板在图片之外: 状态栏抬到面板上方 (仍落在图片区内), 两者不会叠在一起
         int bottomInset = _panelHeight > 0 ? _panelHeight + 8 : 0;
         var (box, textRect) = ComputeStatusLayout(ts, ClientSize, bottomInset);
 
-        using var bg = new SolidBrush(UiTheme.StatusSurface);
-        g.FillRectangle(bg, box);
+        // 圆角与浮层同一档 (8): 早先是直角黑块, 与工具栏/徽标/胶囊的圆角语言不一致
+        using (var bg = new SolidBrush(UiTheme.StatusSurface))
+        using (var path = RoundedRect(box, 8))
+            g.FillPath(bg, path);
         TextRenderer.DrawText(g, _statusText, font, textRect, Color.FromArgb(226, 230, 236),
             TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine |
             TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
@@ -1215,6 +1393,7 @@ public sealed class OcrResultForm : Form
         for (int i = 0; i < _lines.Length; i++)
             _selected.Add(i);
         Invalidate();
+        UpdateIdleStatus();   // 同步「复制选中」的可用态
     }
 
     /// <summary>左键按下: 空白处=清除选中/拖动窗口, 文本块上=Shift 多选 或 进入字符级拖选</summary>
@@ -1239,6 +1418,13 @@ public sealed class OcrResultForm : Form
         // 相当于直接选中了指针下的第一项。
         if (e.Button != MouseButtons.Left)
             return;
+
+        // 失败态: 整块胶囊都是「点击重试」
+        if (_ocrError is not null && _retryRect.Contains(e.Location))
+        {
+            StartOcr();
+            return;
+        }
 
         _hintPressLine = -1; // 新的按下作废上一次未完成的「译」点击
 
@@ -1325,6 +1511,14 @@ public sealed class OcrResultForm : Form
     protected override void OnMouseMove(MouseEventArgs e)
     {
         base.OnMouseMove(e);
+
+        // 失败胶囊整块可点: 先给出"可点"的手型光标, 不再走 hover/拖动分支
+        if (_ocrError is not null && _retryRect.Contains(e.Location))
+        {
+            Cursor = Cursors.Hand;
+            return;
+        }
+
         if (_panning)
         {
             if (e.Button is MouseButtons.Middle or MouseButtons.Left)
@@ -1659,10 +1853,7 @@ public sealed class OcrResultForm : Form
                 return true;
             case Keys.D0:
             case Keys.NumPad0:
-                _scale = _minScale;
-                FitWindowToImage();
-                UpdateZoomLabel();
-                Invalidate();
+                ResetZoom();
                 return true;
             case Keys.Escape:
                 Close();
@@ -1754,17 +1945,28 @@ public sealed class OcrResultForm : Form
     /// <summary>刷新右下角状态栏: 有选中显示字数, 否则显示操作提示</summary>
     private void UpdateIdleStatus()
     {
+        // 「复制选中」的可用态只在这里维护: 能不能点必须与"有没有选区"一致,
+        // 不能可点、点了才在状态栏说"没有可复制的文本"。
+        _copySelection.Enabled = _ocrDone && HasSelection();
+
         if (!_ocrDone)
             return;
+        if (_lines.Length == 0)
+        {
+            // 空结果由画布中央的胶囊说明, 状态栏不再罗列"0 个文本块…"这种没有信息量的句子
+            SetStatus(string.Empty);
+            return;
+        }
         if (HasSelection())
-            SetStatus($"已选 {SelectedCharCount()} 字符（Ctrl+C 复制）");
+            SetStatus($"已选 {SelectedCharCount()} 字符 · Ctrl+C 复制");
         else
         {
             // 只有放大到超出视口时才提示平移, 平时不占用状态栏
             string panHint = _scale > _minScale + 0.001f ? " · 中键平移" : string.Empty;
-            // 单击只复制; 翻译有独立入口 (悬停「译」/ 右键 / T)。提示必须与实际行为一致。
+            // 常驻只留信息量最高的"几块 + 单击行为"; 其余操作提示在工具栏 tooltip 里,
+            // 不再用一整句"悬停译 / Shift 多选 / Ctrl+滚轮"长期压住截图底部。
             string clickHint = SettingsStore.Current.ClickToCopy ? "单击复制" : "单击选中";
-            SetStatus($"{_lines.Length} 个文本块 · {clickHint} · 悬停「译」或 T 翻译 · Shift 多选 · Ctrl+滚轮缩放" + panHint);
+            SetStatus($"{_lines.Length} 块 · {clickHint}" + panHint);
         }
     }
 
@@ -2096,6 +2298,24 @@ public sealed class OcrResultForm : Form
         var service = OcrService.Instance;
         var img = _src;
 
+        // 重试时先把上一轮结果与三态清干净: 新结果回来之前, 画面不能还显示旧框或旧失败态
+        _ocrRunning = true;
+        _ocrError = null;
+        _ocrDone = false;
+        _serviceStatus = string.Empty;
+        _lines = [];
+        _lineCorners = [];
+        _lineCornersSource = null;
+        _lineGlyphs = [];
+        _lineCumW = [];
+        _lineRank = [];
+        _retryRect = Rectangle.Empty;
+        ClearSelection();
+        _translateButton.Enabled = false;
+        SetStatus("拖动空白处移动窗口");
+        _stateTimer.Start();
+        Invalidate();
+
         Task.Run(() =>
         {
             try
@@ -2114,6 +2334,9 @@ public sealed class OcrResultForm : Form
                     _lineGlyphs = OcrGlyphLayout.BuildAll(_lines);
                     _lineRank = OcrSelection.BuildReadingRanks(_lines, _wordOrder);
                     _hover = -1;
+                    _ocrRunning = false;
+                    _stateTimer.Stop();
+                    _ocrError = null;
                     _ocrDone = true;
                     _translateButton.Enabled = true;
                     _minScale = ComputeFitScale();
@@ -2128,8 +2351,14 @@ public sealed class OcrResultForm : Form
             {
                 this.TryBeginInvoke(() =>
                 {
-                    SetStatus("识别失败：" + ex.Message);
+                    _ocrRunning = false;
+                    _stateTimer.Stop();
+                    _ocrError = ex.Message;
                     _ocrDone = true;
+                    _lines = [];
+                    _translateButton.Enabled = false;
+                    SetStatus(string.Empty);   // 失败信息由中央胶囊承载, 状态栏不再重复
+                    Invalidate();
                 });
             }
         });
@@ -2141,6 +2370,8 @@ public sealed class OcrResultForm : Form
         OcrService.Instance.StatusChanged -= OnServiceStatus;
         _cts?.Cancel();
         _cts?.Dispose();
+        _stateTimer.Stop();
+        _stateTimer.Dispose();
         // 只取消不释放: 翻译任务的 finally 负责释放, 这里提前 Dispose 会和它竞争
         _clickTranslateCts?.Cancel();
         _src.Dispose();

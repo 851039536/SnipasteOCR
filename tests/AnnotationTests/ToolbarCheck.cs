@@ -51,11 +51,11 @@ internal static class ToolbarCheck
         Check(cancel.X > 0, "取消按钮可见 (非负坐标)");
 
         int toolsRight = MaxRight("_toolRects");
-        int colorsRight = MaxRight("_colorRects");
-        int widthsRight = MaxRight("_widthRects");
+        var styleRect = (Rectangle)typeof(AnnotationToolbar).GetField("_styleRect", flags)!.GetValue(tb)!;
         Check(toolsRight < tb.Width, $"工具按钮未溢出 (right={toolsRight})");
-        Check(colorsRight < tb.Width, $"颜色按钮未溢出 (right={colorsRight})");
-        Check(widthsRight < tb.Width, $"线宽按钮未溢出 (right={widthsRight})");
+        Check(styleRect.Width == 32 && styleRect.Height == 32,
+            $"样式按钮为 32×32 (实得 {styleRect.Width}×{styleRect.Height})");
+        Check(styleRect.Right < tb.Width, $"样式按钮未溢出 (right={styleRect.Right})");
 
         // 八个工具都应布局出来
         var toolRects = (System.Collections.IList)typeof(AnnotationToolbar)
@@ -112,37 +112,65 @@ internal static class ToolbarCheck
             tb5.Dispose();
         }
 
-        // ===== 线宽预览必须用当前颜色 =====
-        // 回归: 原先线宽预览固定用白色, 选了黄色也显示白色, 无法预判实际颜色。
+        // ===== 样式弹层: 8 色 + 3 档线宽, 预览必须用当前颜色 =====
+        // 回归: 早先颜色/线宽常驻工具栏, 颜色只能循环点击 (最多 8 次), 且选中线宽时
+        // 红色预览线压在蓝色底上, 看不清粗细。现在两者都收进弹层: 一次看全、一次点中。
         {
             var tb4 = new AnnotationToolbar();
-            // 切到蓝色 (调色板第 5 个: 235,59,36 红 -> 循环 4 次到 33,150,243 蓝)
-            for (int i = 0; i < 4; i++) tb4.CycleColor();
+            tb4.SetColor(Color.FromArgb(255, 33, 150, 243));   // 蓝
+            Check(tb4.CurrentColor == Color.FromArgb(255, 33, 150, 243), "SetColor 生效");
 
-            Check(tb4.CurrentColor == Color.FromArgb(255, 33, 150, 243), "已切到蓝色");
+            using var popup = new StylePopupForm(tb4);
+            Check(popup.ClientSize == StylePopupForm.PanelSize,
+                $"弹层尺寸与面板常量一致 (实得 {popup.ClientSize}, 期望 {StylePopupForm.PanelSize})");
 
-            using var wbmp = new Bitmap(tb4.Width, tb4.Height, PixelFormat.Format32bppArgb);
-            using (var g = Graphics.FromImage(wbmp))
-            using (var pea = new PaintEventArgs(g, new Rectangle(0, 0, tb4.Width, tb4.Height)))
+            using var pbmp = new Bitmap(popup.ClientSize.Width, popup.ClientSize.Height, PixelFormat.Format32bppArgb);
+            using (var g = Graphics.FromImage(pbmp))
+            using (var pea = new PaintEventArgs(g, new Rectangle(Point.Empty, popup.ClientSize)))
             {
-                typeof(AnnotationToolbar)
+                typeof(StylePopupForm)
                     .GetMethod("OnPaint", BindingFlags.NonPublic | BindingFlags.Instance)!
-                    .Invoke(tb4, [pea]);
+                    .Invoke(popup, [pea]);
             }
 
-            var wrect = RectOf(((System.Collections.IList)typeof(AnnotationToolbar)
-                .GetField("_widthRects", flags)!.GetValue(tb4)!)[0]!);
+            // 8 个色块的中心必须是调色板里的 8 个颜色 (绘制与数据同源)
+            int swatchMatches = 0;
+            for (int i = 0; i < AnnotationPalette.Colors.Length; i++)
+            {
+                int col = i % StylePopupForm.Columns;
+                int row = i / StylePopupForm.Columns;
+                int cx = StylePopupForm.Pad + col * (StylePopupForm.Swatch + StylePopupForm.SwatchGap)
+                         + StylePopupForm.Swatch / 2;
+                int cy = StylePopupForm.Pad + row * (StylePopupForm.Swatch + StylePopupForm.SwatchGap)
+                         + StylePopupForm.Swatch / 2;
+                // 选中环会覆盖色块边缘, 取中心偏左上的点避开 2px 白环
+                var c = pbmp.GetPixel(cx - 4, cy - 4);
+                if (c.ToArgb() == AnnotationPalette.Colors[i].ToArgb()) swatchMatches++;
+            }
+            Check(swatchMatches == AnnotationPalette.Colors.Length,
+                $"弹层画出全部 {AnnotationPalette.Colors.Length} 种颜色 (实得 {swatchMatches})");
 
-            // 在预览线所在行统计"偏蓝"像素: B 明显大于 R
+            // 第一档线宽格子: 预览线用当前色 (蓝), 而不是固定白/黑
+            int wtop = StylePopupForm.PanelSize.Height - StylePopupForm.Pad - StylePopupForm.Swatch;
             int bluish = 0;
-            for (int y = wrect.Top; y < wrect.Bottom && y < wbmp.Height; y++)
-                for (int x = wrect.Left + 4; x < wrect.Right - 4 && x < wbmp.Width; x++)
+            for (int y = wtop; y < wtop + StylePopupForm.Swatch; y++)
+                for (int x = StylePopupForm.Pad; x < StylePopupForm.Pad + StylePopupForm.Swatch; x++)
                 {
-                    var c = wbmp.GetPixel(x, y);
+                    var c = pbmp.GetPixel(x, y);
                     if (c.B > 150 && c.B > c.R + 50) bluish++;
                 }
             Check(bluish > 10, $"线宽预览使用当前颜色而非白色 (蓝色像素={bluish})");
-            tb4.Dispose();
+
+            // 选中线宽用浅色底 + 强调色描边, 不再用整块蓝底压住彩色预览线
+            var selectedCell = new Rectangle(
+                StylePopupForm.Pad, wtop, StylePopupForm.Swatch, StylePopupForm.Swatch);
+            int accentPixels = 0;
+            for (int x = selectedCell.Left; x < selectedCell.Right; x++)
+            {
+                var c = pbmp.GetPixel(x, selectedCell.Top);
+                if (c.B > 150 && c.R < 90) accentPixels++;
+            }
+            Check(accentPixels > 5, $"选中线宽有强调色描边 (像素={accentPixels})");
         }
 
         // 单行布局: 所有控件必须完整落在工具栏高度内 (不再有第二行标签)
@@ -169,7 +197,7 @@ internal static class ToolbarCheck
         {
             var cancelR = (Rectangle)typeof(AnnotationToolbar).GetField("_cancelRect", flags)!.GetValue(tb)!;
             Check(tb.Width >= cancelR.Right, $"宽度足够容纳全部元素 (宽={tb.Width}, 取消右={cancelR.Right})");
-            Check(tb.Width - cancelR.Right == 7, $"尾部留白等于设计值 7px (实得 {tb.Width - cancelR.Right})");
+            Check(tb.Width - cancelR.Right == 8, $"尾部留白等于设计值 8px (实得 {tb.Width - cancelR.Right})");
         }
 
         // 保存/确认/取消 必须等宽等高, 否则三个按钮参差不齐
@@ -189,7 +217,7 @@ internal static class ToolbarCheck
         // 按钮不能重叠 (同一行内的命中区域互斥)
         bool overlap = false;
         var all = new List<Rectangle> { cancel };
-        foreach (var f in new[] { "_undoRect", "_redoRect", "_pinRect", "_saveRect", "_confirmRect" })
+        foreach (var f in new[] { "_styleRect", "_undoRect", "_redoRect", "_pinRect", "_saveRect", "_confirmRect" })
             all.Add((Rectangle)typeof(AnnotationToolbar).GetField(f, flags)!.GetValue(tb)!);
         foreach (var item in (System.Collections.IEnumerable)typeof(AnnotationToolbar)
                      .GetField("_toolRects", flags)!.GetValue(tb)!)
@@ -323,10 +351,10 @@ internal static class ToolbarCheck
             var cancelAfter = (Rectangle)typeof(AnnotationToolbar).GetField("_cancelRect", flags)!.GetValue(tb6)!;
 
             Check(pinAfter == Rectangle.Empty, $"隐藏后贴图按钮无命中区域 (实得 {pinAfter})");
-            Check(widthWithPin - tb6.Width == 30 + 2,
-                $"隐藏后工具栏收窄一个按钮位 (实得 {widthWithPin - tb6.Width}, 期望 32)");
-            Check(tb6.Width - cancelAfter.Right == 7,
-                $"隐藏后尾部留白仍为 7px (实得 {tb6.Width - cancelAfter.Right})");
+            Check(widthWithPin - tb6.Width == 32 + 4,
+                $"隐藏后工具栏收窄一个按钮位 (实得 {widthWithPin - tb6.Width}, 期望 36)");
+            Check(tb6.Width - cancelAfter.Right == 8,
+                $"隐藏后尾部留白仍为 8px (实得 {tb6.Width - cancelAfter.Right})");
             Check(cancelAfter.Bottom <= tb6.Height, "隐藏后按钮仍完整落在工具栏内");
 
             tb6.ShowPin = true;

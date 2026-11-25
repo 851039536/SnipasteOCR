@@ -34,6 +34,8 @@ public sealed class HotKeyForm : Form
         ShowInTaskbar = true;
         ClientSize = new Size(430, 224);
         Font = UiFont.Create(12f);
+        // 与主界面同一套深色语言: 早先这里是默认浅色 WinForms 对话框, 与应用其余部分割裂
+        DialogTheme.StyleForm(this);
 
         var tip = new Label
         {
@@ -42,8 +44,8 @@ public sealed class HotKeyForm : Form
                    "仅功能键（F1-F12）可不加修饰键，其余需带修饰键。",
             Location = new Point(18, 14),
             Size = new Size(395, 64),
-            ForeColor = Color.FromArgb(60, 60, 60),
         };
+        DialogTheme.StyleMuted(tip);
 
         var ocrLabel = new Label
         {
@@ -52,6 +54,7 @@ public sealed class HotKeyForm : Form
             Size = new Size(75, 26),
             TextAlign = ContentAlignment.MiddleLeft,
         };
+        DialogTheme.StyleLabel(ocrLabel);
         _ocrBox = new HotKeyBox
         {
             Location = new Point(100, 90),
@@ -66,6 +69,7 @@ public sealed class HotKeyForm : Form
             Size = new Size(75, 26),
             TextAlign = ContentAlignment.MiddleLeft,
         };
+        DialogTheme.StyleLabel(imageLabel);
         _imageBox = new HotKeyBox
         {
             Location = new Point(100, 128),
@@ -98,6 +102,9 @@ public sealed class HotKeyForm : Form
             _ocrBox.SetKey(0x70, 0);    // F1
             _imageBox.SetKey(0x72, 0);  // F3 (=0x72; 0x73 是 F4)
         };
+        DialogTheme.StyleButton(reset);
+        DialogTheme.StyleButton(ok, primary: true);
+        DialogTheme.StyleButton(cancel);
 
         // 两个热键不能相同, 否则一个动作将永远无法触发
         ok.Click += (_, _) =>
@@ -130,7 +137,7 @@ internal sealed class HotKeyBox : TextBox
         ReadOnly = true;
         Cursor = Cursors.Hand;
         TextAlign = HorizontalAlignment.Center;
-        BackColor = Color.White;
+        DialogTheme.StyleTextBox(this);
         ShortcutsEnabled = false;
     }
 
@@ -164,6 +171,17 @@ internal sealed class HotKeyBox : TextBox
     private void UpdateDisplay()
     {
         Text = HotKeyManager.Describe((uint)_mods, (uint)_vk);
+    }
+
+    /// <summary>
+    /// 只读文本框获得焦点时, TextBox 默认全选内容 —— 深色底上会整块变成高亮蓝,
+    /// 看起来像"输入框坏了"。这里取消选择, 只保留光标。
+    /// </summary>
+    protected override void OnGotFocus(EventArgs e)
+    {
+        base.OnGotFocus(e);
+        SelectionStart = TextLength;
+        SelectionLength = 0;
     }
 
     /// <summary>短暂显示一条提示, 随后自动恢复为当前热键</summary>
