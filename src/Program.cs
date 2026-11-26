@@ -216,9 +216,14 @@ internal static class Program
                     "SnipasteOCR", MessageBoxButtons.OK, MessageBoxIcon.Information);
             };
 
-            tray.ExitRequested += () => Environment.Exit(0);
+            // 退出走协作式: 只置标志, 让循环自然结束, finally 才能还原休眠/释放引擎。
+            // 原先的 Environment.Exit(0) 会跳过 finally, 防休眠状态与 SIMD 缓冲都留在进程外。
+            bool exitRequested = false;
+            int exitCode = 0;
+            int consecutiveFailures = 0;
+            tray.ExitRequested += () => exitRequested = true;
 
-            while (true)
+            while (!exitRequested)
             {
                 try
                 {
@@ -235,14 +240,29 @@ internal static class Program
                         User32.TranslateMessage(ref msg);
                         User32.DispatchMessage(ref msg);
                     }
+                    consecutiveFailures = 0;
                     Thread.Sleep(1);
                 }
-                catch
+                catch (Exception ex)
                 {
-                    // 极端异常不致命, 降速后继续重试, 避免死循环空转
+                    consecutiveFailures++;
+                    AppLog.Write($"消息循环异常 (连续 {consecutiveFailures} 次)", ex);
+
+                    if (consecutiveFailures >= 5)
+                    {
+                        exitCode = 2;
+                        MessageBox.Show(
+                            "程序的消息循环连续出现异常，即将退出。\n\n详情已记录到：\n" + AppLog.FilePath,
+                            "SnipasteOCR", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        break;
+                    }
+
+                    // 单次异常不致命: 降速后继续派发剩余消息, 避免死循环空转
                     Thread.Sleep(100);
                 }
             }
+
+            return exitCode;
         }
         catch (Exception ex)
         {

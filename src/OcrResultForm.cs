@@ -14,6 +14,9 @@ public sealed class OcrResultForm : Form
 {
     private readonly Bitmap _src;
 
+    /// <summary>资源是否已释放 (Dispose 与 FormClosed 两个入口共用)</summary>
+    private bool _released;
+
     /// <summary>截图选区所在的屏幕矩形 (屏幕坐标); null 表示无截图来源 (如剪贴板识别)</summary>
     private readonly Rectangle? _anchorScreen;
 
@@ -162,6 +165,21 @@ public sealed class OcrResultForm : Form
     {
         _src = source;
         _anchorScreen = anchorScreen;
+        try
+        {
+            Initialize();
+        }
+        catch
+        {
+            // 构造中途失败: 已接管的 _src 必须在这里释放, 调用方拿不到实例
+            Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>构造体的实际内容; 单独成方法是为了让失败路径能统一 Dispose</summary>
+    private void Initialize()
+    {
         Text = "SnipasteOCR";
         StartPosition = FormStartPosition.Manual;
         FormBorderStyle = FormBorderStyle.None; // 无标题栏, 边缘细边框可缩放
@@ -2440,9 +2458,16 @@ public sealed class OcrResultForm : Form
         Invalidate();
     }
 
-    /// <summary>取消 OCR 与单击翻译任务、退订状态事件并释放位图</summary>
-    protected override void OnFormClosed(FormClosedEventArgs e)
+    /// <summary>
+    /// 唯一的资源释放点: Dispose 与 FormClosed 都走这里, _released 保证幂等。
+    /// 退订必须最先做 —— 后台识别线程可能正在回调 OnServiceStatus。
+    /// </summary>
+    private void ReleaseResources()
     {
+        if (_released)
+            return;
+        _released = true;
+
         OcrService.Instance.StatusChanged -= OnServiceStatus;
         _cts?.Cancel();
         _cts?.Dispose();
@@ -2450,7 +2475,21 @@ public sealed class OcrResultForm : Form
         _stateTimer.Dispose();
         // 只取消不释放: 翻译任务的 finally 负责释放, 这里提前 Dispose 会和它竞争
         _clickTranslateCts?.Cancel();
+        _toolStrip.Dispose();
         _src.Dispose();
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+            ReleaseResources();
+        base.Dispose(disposing);
+    }
+
+    /// <summary>关闭时立即释放 (Dispose 紧随其后, 由 _released 去重)</summary>
+    protected override void OnFormClosed(FormClosedEventArgs e)
+    {
+        ReleaseResources();
         base.OnFormClosed(e);
     }
 }

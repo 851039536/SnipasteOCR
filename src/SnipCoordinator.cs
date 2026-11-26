@@ -184,8 +184,9 @@ public static class SnipCoordinator
     /// <summary>
     /// 打开 OCR 结果窗口并纳入生命周期跟踪。
     /// 剪贴板/重复区域/截图三条入口共用, 保证窗体的关闭与释放行为一致。
+    /// 构造或显示失败时在这里收口并提示: 不把异常抛回消息泵 (否则会触发连续异常退出)。
     /// </summary>
-    private static void ShowOcrResult(Bitmap bmp, Rectangle? anchorScreen)
+    internal static void ShowOcrResult(Bitmap bmp, Rectangle? anchorScreen)
     {
         if (OcrResultLauncherForTest is { } launcher)
         {
@@ -193,10 +194,27 @@ public static class SnipCoordinator
             return;
         }
 
-        var form = new OcrResultForm(bmp, anchorScreen);
-        _openForms.Add(form);
-        form.FormClosed += (_, _) => _openForms.Remove(form);
-        form.Show();
+        OcrResultForm? form = null;
+        try
+        {
+            form = new OcrResultForm(bmp, anchorScreen);
+            _openForms.Add(form);
+            form.FormClosed += (_, _) => _openForms.Remove(form);
+            form.Show();
+        }
+        catch (Exception ex)
+        {
+            if (form is not null)
+            {
+                _openForms.Remove(form);
+                form.Dispose();
+            }
+            // 构造函数失败时已自行 Dispose 并释放 bmp, 这里不能再碰它
+            AppLog.Write("打开识别结果窗口失败", ex);
+            MessageBox.Show(
+                "无法打开识别结果窗口，已记录到日志：\n" + AppLog.FilePath,
+                "SnipasteOCR", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
     }
 
     /// <summary>

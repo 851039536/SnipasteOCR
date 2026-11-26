@@ -18,14 +18,14 @@ namespace SnipasteOcr;
 /// </summary>
 public sealed class SnipOverlayForm : Form
 {
-    private readonly Bitmap _screen;
+    private Bitmap _screen;
     private readonly SnipMode _mode;
     private Point _anchor;
     private bool _dragging;
     private Rectangle? _selection; // 客户区 (逻辑) 坐标
 
     /// <summary>覆盖层客户区对应的物理屏幕矩形 (截图与屏幕坐标换算的基准)</summary>
-    private readonly Rectangle _virtualScreen;
+    private Rectangle _virtualScreen;
 
     /// <summary>上次绘制底部提示条时所在的屏幕 (客户区坐标), 跨屏移动时用于触发重绘</summary>
     private Rectangle _hintScreen;
@@ -76,10 +76,13 @@ public sealed class SnipOverlayForm : Form
     private readonly AnnotationToolbar _toolbar = new();
 
     /// <summary>跟随光标的 15×15 像素放大镜; 只显示, 不参与导出合成</summary>
-    private readonly SnipMagnifierControl _magnifier;
+    private SnipMagnifierControl _magnifier;
 
     /// <summary>取色成功/失败后的短暂提示 (会替换底部提示条)</summary>
     private readonly System.Windows.Forms.Timer _toastTimer = new() { Interval = 1400 };
+
+    /// <summary>资源是否已释放 (Dispose 与 FormClosed 两个入口共用)</summary>
+    private bool _released;
     private string? _toast;
 
     private TextEditorOverlay? _editor;
@@ -103,7 +106,22 @@ public sealed class SnipOverlayForm : Form
     public SnipOverlayForm(SnipMode mode)
     {
         _mode = mode;
+        try
+        {
+            Initialize(mode);
+        }
+        catch
+        {
+            // 构造中途失败时调用方连实例都拿不到, 已分配的整屏位图必须在这里释放
+            Dispose();
+            throw;
+        }
+    }
 
+    /// <summary>构造体的实际内容; 单独成方法是为了让失败路径能统一 Dispose</summary>
+    [System.Diagnostics.CodeAnalysis.MemberNotNull(nameof(_screen), nameof(_virtualScreen), nameof(_magnifier))]
+    private void Initialize(SnipMode mode)
+    {
         // 先抓取屏幕 (必须在本窗体显示之前)
         Rectangle vs = SystemInformation.VirtualScreen;
         _virtualScreen = vs;
@@ -1477,7 +1495,7 @@ public sealed class SnipOverlayForm : Form
             if (launcher is { } launch)
                 launch(crop, anchor);
             else
-                new OcrResultForm(crop, anchor).Show();
+                SnipCoordinator.ShowOcrResult(crop, anchor);
             return;
         }
 
@@ -1567,16 +1585,42 @@ public sealed class SnipOverlayForm : Form
         return new Rectangle(x, y, Math.Abs(a.X - b.X), Math.Abs(a.Y - b.Y));
     }
 
-    /// <summary>释放全屏位图与子控件</summary>
-    protected override void OnFormClosed(FormClosedEventArgs e)
+    /// <summary>自检用: 验证 Dispose 是否释放全屏底图; 产品路径不得使用</summary>
+    internal Bitmap ScreenForTest => _screen;
+
+    /// <summary>
+    /// 唯一的资源释放点: <see cref="Dispose(bool)"/> 与 <see cref="OnFormClosed"/> 都走这里。
+    /// <c>_released</c> 保证幂等 —— 两条路径都会触发 (无模态窗体 Close 后紧跟 Dispose)。
+    /// 顺序不能换: 放大镜读取 <c>_screen</c>, 必须先于底图释放。
+    /// </summary>
+    private void ReleaseResources()
     {
+        if (_released)
+            return;
+        _released = true;
+
         _toastTimer.Stop();
         _toastTimer.Dispose();
         _editor?.Dispose();
         _editor = null;
-        _magnifier.Dispose();   // 它读取 _screen, 必须先于底图释放
+        if (_magnifier is not null)   // 构造早期失败时可能尚未赋值
+            _magnifier.Dispose();
         _toolbar.Dispose();
-        _screen.Dispose();
+        if (_screen is not null)
+            _screen.Dispose();
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+            ReleaseResources();
+        base.Dispose(disposing);
+    }
+
+    /// <summary>关闭时立即释放 (Dispose 紧随其后, 由 _released 去重)</summary>
+    protected override void OnFormClosed(FormClosedEventArgs e)
+    {
+        ReleaseResources();
         base.OnFormClosed(e);
     }
 }

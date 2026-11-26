@@ -787,6 +787,7 @@ internal static class InteractiveCheck
                 resultForm.TranslateForTest = null;
                 resultForm.Close();
                 Check(StatusSubscribers() == subscribersBefore, "关闭结果窗口后退订引擎状态事件");
+                Check(IsImageDisposed(src), "关闭结果窗口释放源位图");
             }
             finally
             {
@@ -1471,6 +1472,20 @@ internal static class InteractiveCheck
             }
         }
 
+        // 22b. 资源释放: 构造失败 / 只 Dispose 不 Close 也必须释放位图
+        {
+            var releaseSrc = new Bitmap(40, 30);
+            var releaseForm = new OcrResultForm(releaseSrc);
+            _ = releaseForm.Handle;
+            releaseForm.Dispose();
+            Check(IsImageDisposed(releaseSrc), "结果窗口 Dispose 释放源位图");
+
+            var overlay = new SnipOverlayForm(SnipMode.Image);
+            Bitmap screen = overlay.ScreenForTest;
+            overlay.Dispose();
+            Check(IsImageDisposed(screen), "覆盖层 Dispose 释放全屏底图");
+        }
+
         // 23. 标注选中 / 拖动 / 层级 / 删除 / 选区手柄, 以及导出图不含选中装饰
         SelectionInteractionChecks.Run(runner);
 
@@ -1591,6 +1606,20 @@ internal static class InteractiveCheck
             AppliedRotationDegrees = 0,
             EmittedCount = 0,
         };
+
+    /// <summary>Image 释放后再访问 Width 会抛 (GDI+ 句柄已失效), 用它判断所有权是否回收</summary>
+    private static bool IsImageDisposed(Image image)
+    {
+        try
+        {
+            _ = image.Width;
+            return false;
+        }
+        catch
+        {
+            return true;
+        }
+    }
 
     /// <summary>读剪贴板: 其它程序短暂占用是常态, 重试几次再判失败</summary>
     private static string? GetClipboardTextSafe()
