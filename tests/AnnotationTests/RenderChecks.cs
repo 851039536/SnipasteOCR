@@ -138,6 +138,66 @@ internal static class RenderChecks
             Check(bmp2.GetPixel(5, 5).ToArgb() == Color.White.ToArgb(), "马赛克区域外左上保持纯白");
         }
 
+        // ===== 马赛克失败回退: 取样不支持的格式时, 必须用平均色盖住而不是原样放过 =====
+        {
+            // 1bpp 索引色源: 走确定性回退分支 (不做 LockBits 赌它能隐式转换)
+            using var indexed = new Bitmap(200, 200, PixelFormat.Format1bppIndexed);
+            var canvas = new Bitmap(200, 200, PixelFormat.Format32bppArgb);
+            using (var g = Graphics.FromImage(canvas))
+                g.Clear(Color.White);
+
+            using (var g = Graphics.FromImage(canvas))
+            {
+                AnnotationEngine.Draw(g,
+                    [new Annotation { Tool = AnnotationTool.Mosaic, Start = new PointF(50, 50), End = new PointF(150, 150) }],
+                    indexed);
+            }
+
+            // 源图全黑 → 平均色为黑; 若回退没画, 中心仍是画布的白
+            Check(canvas.GetPixel(100, 100).ToArgb() == Color.Black.ToArgb(),
+                "马赛克取样失败时用平均色遮盖原区域");
+            Check(canvas.GetPixel(10, 100).ToArgb() == Color.White.ToArgb(),
+                "马赛克回退填充不越界");
+        }
+
+        // ===== 白名单内的 24bpp 源仍要正常做块内平均 =====
+        {
+            using var src24 = new Bitmap(200, 200, PixelFormat.Format24bppRgb);
+            using (var g = Graphics.FromImage(src24))
+            {
+                g.Clear(Color.White);
+                using var pen = new Pen(Color.Black, 1f);
+                for (int x = 0; x < 100; x += 2)
+                    g.DrawLine(pen, x, 0, x, 199);   // 左半: 1px 黑白竖条, 块内平均后应为中间灰
+                using var black = new SolidBrush(Color.Black);
+                g.FillRectangle(black, 100, 0, 100, 200);   // 右半纯黑, 块内平均仍是纯黑
+            }
+
+            var canvas = new Bitmap(200, 200, PixelFormat.Format32bppArgb);
+            using (var g = Graphics.FromImage(canvas))
+            {
+                g.DrawImageUnscaled(src24, 0, 0);
+                AnnotationEngine.Draw(g,
+                    [new Annotation { Tool = AnnotationTool.Mosaic, Start = new PointF(50, 50), End = new PointF(150, 150) }],
+                    src24);
+            }
+
+            var blockColor = canvas.GetPixel(55, 105);
+            bool uniform = true;
+            for (int x = 55; x < 60; x++)
+            {
+                if (canvas.GetPixel(x, 105).ToArgb() != blockColor.ToArgb())
+                {
+                    uniform = false;
+                    break;
+                }
+            }
+            Check(uniform && blockColor.R is > 60 and < 200,
+                "24bpp 源仍产生块内平均 (白名单内路径未被回退劫持)");
+            // 右半纯黑: 若整区回退成平均色 (~64), 这里会明显发灰
+            Check(canvas.GetPixel(120, 105).R < 20, "24bpp 源纯黑块平均后仍为黑");
+        }
+
         // ===== 文字: 指定位置着色, 且带描边 (周围存在对比色) =====
         {
             var bmp = Blank(320, 90);

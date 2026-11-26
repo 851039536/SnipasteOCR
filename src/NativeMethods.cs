@@ -390,17 +390,26 @@ public static class Dwmapi
 {
     private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
     private const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
+    private const int DWMWCP_DONOTROUND = 1;
     private const int DWMWCP_ROUND = 2;
 
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
 
     /// <summary>请求系统圆角 (仅 Win11 生效; 其它系统静默忽略)</summary>
-    public static void TryRoundCorners(IntPtr hwnd)
+    public static void TryRoundCorners(IntPtr hwnd) => TrySetCornerPreference(hwnd, DWMWCP_ROUND);
+
+    /// <summary>
+    /// 显式要求直角 (贴图窗口用)。
+    /// 无边框窗口在系统默认策略下本是直角, 但 Win11 会给顶级窗口补 8px 圆角;
+    /// 声明式固定比"靠默认"可靠, 且能防将来系统策略变化把截图像素四角裁掉。
+    /// </summary>
+    public static void TrySquareCorners(IntPtr hwnd) => TrySetCornerPreference(hwnd, DWMWCP_DONOTROUND);
+
+    private static void TrySetCornerPreference(IntPtr hwnd, int preference)
     {
         if (hwnd == IntPtr.Zero)
             return;
-        int preference = DWMWCP_ROUND;
         try
         {
             _ = DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, ref preference, sizeof(int));

@@ -1506,10 +1506,20 @@ public sealed class SnipOverlayForm : Form
         {
             Clipboard.SetImage(crop);
         }
-        catch
+        catch (Exception ex)
         {
             crop.Dispose();
-            ShowToast("复制失败（剪贴板被占用）· 可点「保存」另存或按 Esc 放弃");
+            // 只有 CLIPBRD_E_CANT_OPEN 才是"被占用"; 位图过大/GDI+ 失败/OOM 等
+            // 之前也被说成占用, 用户反复重试也没用。其它原因写日志, 提示不猜原因。
+            if (ClipboardErrors.IsBusy(ex))
+            {
+                ShowToast("复制失败（剪贴板被占用）· 可点「保存」另存或按 Esc 放弃");
+            }
+            else
+            {
+                AppLog.Write("复制截图到剪贴板失败", ex);
+                ShowToast("复制失败 · 可点「保存」另存或按 Esc 放弃");
+            }
             return;
         }
 

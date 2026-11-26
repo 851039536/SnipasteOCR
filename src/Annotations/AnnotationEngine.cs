@@ -382,44 +382,135 @@ public static class AnnotationEngine
         if (dest.Width < 2 || dest.Height < 2)
             return;
 
-        using var block = CreateMosaicBlock(source, dest, DefaultMosaicBlock);
-        if (block is null)
-            return;
+        Bitmap? block = null;
+        try
+        {
+            block = CreateMosaicBlock(source, dest, DefaultMosaicBlock);
+        }
+        catch
+        {
+            block?.Dispose();
+            block = null;
+        }
 
-        // 目标区域用最近邻放大 → 硬边像素块
-        var oldInterp = g.InterpolationMode;
+        // 生成失败绝不能"什么都不画": 那等于把用户以为已遮挡的隐私区域原样导出。
+        // 退回整块平均色 (取不到则中灰) 覆盖, 宁可观感差也要挡住内容。
+        if (block is null)
+        {
+            FillMosaicFallback(g, source, dest);
+            return;
+        }
+
+        using (block)
+        {
+            // 目标区域用最近邻放大 → 硬边像素块
+            var oldInterp = g.InterpolationMode;
+            var oldOffset = g.PixelOffsetMode;
+            try
+            {
+                g.InterpolationMode = InterpolationMode.NearestNeighbor;
+                g.PixelOffsetMode = PixelOffsetMode.Half;
+                g.DrawImage(block, dest, new Rectangle(0, 0, block.Width, block.Height), GraphicsUnit.Pixel);
+            }
+            finally
+            {
+                g.InterpolationMode = oldInterp;
+                g.PixelOffsetMode = oldOffset;
+            }
+        }
+    }
+
+    /// <summary>马赛克失败时的隐私兜底: 用整块平均色盖住原像素 (采样也失败则中灰)</summary>
+    private static void FillMosaicFallback(Graphics g, Bitmap source, Rectangle area)
+    {
+        Color fill = TryAverageColor(source, area) ?? Color.FromArgb(255, 128, 128, 128);
+
+        var oldSmoothing = g.SmoothingMode;
         var oldOffset = g.PixelOffsetMode;
         try
         {
-            g.InterpolationMode = InterpolationMode.NearestNeighbor;
+            // 覆盖层有缩放变换: 关抗锯齿, 避免边缘留下 1px 半透明原像素
+            g.SmoothingMode = SmoothingMode.None;
             g.PixelOffsetMode = PixelOffsetMode.Half;
-            g.DrawImage(block, dest, new Rectangle(0, 0, block.Width, block.Height), GraphicsUnit.Pixel);
+            using var brush = new SolidBrush(fill);
+            g.FillRectangle(brush, area);
         }
         finally
         {
-            g.InterpolationMode = oldInterp;
+            g.SmoothingMode = oldSmoothing;
             g.PixelOffsetMode = oldOffset;
         }
     }
 
     /// <summary>
+    /// 整区网格采样求平均色 (最多 32×32 点)。
+    /// 刻意不走 LockBits: 触发回退的位图往往正是 LockBits 失败的那张, 再走一遍只会再失败。
+    /// </summary>
+    private static Color? TryAverageColor(Bitmap source, Rectangle area)
+    {
+        try
+        {
+            int stepX = Math.Max(1, area.Width / 32);
+            int stepY = Math.Max(1, area.Height / 32);
+            long r = 0, g = 0, b = 0;
+            int n = 0;
+
+            for (int y = area.Top; y < area.Bottom; y += stepY)
+            {
+                for (int x = area.Left; x < area.Right; x += stepX)
+                {
+                    Color c = source.GetPixel(x, y);
+                    r += c.R;
+                    g += c.G;
+                    b += c.B;
+                    n++;
+                }
+            }
+
+            if (n == 0)
+                return null;
+
+            return Color.FromArgb(255, (int)(r / n), (int)(g / n), (int)(b / n));
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// 该位图能否做马赛克取样。
+    /// 只接受常见的 24/32bpp 真彩色: 索引色与 16bpp 的 LockBits 行为随 GDI+ 版本漂移,
+    /// 与其赌它能隐式转 32bpp, 不如确定性走回退填充 (隐私优先)。
+    /// </summary>
+    private static bool CanMosaic(Bitmap source) => source.PixelFormat
+        is PixelFormat.Format32bppArgb
+        or PixelFormat.Format32bppPArgb
+        or PixelFormat.Format32bppRgb
+        or PixelFormat.Format24bppRgb;
+
+    /// <summary>
     /// 生成马赛克小图: 把源区域按 <paramref name="blockSize"/> 分块取平均色, 写进一张小位图。
-    /// 之后放大绘制即得到马赛克。返回 null 表示区域无效。
+    /// 之后放大绘制即得到马赛克。返回 null 表示区域无效或取样失败, 由调用方走回退填充。
     /// </summary>
     private static Bitmap? CreateMosaicBlock(Bitmap source, Rectangle area, int blockSize)
     {
+        if (!CanMosaic(source))
+            return null;
+
         if (blockSize < 2)
             blockSize = 2;
 
         int cols = Math.Max(1, area.Width / blockSize);
         int rows = Math.Max(1, area.Height / blockSize);
 
-        var small = new Bitmap(cols, rows, PixelFormat.Format32bppArgb);
+        Bitmap? small = null;
 
         // 直接按块采样源图。为速度起见用 LockBits 一次性取源区域像素。
         BitmapData? srcData = null;
         try
         {
+            small = new Bitmap(cols, rows, PixelFormat.Format32bppArgb);
             srcData = source.LockBits(area, ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
             int stride = srcData.Stride;
             int bytes = Math.Abs(stride) * area.Height;
@@ -476,7 +567,7 @@ public static class AnnotationEngine
         }
         catch
         {
-            small.Dispose();
+            small?.Dispose();
             return null;
         }
         finally
