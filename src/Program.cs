@@ -70,26 +70,53 @@ internal static class Program
                 SettingsStore.Update(s => s.ModelProfile = p);   // 记住选择
             };
 
-            // 识别剪贴板图片: 剪贴板里没有图片时给出提示 (否则点了没反应, 用户不知道原因)
+            // 识别剪贴板图片: 按"没图 / 被占用 / 其它失败"分别提示, 不把三种原因说成一句
             tray.OcrClipboardRequested += () =>
             {
-                if (!SnipCoordinator.StartFromClipboard())
+                switch (SnipCoordinator.StartFromClipboard())
                 {
-                    MessageBox.Show(
-                        "剪贴板里没有图片。\n\n请先复制一张图片（或用 F3 截图），再试。",
-                        "SnipasteOCR", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    case ClipboardImageStatus.NoImage:
+                        MessageBox.Show(
+                            "剪贴板里没有图片。\n\n请先复制一张图片（或用 F3 截图），再试。",
+                            "SnipasteOCR", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        break;
+
+                    case ClipboardImageStatus.Busy:
+                        MessageBox.Show(
+                            "剪贴板正被其它程序占用，暂时读不到图片。\n\n请稍等一秒再试，或先用 F3 截图。",
+                            "SnipasteOCR", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        break;
+
+                    case ClipboardImageStatus.Failed:
+                        MessageBox.Show(
+                            "读取剪贴板图片失败，已记录到日志：\n" + AppLog.FilePath,
+                            "SnipasteOCR", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        break;
                 }
             };
 
-            // 重复上次 OCR 区域: 屏幕布局变了或还没识别过时明确提示, 不静默失败
+            // 重复上次 OCR 区域: 没识别过 / 布局变了 / 抓屏失败分别提示, 不静默也不误导
             tray.RepeatLastOcrRequested += () =>
             {
-                if (!SnipCoordinator.RepeatLastOcr())
+                switch (SnipCoordinator.RepeatLastOcr())
                 {
-                    MessageBox.Show(
-                        "没有可重复的识别区域。\n\n请先用 F1 框选识别一次；" +
-                        "如果刚才换过显示器或分辨率，请重新框选。",
-                        "SnipasteOCR", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    case RepeatOcrStatus.NoRegion:
+                        MessageBox.Show(
+                            "还没有可重复的识别区域。\n\n请先用 F1 框选识别一次，再使用「重复上次识别」。",
+                            "SnipasteOCR", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        break;
+
+                    case RepeatOcrStatus.LayoutChanged:
+                        MessageBox.Show(
+                            "上次识别的区域已不在当前屏幕内。\n\n换过显示器或分辨率后，请重新框选。",
+                            "SnipasteOCR", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        break;
+
+                    case RepeatOcrStatus.CaptureFailed:
+                        MessageBox.Show(
+                            "截取上次区域失败（可能是副屏休眠、锁屏或远程会话切换）。\n\n已记录到日志：\n" + AppLog.FilePath,
+                            "SnipasteOCR", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        break;
                 }
             };
 

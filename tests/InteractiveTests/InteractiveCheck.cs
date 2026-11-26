@@ -1424,6 +1424,11 @@ internal static class InteractiveCheck
         // 22. 重复上次识别: 记住区域 -> 直接截同一块屏幕, 不经过覆盖层/OCR 引擎
         {
             var vs = SystemInformation.VirtualScreen;
+
+            SnipCoordinator.ClearLastOcrRegionForTest();
+            Check(SnipCoordinator.RepeatLastOcr() == RepeatOcrStatus.NoRegion,
+                "没有上次区域时返回 NoRegion");
+
             var region = new Rectangle(vs.Left + 10, vs.Top + 10, 120, 80);
             SnipCoordinator.RememberOcrRegion(region);
             Check(SnipCoordinator.LastOcrRegionForTest == region, "记住上次 OCR 区域");
@@ -1438,8 +1443,9 @@ internal static class InteractiveCheck
             };
             try
             {
-                bool ok = SnipCoordinator.RepeatLastOcr();
-                Check(ok, "重复上次识别返回成功");
+                var repeatStatus = SnipCoordinator.RepeatLastOcr();
+                Check(repeatStatus == RepeatOcrStatus.Ok,
+                    $"重复上次识别返回成功 (实得 {repeatStatus})");
                 Check(captured is not null && captured.Size == region.Size,
                     $"重复截图尺寸等于上次区域 (实得 {captured?.Size}, 期望 {region.Size})");
                 Check(capturedAnchor == region,
@@ -1462,7 +1468,8 @@ internal static class InteractiveCheck
             };
             try
             {
-                Check(!SnipCoordinator.RepeatLastOcr(), "屏幕布局变化后拒绝重复上次区域");
+                Check(SnipCoordinator.RepeatLastOcr() == RepeatOcrStatus.LayoutChanged,
+                    "屏幕布局变化后拒绝重复上次区域");
                 Check(invalidLaunches == 0, "失效区域不打开结果窗口");
             }
             finally

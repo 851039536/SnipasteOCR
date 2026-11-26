@@ -2,6 +2,22 @@ using SnipasteOcr.Native;
 
 namespace SnipasteOcr;
 
+/// <summary>「重复上次识别」的结果; 三种失败必须能分别提示</summary>
+public enum RepeatOcrStatus
+{
+    /// <summary>已按上次区域截屏并打开结果窗口</summary>
+    Ok,
+
+    /// <summary>本次运行还没有成功识别过的区域</summary>
+    NoRegion,
+
+    /// <summary>区域已不在当前虚拟屏内 (换显示器/改分辨率)</summary>
+    LayoutChanged,
+
+    /// <summary>抓屏失败 (副屏休眠/锁屏/远程会话切换), 已记录日志</summary>
+    CaptureFailed,
+}
+
 /// <summary>
 /// 截图流程协调: 启动截图覆盖层, 结束后打开 OCR 窗口或把图片写入剪贴板
 /// </summary>
@@ -16,6 +32,9 @@ public static class SnipCoordinator
 
     /// <summary>最近一次 OCR 区域 (物理屏幕坐标); 仅供自检断言</summary>
     internal static Rectangle? LastOcrRegionForTest => _lastOcrRegion;
+
+    /// <summary>清空上次区域 (仅供自检构造 NoRegion 分支)</summary>
+    internal static void ClearLastOcrRegionForTest() => _lastOcrRegion = null;
 
     /// <summary>
     /// 仅供交互自检替换结果窗口启动动作, 避免自检触发真实 OCR 引擎。
@@ -118,17 +137,17 @@ public static class SnipCoordinator
 
     /// <summary>
     /// 重复上次 OCR 区域: 直接截取同一块屏幕并打开结果窗口, 不经过覆盖层。
-    /// 返回 false 表示还没有上次区域, 或屏幕布局已变化导致区域失效 —— 由调用方提示用户。
+    /// 返回值区分"没识别过 / 布局变了 / 抓屏失败", 由调用方给出对应提示。
     /// </summary>
-    public static bool RepeatLastOcr()
+    public static RepeatOcrStatus RepeatLastOcr()
     {
         if (_lastOcrRegion is not { } rect)
-            return false;
+            return RepeatOcrStatus.NoRegion;
 
         // 屏幕布局可能变化 (拔掉副屏/改分辨率): 区域必须完整落在当前虚拟屏内,
         // 否则截到的是桌面背景或其它窗口, 不如让用户重新框选。
         if (!SystemInformation.VirtualScreen.Contains(rect))
-            return false;
+            return RepeatOcrStatus.LayoutChanged;
 
         Bitmap? bmp = null;
         List<IntPtr> hidden = [];
@@ -139,10 +158,11 @@ public static class SnipCoordinator
             hidden = HideOpenForms();
             bmp = ScreenGrab.Copy(rect);
         }
-        catch
+        catch (Exception ex)
         {
             bmp?.Dispose();
-            return false;
+            AppLog.Write("重复上次识别: 抓屏失败", ex);
+            return RepeatOcrStatus.CaptureFailed;
         }
         finally
         {
@@ -150,7 +170,7 @@ public static class SnipCoordinator
         }
 
         ShowOcrResult(bmp, rect);
-        return true;
+        return RepeatOcrStatus.Ok;
     }
 
     /// <summary>抓屏前短暂隐藏本程序已跟踪的可见窗体; 返回已隐藏的句柄</summary>
@@ -222,31 +242,19 @@ public static class SnipCoordinator
     /// 复用 <see cref="OcrResultForm"/>, 因此结果窗口的选词/复制/导出行为与截图路径完全一致 ——
     /// 这正是"同一逻辑只写一份"的体现: 这里只负责取图, 识别与展示都交给既有组件。
     /// </summary>
-    /// <returns>是否成功取到图片并打开了结果窗口; false 表示剪贴板里没有图片</returns>
-    public static bool StartFromClipboard()
+    /// <returns>取图结果; 调用方按 Ok/NoImage/Busy/Failed 分别提示</returns>
+    public static ClipboardImageStatus StartFromClipboard()
     {
-        // 剪贴板可能被其它进程独占, GetImage 会抛 ExternalException, 必须兜住
-        Image? img = null;
-        try
+        var status = ClipboardImage.TryGet(out Bitmap? bmp, out Exception? error);
+        if (status != ClipboardImageStatus.Ok || bmp is null)
         {
-            if (Clipboard.ContainsImage())
-                img = Clipboard.GetImage();
-        }
-        catch
-        {
-            img = null;
+            if (status == ClipboardImageStatus.Failed)
+                AppLog.Write("读取剪贴板图片失败", error);
+            return status;
         }
 
-        if (img is null)
-            return false;
-
-        // OcrResultForm 会持有并使用该位图, 因此不在这里 Dispose;
-        // 转成 Bitmap 以统一类型 (GetImage 可能返回其它 Image 派生类)
-        Bitmap bmp = img as Bitmap ?? new Bitmap(img);
-        if (!ReferenceEquals(bmp, img))
-            img.Dispose();
-
+        // 结果窗口接管位图所有权 (构造失败时它会自行释放)
         ShowOcrResult(bmp, anchorScreen: null);
-        return true;
+        return ClipboardImageStatus.Ok;
     }
 }
