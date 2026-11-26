@@ -89,7 +89,7 @@ public sealed class SnipOverlayForm : Form
     private string? _editingText;
 
     /// <summary>正在输入的文字颜色 (开始编辑时锁定, 避免中途换色导致重影)</summary>
-    private Color _editingColor = Color.FromArgb(255, 235, 59, 36);
+    private Color _editingColor = AnnotationPalette.Colors[0];
 
     /// <summary>
     /// 仅供交互自检替换识别结果窗口的启动动作, 避免自检触发真实 OCR 引擎。
@@ -107,9 +107,7 @@ public sealed class SnipOverlayForm : Form
         // 先抓取屏幕 (必须在本窗体显示之前)
         Rectangle vs = SystemInformation.VirtualScreen;
         _virtualScreen = vs;
-        _screen = new Bitmap(vs.Width, vs.Height);
-        using (var g = Graphics.FromImage(_screen))
-            g.CopyFromScreen(vs.Left, vs.Top, 0, 0, _screen.Size, CopyPixelOperation.SourceCopy);
+        _screen = ScreenGrab.Copy(vs);
 
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar = false;
@@ -496,85 +494,114 @@ public sealed class SnipOverlayForm : Form
         // 弹层是不抢焦点的顶层窗口, 点它自己不会经过这里, 所以这里等价于"点到了外面"。
         _toolbar.CloseStylePopup();
 
-        if (e.Button == MouseButtons.Right)
-        {
-            // 有标注时右键先清空 (避免误退出丢失工作), 再按一次退出
-            if (_annotations.Count > 0)
-            {
-                _history.Push(_annotations);
-                _annotations.Clear();
-                _selected = -1;
-                SyncToolbarState();
-                Invalidate();
-                return;
-            }
-            Close();
+        if (HandleRightButtonDown(e))
             return;
-        }
 
         if (e.Button != MouseButtons.Left)
             return;
 
         var pointerPhysical = ToPhysical(e.Location);
 
-        // (1) 选区手柄优先, 且只在"已框选 + 未选工具"时启用。
-        //     必须排在框选之前: 手柄贴在选区边上, 若先判断框选, 贴着边按下会被当成
-        //     重新框选, 手柄就永远拖不动。
-        if (_hasSelection && _toolbar.Tool == AnnotationTool.None && _selection is { } handleSelection)
-        {
-            var handle = SelectionResize.HitHandle(handleSelection, e.Location, SelectionHandleSize, SelectionHandleGrow);
-            if (handle != SelectionHandle.None)
-            {
-                _resizeHandle = handle;
-                _resizeStart = handleSelection;
-                _dragging = true;
-                return;
-            }
-        }
+        if (TryStartResize(e.Location)) return;
+        if (TrySelectAnnotation(pointerPhysical)) return;
+        if (TryBeginAnnotateInSelection(e.Location, pointerPhysical)) return;
 
-        // (2) 未选工具时点中已有标注 → 选中并进入拖动。
-        //     点在选区内空白处则只取消选中, 继续往下走原有的框选逻辑 (行为不回归)。
-        if (_mode == SnipMode.Image && _toolbar.Tool == AnnotationTool.None && _annotations.Count > 0)
-        {
-            int hit = AnnotationHit.Topmost(_annotations, pointerPhysical);
-            if (hit >= 0)
-            {
-                // 刚输入完的文字先提交, 否则用户一选中就把没提交的内容弄丢了
-                CommitEditorIfOpen();
-
-                _selected = hit;
-                _movingSelected = true;
-                _moveHistoryPushed = false;
-                _moveLastPhysical = pointerPhysical;
-                _dragging = true;
-                Invalidate();
-                return;
-            }
-
-            if (_selected >= 0)
-            {
-                _selected = -1;
-                Invalidate();
-            }
-        }
-
-        // (3) 已有选区 + 选中了工具 → 在选区内按下即绘制标注
-        // 在选区外按下则重新框选 (否则选中工具后就再也无法调整选区, 只能靠按 0 退回)
-        if (_hasSelection && _toolbar.Tool != AnnotationTool.None)
-        {
-            if (SelectionPhysical is not { } sel || sel.Contains(pointerPhysical))
-            {
-                BeginAnnotate(e.Location);
-                return;
-            }
-
-            // 落到选区外: 重新框选, 并顺手退出标注工具避免误绘
-            _toolbar.SetTool(AnnotationTool.None);
-        }
-
-        // (4) 否则走框选
+        // 否则走框选
         _anchor = e.Location;
         _dragging = true;
+    }
+
+    /// <summary>右键: 有标注先清空 (避免误退出丢失工作), 再按一次退出</summary>
+    private bool HandleRightButtonDown(MouseEventArgs e)
+    {
+        if (e.Button != MouseButtons.Right)
+            return false;
+
+        if (_annotations.Count > 0)
+        {
+            _history.Push(_annotations);
+            _annotations.Clear();
+            _selected = -1;
+            SyncToolbarState();
+            Invalidate();
+        }
+        else
+        {
+            Close();
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// 选区手柄优先, 且只在"已框选 + 未选工具"时启用。
+    /// 必须排在框选之前: 手柄贴在选区边上, 若先判断框选, 贴着边按下会被当成
+    /// 重新框选, 手柄就永远拖不动。
+    /// </summary>
+    private bool TryStartResize(Point logical)
+    {
+        if (!_hasSelection || _toolbar.Tool != AnnotationTool.None || _selection is not { } handleSelection)
+            return false;
+
+        var handle = SelectionResize.HitHandle(handleSelection, logical, SelectionHandleSize, SelectionHandleGrow);
+        if (handle == SelectionHandle.None)
+            return false;
+
+        _resizeHandle = handle;
+        _resizeStart = handleSelection;
+        _dragging = true;
+        return true;
+    }
+
+    /// <summary>
+    /// 未选工具时点中已有标注 → 选中并进入拖动。
+    /// 点在选区内空白处只取消选中, 返回 false 继续走原有的框选/标注逻辑。
+    /// </summary>
+    private bool TrySelectAnnotation(PointF pointerPhysical)
+    {
+        if (_mode != SnipMode.Image || _toolbar.Tool != AnnotationTool.None || _annotations.Count == 0)
+            return false;
+
+        int hit = AnnotationHit.Topmost(_annotations, pointerPhysical);
+        if (hit >= 0)
+        {
+            // 刚输入完的文字先提交, 否则用户一选中就把没提交的内容弄丢了
+            CommitEditorIfOpen();
+
+            _selected = hit;
+            _movingSelected = true;
+            _moveHistoryPushed = false;
+            _moveLastPhysical = pointerPhysical;
+            _dragging = true;
+            Invalidate();
+            return true;
+        }
+
+        if (_selected >= 0)
+        {
+            _selected = -1;
+            Invalidate();
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// 已有选区 + 选中了工具 → 在选区内按下即绘制标注。
+    /// 在选区外按下则重新框选 (否则选中工具后就再也无法调整选区, 只能靠按 0 退回)。
+    /// </summary>
+    private bool TryBeginAnnotateInSelection(Point logical, PointF pointerPhysical)
+    {
+        if (!_hasSelection || _toolbar.Tool == AnnotationTool.None)
+            return false;
+
+        if (SelectionPhysical is not { } sel || sel.Contains(pointerPhysical))
+        {
+            BeginAnnotate(logical);
+            return true;
+        }
+
+        // 落到选区外: 重新框选, 并顺手退出标注工具避免误绘
+        _toolbar.SetTool(AnnotationTool.None);
+        return false;
     }
 
     /// <summary>开始一次标注 (拖拽形状或画笔点列); 文字工具走点击即编辑</summary>
@@ -642,17 +669,7 @@ public sealed class SnipOverlayForm : Form
 
         // 放大镜是独立子控件, 更新它只重绘自己那一小块, 不会触发整屏底图重绘
         UpdateMagnifier(e.Location);
-
-        // 提示条跟随光标所在屏: 只有跨屏时才重绘一次 (全屏底图重绘很贵, 不能每个鼠标移动都刷)
-        if (!_dragging && !SnipGeometry.IsValidSelection(_selection))
-        {
-            Rectangle screen = ScreenRectToClient(Screen.FromPoint(Cursor.Position).Bounds);
-            if (screen != _hintScreen)
-            {
-                _hintScreen = screen;
-                Invalidate();
-            }
-        }
+        UpdateHintScreen();
 
         if (!_dragging)
         {
@@ -660,63 +677,96 @@ public sealed class SnipOverlayForm : Form
             return;
         }
 
-        // 调整选区: 每次都从拖拽起点重算, 避免"夹紧后作为新基准"造成的累积漂移
-        if (_resizeHandle != SelectionHandle.None)
-        {
-            var resized = Rectangle.Intersect(
-                SelectionResize.Apply(_resizeStart, _resizeHandle, e.Location, SnipGeometry.MinDragSide),
-                ClientRectangle);
+        if (HandleSelectionResizeMove(e)) return;
+        if (HandleMoveSelectedMove(e)) return;
+        if (HandlePendingShapeMove(e)) return;
+        HandleSelectionDragMove(e);
+    }
 
-            if (SnipGeometry.IsValidSelection(resized) && _selection != resized)
-            {
-                _selection = resized;
-                PositionToolbar();   // 选区变了, 工具栏要跟着走
-                Invalidate();
-            }
+    /// <summary>提示条跟随光标所在屏: 只有跨屏时才重绘一次 (全屏底图重绘很贵)</summary>
+    private void UpdateHintScreen()
+    {
+        if (_dragging || SnipGeometry.IsValidSelection(_selection))
             return;
-        }
 
-        // 拖动已选中的标注: 按增量平移, 首次真正位移时才压历史
-        if (_movingSelected && _selected >= 0 && _selected < _annotations.Count)
+        Rectangle screen = ScreenRectToClient(Screen.FromPoint(Cursor.Position).Bounds);
+        if (screen != _hintScreen)
         {
-            var phys = ToPhysical(e.Location);
-            float dx = phys.X - _moveLastPhysical.X;
-            float dy = phys.Y - _moveLastPhysical.Y;
-            if (dx != 0 || dy != 0)
-            {
-                // 每帧 Push 会让一次 Ctrl+Z 只回退一个像素, 撤销栈瞬间被刷爆
-                if (!_moveHistoryPushed)
-                {
-                    _history.Push(_annotations);
-                    _moveHistoryPushed = true;
-                }
-
-                _annotations[_selected].Offset(dx, dy);
-                _moveLastPhysical = phys;
-                Invalidate();
-            }
-            return;
-        }
-
-        if (_pending is { } pending)
-        {
-            var phys = ToPhysical(e.Location);
-            if (pending.Tool is AnnotationTool.Pen or AnnotationTool.Marker)
-            {
-                // 采样去抖: 距离过近的点丢弃, 避免轨迹点爆炸
-                var last = pending.Points[^1];
-                float dx = phys.X - last.X, dy = phys.Y - last.Y;
-                if (dx * dx + dy * dy >= 4f)
-                    pending.Points.Add(phys);
-            }
-            else
-            {
-                pending.End = ConstrainDragEnd(pending.Tool, pending.Start, phys);
-            }
+            _hintScreen = screen;
             Invalidate();
-            return;
         }
+    }
 
+    /// <summary>调整选区: 每次都从拖拽起点重算, 避免"夹紧后作为新基准"造成的累积漂移</summary>
+    private bool HandleSelectionResizeMove(MouseEventArgs e)
+    {
+        if (_resizeHandle == SelectionHandle.None)
+            return false;
+
+        var resized = Rectangle.Intersect(
+            SelectionResize.Apply(_resizeStart, _resizeHandle, e.Location, SnipGeometry.MinDragSide),
+            ClientRectangle);
+
+        if (SnipGeometry.IsValidSelection(resized) && _selection != resized)
+        {
+            _selection = resized;
+            PositionToolbar();   // 选区变了, 工具栏要跟着走
+            Invalidate();
+        }
+        return true;
+    }
+
+    /// <summary>拖动已选中的标注: 按增量平移, 首次真正位移时才压历史</summary>
+    private bool HandleMoveSelectedMove(MouseEventArgs e)
+    {
+        if (!_movingSelected || _selected < 0 || _selected >= _annotations.Count)
+            return false;
+
+        var phys = ToPhysical(e.Location);
+        float dx = phys.X - _moveLastPhysical.X;
+        float dy = phys.Y - _moveLastPhysical.Y;
+        if (dx != 0 || dy != 0)
+        {
+            // 每帧 Push 会让一次 Ctrl+Z 只回退一个像素, 撤销栈瞬间被刷爆
+            if (!_moveHistoryPushed)
+            {
+                _history.Push(_annotations);
+                _moveHistoryPushed = true;
+            }
+
+            _annotations[_selected].Offset(dx, dy);
+            _moveLastPhysical = phys;
+            Invalidate();
+        }
+        return true;
+    }
+
+    /// <summary>拖拽中的形状: 画笔/马克笔追加轨迹点, 其余更新终点</summary>
+    private bool HandlePendingShapeMove(MouseEventArgs e)
+    {
+        if (_pending is not { } pending)
+            return false;
+
+        var phys = ToPhysical(e.Location);
+        if (pending.Tool is AnnotationTool.Pen or AnnotationTool.Marker)
+        {
+            // 采样去抖: 距离过近的点丢弃, 避免轨迹点爆炸
+            var last = pending.Points[^1];
+            float dx = phys.X - last.X, dy = phys.Y - last.Y;
+            if (dx * dx + dy * dy >= 4f)
+                pending.Points.Add(phys);
+        }
+        else
+        {
+            pending.End = ConstrainDragEnd(pending.Tool, pending.Start, phys);
+        }
+        Invalidate();
+        return true;
+    }
+
+    /// <summary>框选矩形更新 (未命中任何手柄/标注时)</summary>
+    private void HandleSelectionDragMove(MouseEventArgs e)
+    {
         var rect = RectFromPoints(_anchor, e.Location);
         // 与 OnMouseUp 共用 SnipGeometry.MinDragSide: 点击时鼠标常漂移 1~3px,
         // 微小矩形不能覆盖已有选区 (否则单击会把选区"抹掉", 之后双击确认时选区消失)
@@ -736,56 +786,72 @@ public sealed class SnipOverlayForm : Form
 
         _dragging = false;
 
-        // 结束选区调整: 走一次 OnSelectionChanged, 让工具栏重新贴边
-        if (_resizeHandle != SelectionHandle.None)
+        if (FinishResize()) return;
+        if (FinishMoveSelected()) return;
+        if (CommitPendingShape(e)) return;
+        FinishSelection(e);
+    }
+
+    /// <summary>结束选区调整: 走一次 OnSelectionChanged, 让工具栏重新贴边</summary>
+    private bool FinishResize()
+    {
+        if (_resizeHandle == SelectionHandle.None)
+            return false;
+
+        _resizeHandle = SelectionHandle.None;
+        OnSelectionChanged();
+        Invalidate();
+        return true;
+    }
+
+    /// <summary>结束拖动标注。只是单击选中时不会有位移, 也就不需要提交任何东西</summary>
+    private bool FinishMoveSelected()
+    {
+        if (!_movingSelected)
+            return false;
+
+        _movingSelected = false;
+        _moveHistoryPushed = false;
+        SyncToolbarState();
+        Invalidate();
+        return true;
+    }
+
+    /// <summary>提交拖拽中的标注; 形状过小则丢弃</summary>
+    private bool CommitPendingShape(MouseEventArgs e)
+    {
+        if (_pending is not { } pending)
+            return false;
+
+        var phys = ToPhysical(e.Location);
+        if (pending.Tool is AnnotationTool.Pen or AnnotationTool.Marker)
         {
-            _resizeHandle = SelectionHandle.None;
-            OnSelectionChanged();
-            Invalidate();
-            return;
+            if (pending.Points.Count > 0)
+                pending.Points.Add(phys);
+        }
+        else
+        {
+            pending.End = ConstrainDragEnd(pending.Tool, pending.Start, phys);
         }
 
-        // 结束拖动标注。只是单击选中时不会有位移, 也就不需要提交任何东西
-        if (_movingSelected)
+        // 形状过小则不记录 (避免撤销栈里全是误点产生的垃圾)
+        if (!pending.IsDegenerate())
         {
-            _movingSelected = false;
-            _moveHistoryPushed = false;
+            _history.Push(_annotations);
+            _annotations.Add(pending);
+            _selected = -1;
             SyncToolbarState();
-            Invalidate();
-            return;
         }
 
-        // 提交标注
-        if (_pending is { } pending)
-        {
-            var phys = ToPhysical(e.Location);
-            if (pending.Tool is AnnotationTool.Pen or AnnotationTool.Marker)
-            {
-                if (pending.Points.Count > 0)
-                    pending.Points.Add(phys);
-            }
-            else
-            {
-                pending.End = ConstrainDragEnd(pending.Tool, pending.Start, phys);
-            }
+        _pending = null;
+        Invalidate();
+        return true;
+    }
 
-            // 形状过小则不记录 (避免撤销栈里全是误点产生的垃圾)
-            if (!pending.IsDegenerate())
-            {
-                _history.Push(_annotations);
-                _annotations.Add(pending);
-                _selected = -1;
-                SyncToolbarState();
-            }
-
-            _pending = null;
-            Invalidate();
-            return;
-        }
-
-        // 更新选区
+    /// <summary>结束框选: 小于阈值视为单击 (保留上一次选区, 兼容双击确认)</summary>
+    private void FinishSelection(MouseEventArgs e)
+    {
         var rect = RectFromPoints(_anchor, e.Location);
-        // 小于阈值视为单击: 保留上一次选区 (兼容双击确认, 双击第二下不会清空选区)
         if (rect.Width >= SnipGeometry.MinDragSide && rect.Height >= SnipGeometry.MinDragSide)
         {
             _selection = rect;
@@ -886,36 +952,13 @@ public sealed class SnipOverlayForm : Form
         if (_editor is not null)
             return;
 
-        // 样式弹层打开时, 第一次 Esc 只收起面板; 其它按键也先收起面板再按原逻辑处理
-        if (_toolbar.IsStylePopupOpen)
-        {
-            _toolbar.CloseStylePopup();
-            if (e.KeyCode == Keys.Escape)
-            {
-                e.Handled = true;
-                return;
-            }
-        }
+        if (HandleStylePopupKey(e))
+            return;
 
         switch (e.KeyCode)
         {
             case Keys.Escape:
-                // 选中某条标注时, 第一次 Esc 只取消选中 (不退出窗口)
-                if (_selected >= 0)
-                {
-                    _selected = -1;
-                    Invalidate();
-                    e.Handled = true;
-                    return;
-                }
-                // 有标注时先退出工具, 再次 Esc 才关闭
-                if (_toolbar.Tool != AnnotationTool.None)
-                {
-                    _toolbar.SetTool(AnnotationTool.None);
-                    e.Handled = true;
-                    return;
-                }
-                Close();
+                HandleEscapeKey(e);
                 return;
 
             case Keys.C when !e.Control && !e.Alt:
@@ -944,23 +987,7 @@ public sealed class SnipOverlayForm : Form
                 return;
 
             case Keys.Delete:
-                // 有选中 → 只删这一条; 无选中 → 清空全部 (保留选区, 与旧行为一致)
-                if (_selected >= 0 && _selected < _annotations.Count)
-                {
-                    _history.Push(_annotations);
-                    _annotations.RemoveAt(_selected);
-                    _selected = -1;
-                    SyncToolbarState();
-                    Invalidate();
-                }
-                else if (_annotations.Count > 0)
-                {
-                    _history.Push(_annotations);
-                    _annotations.Clear();
-                    _selected = -1;
-                    SyncToolbarState();
-                    Invalidate();
-                }
+                HandleDeleteKey();
                 return;
 
             // 层级调整走快捷键而非工具栏按钮: 工具栏宽度已卡在 650px 上限,
@@ -976,27 +1003,89 @@ public sealed class SnipOverlayForm : Form
                 return;
         }
 
-        // 数字键 1..8 切换工具; 0 退回框选模式。
-        // 识别模式没有标注工具, 不劫持数字键, 也避免把光标切成 IBeam 等无用状态。
-        if (_mode == SnipMode.Image && !e.Control && !e.Alt)
-        {
-            int digit = e.KeyCode switch
-            {
-                >= Keys.D1 and <= Keys.D8 => e.KeyCode - Keys.D0,
-                >= Keys.NumPad1 and <= Keys.NumPad8 => e.KeyCode - Keys.NumPad0,
-                _ => -1,
-            };
+        HandleToolDigit(e);
+    }
 
-            if (digit >= 0)
-            {
-                _toolbar.SetTool(AnnotationToolInfo.FromShortcutDigit(digit));
-                e.Handled = true;
-            }
-            else if (e.KeyCode is Keys.D0 or Keys.NumPad0)
-            {
-                _toolbar.SetTool(AnnotationTool.None);
-                e.Handled = true;
-            }
+    /// <summary>样式弹层打开时, 第一次 Esc 只收起面板; 其它按键也先收起面板再继续</summary>
+    private bool HandleStylePopupKey(KeyEventArgs e)
+    {
+        if (!_toolbar.IsStylePopupOpen)
+            return false;
+
+        _toolbar.CloseStylePopup();
+        if (e.KeyCode != Keys.Escape)
+            return false;
+
+        e.Handled = true;
+        return true;
+    }
+
+    /// <summary>Esc 阶梯: 取消选中 → 退出工具 → 关闭窗口</summary>
+    private void HandleEscapeKey(KeyEventArgs e)
+    {
+        // 选中某条标注时, 第一次 Esc 只取消选中 (不退出窗口)
+        if (_selected >= 0)
+        {
+            _selected = -1;
+            Invalidate();
+            e.Handled = true;
+            return;
+        }
+        // 有标注时先退出工具, 再次 Esc 才关闭
+        if (_toolbar.Tool != AnnotationTool.None)
+        {
+            _toolbar.SetTool(AnnotationTool.None);
+            e.Handled = true;
+            return;
+        }
+        Close();
+    }
+
+    /// <summary>Delete: 有选中只删这一条, 无选中清空全部 (保留选区)</summary>
+    private void HandleDeleteKey()
+    {
+        if (_selected >= 0 && _selected < _annotations.Count)
+        {
+            _history.Push(_annotations);
+            _annotations.RemoveAt(_selected);
+        }
+        else if (_annotations.Count > 0)
+        {
+            _history.Push(_annotations);
+            _annotations.Clear();
+        }
+        else
+        {
+            return;
+        }
+
+        _selected = -1;
+        SyncToolbarState();
+        Invalidate();
+    }
+
+    /// <summary>数字键 1..8 切换工具, 0 退回框选; 识别模式不劫持数字键</summary>
+    private void HandleToolDigit(KeyEventArgs e)
+    {
+        if (_mode != SnipMode.Image || e.Control || e.Alt)
+            return;
+
+        int digit = e.KeyCode switch
+        {
+            >= Keys.D1 and <= Keys.D8 => e.KeyCode - Keys.D0,
+            >= Keys.NumPad1 and <= Keys.NumPad8 => e.KeyCode - Keys.NumPad0,
+            _ => -1,
+        };
+
+        if (digit >= 0)
+        {
+            _toolbar.SetTool(AnnotationToolInfo.FromShortcutDigit(digit));
+            e.Handled = true;
+        }
+        else if (e.KeyCode is Keys.D0 or Keys.NumPad0)
+        {
+            _toolbar.SetTool(AnnotationTool.None);
+            e.Handled = true;
         }
     }
 
@@ -1006,30 +1095,15 @@ public sealed class SnipOverlayForm : Form
     /// </summary>
     private void CopyColorAtCursor()
     {
-        if (!IsHandleCreated)
+        if (!TrySampleCursorColor(out Color color))
             return;
 
-        Point client = PointToClient(Cursor.Position);
-        if (!ClientRectangle.Contains(client))
-            return;
-        if (_toolbar.Visible && _toolbar.Bounds.Contains(client))
-            return;   // 工具栏是不透明子控件, 它盖住的位置不是用户看到的屏幕内容
-
-        PointF physical = ToPhysical(client);
-        var point = new Point((int)Math.Floor(physical.X), (int)Math.Floor(physical.Y));
-        Color color = SnipMagnifier.Sample(_screen, point);
         string hex = SnipMagnifier.FormatHex(color);
-
-        try
-        {
-            Clipboard.SetText(hex);
+        if (ClipboardText.TrySet(hex))
             ShowToast($"已复制 {hex}  {SnipMagnifier.FormatRgb(color)}");
-        }
-        catch
-        {
+        else
             // 剪贴板被其它进程占用: 不打断截图流程, 但必须让用户知道没复制成功
             ShowToast("颜色复制失败");
-        }
     }
 
     /// <summary>
@@ -1040,23 +1114,35 @@ public sealed class SnipOverlayForm : Form
     /// </summary>
     private void PinColorAtCursor()
     {
-        if (!IsHandleCreated)
+        if (!TrySampleCursorColor(out Color color))
             return;
-
-        Point client = PointToClient(Cursor.Position);
-        if (!ClientRectangle.Contains(client))
-            return;
-        if (_toolbar.Visible && _toolbar.Bounds.Contains(client))
-            return;   // 工具栏盖住的位置不是用户看到的屏幕内容
-
-        PointF physical = ToPhysical(client);
-        var point = new Point((int)Math.Floor(physical.X), (int)Math.Floor(physical.Y));
-        Color color = SnipMagnifier.Sample(_screen, point);
 
         // 贴在光标右下方一点, 避免正好盖住用户正在看的那个像素
         new PinnedColorForm(color, new Point(Cursor.Position.X + 18, Cursor.Position.Y + 18)).Show();
 
         ShowToast($"已贴色块 {SnipMagnifier.FormatHex(color)}");
+    }
+
+    /// <summary>
+    /// 取光标所在像素 (覆盖层底图, 不重新抓屏)。句柄/边界/工具栏遮挡三判断共用一份,
+    /// 取色复制与贴色块曾各抄一遍前导, 漏掉工具栏遮挡就会取到界面自己的颜色。
+    /// </summary>
+    private bool TrySampleCursorColor(out Color color)
+    {
+        color = default;
+        if (!IsHandleCreated)
+            return false;
+
+        Point client = PointToClient(Cursor.Position);
+        if (!ClientRectangle.Contains(client))
+            return false;
+        if (_toolbar.Visible && _toolbar.Bounds.Contains(client))
+            return false;   // 工具栏是不透明子控件, 它盖住的位置不是用户看到的屏幕内容
+
+        PointF physical = ToPhysical(client);
+        var point = new Point((int)Math.Floor(physical.X), (int)Math.Floor(physical.Y));
+        color = SnipMagnifier.Sample(_screen, point);
+        return true;
     }
 
     /// <summary>短暂显示底部状态, 由 <see cref="_toastTimer"/> 恢复为常规提示</summary>
@@ -1205,7 +1291,28 @@ public sealed class SnipOverlayForm : Form
         {
             TextColor = _toolbar.CurrentColor,
         };
+        HookEditorEvents(editor);
 
+        _editor = editor;
+
+        // 不加入 Controls 树: 一旦作为可见子控件存在, 它就会被本窗体的整屏绘制覆盖。
+        // 用 AddOwnedForm/隐藏窗口的方式无法可靠收键盘, 因此这里把它放到屏幕外、尺寸最小,
+        // 只要它能拿到焦点即可 (焦点与可见性无关)。
+        editor.Location = new Point(-32000, -32000);
+        editor.Size = new Size(120, 30);
+        Controls.Add(editor);
+
+        // 取焦点链: 覆盖层已是前台窗口 (见 ForceActivate), 这里把焦点交给编辑控件
+        editor.Select();
+        if (!editor.Focused)
+            editor.Focus();
+
+        Invalidate();
+    }
+
+    /// <summary>编辑框的内容/提交/取消事件: 宿主只负责同步预览文本与落一条标注</summary>
+    private void HookEditorEvents(TextEditorOverlay editor)
+    {
         // 内容变化: 同步到 _editingText 并重绘窗体 (真正显示文字的地方)
         editor.ContentChanged += () =>
         {
@@ -1246,22 +1353,6 @@ public sealed class SnipOverlayForm : Form
         };
 
         editor.Cancelled += CloseEditor;
-
-        _editor = editor;
-
-        // 不加入 Controls 树: 一旦作为可见子控件存在, 它就会被本窗体的整屏绘制覆盖。
-        // 用 AddOwnedForm/隐藏窗口的方式无法可靠收键盘, 因此这里把它放到屏幕外、尺寸最小,
-        // 只要它能拿到焦点即可 (焦点与可见性无关)。
-        editor.Location = new Point(-32000, -32000);
-        editor.Size = new Size(120, 30);
-        Controls.Add(editor);
-
-        // 取焦点链: 覆盖层已是前台窗口 (见 ForceActivate), 这里把焦点交给编辑控件
-        editor.Select();
-        if (!editor.Focused)
-            editor.Focus();
-
-        Invalidate();
     }
 
     /// <summary>提交并关闭编辑框 (切换工具/确认截图前调用)</summary>
@@ -1449,7 +1540,7 @@ public sealed class SnipOverlayForm : Form
                 "SnipasteOCR");
             Directory.CreateDirectory(dir);
             string file = Path.Combine(dir, $"Snip_{DateTime.Now:yyyyMMdd_HHmmss}.png");
-            crop.Save(file, System.Drawing.Imaging.ImageFormat.Png);
+            AtomicFile.SaveImage(crop, file, System.Drawing.Imaging.ImageFormat.Png);
         }
         catch (Exception ex)
         {

@@ -162,7 +162,7 @@ internal sealed class StylePopupForm : Form
             {
                 // 选中态不用强调蓝填充: 预览线是当前色, 蓝底 + 红线会互相干扰、也看不清粗细
                 using var back = new SolidBrush(Color.FromArgb(36, 255, 255, 255));
-                using var path = Rounded(cell, 4);
+                using var path = UiShapes.RoundedRect(cell, 4);
                 g.FillPath(back, path);
                 using var ring = new Pen(UiTheme.Accent, 1.2f);
                 g.DrawPath(ring, path);
@@ -170,7 +170,7 @@ internal sealed class StylePopupForm : Form
             else if (i == _hoverWidth)
             {
                 using var back = new SolidBrush(Color.FromArgb(22, 255, 255, 255));
-                using var path = Rounded(cell, 4);
+                using var path = UiShapes.RoundedRect(cell, 4);
                 g.FillPath(back, path);
             }
 
@@ -251,17 +251,5 @@ internal sealed class StylePopupForm : Form
             return true;
         }
         return base.ProcessCmdKey(ref msg, keyData);
-    }
-
-    private static GraphicsPath Rounded(Rectangle r, int radius)
-    {
-        int d = Math.Min(radius * 2, Math.Min(r.Width, r.Height));
-        var path = new GraphicsPath();
-        path.AddArc(r.Left, r.Top, d, d, 180, 90);
-        path.AddArc(r.Right - d, r.Top, d, d, 270, 90);
-        path.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
-        path.AddArc(r.Left, r.Bottom - d, d, d, 90, 90);
-        path.CloseFigure();
-        return path;
     }
 }

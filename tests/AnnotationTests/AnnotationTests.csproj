@@ -42,6 +42,8 @@
     <Compile Include="..\..\src\Annotations\SelectionResize.cs" Link="Engine\SelectionResize.cs" />
     <!-- 界面配色唯一来源 (标注工具栏/尺寸徽标引用) -->
     <Compile Include="..\..\src\UiTheme.cs" Link="Engine\UiTheme.cs" />
+    <!-- 圆角矩形路径 (工具栏/样式弹层/尺寸徽标/窗口 Region 的唯一实现) -->
+    <Compile Include="..\..\src\UiShapes.cs" Link="Engine\UiShapes.cs" />
     <!-- 高倍缩放平移的夹紧几何 (结果窗口与离线断言共用) -->
     <Compile Include="..\..\src\OcrPan.cs" Link="Engine\OcrPan.cs" />
     <!-- 置信度展示规则 (低分框标色/状态栏百分比) -->

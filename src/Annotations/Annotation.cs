@@ -13,7 +13,7 @@ public sealed class Annotation
     public required AnnotationTool Tool { get; init; }
 
     /// <summary>线条/描边颜色</summary>
-    public Color Color { get; init; } = Color.FromArgb(255, 235, 59, 36);
+    public Color Color { get; init; } = AnnotationPalette.Colors[0];
 
     /// <summary>线宽 (物理像素)</summary>
     public float StrokeWidth { get; set; } = 2f;
@@ -70,11 +70,14 @@ public sealed class Annotation
             if (Tool == AnnotationTool.StepNumber)
                 return AnnotationEngine.StepBadgeBounds(Start, Number, FontSize);
 
-            return RectangleF.FromLTRB(
-                Math.Min(Start.X, End.X), Math.Min(Start.Y, End.Y),
-                Math.Max(Start.X, End.X), Math.Max(Start.Y, End.Y));
+            return NormalizedRect();
         }
     }
+
+    /// <summary>把起止点归一化为正矩形 (反方向拖拽也能得到正的 Left/Top/Right/Bottom)</summary>
+    public RectangleF NormalizedRect() => RectangleF.FromLTRB(
+        Math.Min(Start.X, End.X), Math.Min(Start.Y, End.Y),
+        Math.Max(Start.X, End.X), Math.Max(Start.Y, End.Y));
 
     /// <summary>
     /// 文字标注的包围盒。字号度量需要 GDI+, 无字体缓存时退回按字号估算,

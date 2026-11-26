@@ -31,6 +31,9 @@ internal static class UiTheme
     /// <summary>主要文字 (深底上的正文/工具栏标签)</summary>
     public static readonly Color TextPrimary = Color.FromArgb(255, 226, 230, 236);
 
+    /// <summary>禁用态文字 (工具栏不可点项)</summary>
+    public static readonly Color TextDisabled = Color.FromArgb(255, 110, 114, 120);
+
     /// <summary>次级文字 (译文面板里比正文弱一档可复制项)</summary>
     public static readonly Color TextSecondary = Color.FromArgb(255, 210, 220, 232);
 

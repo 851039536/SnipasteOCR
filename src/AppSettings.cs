@@ -18,19 +18,25 @@ public sealed class AppSettings
     /// <summary>默认翻译模型名 (与 TranslateClient 共用, 避免两处各写一份)</summary>
     public const string DefaultTranslateModel = "deepseek-flash";
 
-    /// <summary>上次选择的识别模型档位</summary>
-    public OcrModelProfile ModelProfile { get; set; } = OcrModelProfile.Medium;
-
-    /// <summary>截图并识别热键的虚拟键码 (默认 F1 = 0x70)</summary>
-    public int HotKeyOcr { get; set; } = 0x70;
+    /// <summary>默认热键: F1 截图识别 (VK_F1 = 0x70)</summary>
+    public const int DefaultHotKeyOcr = 0x70;
 
     /// <summary>
-    /// 截图标注热键的虚拟键码 (默认 F3 = 0x72)。
+    /// 默认热键: F3 截图标注。
     /// 注意 VK_F1=0x70 起算, 所以 VK_F3 = 0x72 而不是 0x73 —— 0x73 是 F4。
     /// 踩过的坑: 早期版本把 0x73 写成 F3, 于是"F3"实际注册成了 F4:
     /// 用户按 F3 毫无反应, 按 F4 反而触发截图, 且设置界面显示"F3"让人完全摸不着头脑。
     /// </summary>
-    public int HotKeyImage { get; set; } = 0x72;
+    public const int DefaultHotKeyImage = 0x72;
+
+    /// <summary>上次选择的识别模型档位</summary>
+    public OcrModelProfile ModelProfile { get; set; } = OcrModelProfile.Medium;
+
+    /// <summary>截图并识别热键的虚拟键码</summary>
+    public int HotKeyOcr { get; set; } = DefaultHotKeyOcr;
+
+    /// <summary>截图标注热键的虚拟键码</summary>
+    public int HotKeyImage { get; set; } = DefaultHotKeyImage;
 
     /// <summary>截图识别热键的修饰符 (0 = 无; MOD_ALT=1, MOD_CONTROL=2, MOD_SHIFT=4, MOD_WIN=8)</summary>
     public int HotKeyModifiers { get; set; } = 0;

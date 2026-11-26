@@ -116,11 +116,11 @@ internal static class SnipSizeBadge
         {
             // 投影: 亮色截图上也能把面板从底图里分离出来
             using (var shadow = new SolidBrush(Color.FromArgb(70, 0, 0, 0)))
-            using (var sp = RoundRect(new Rectangle(box.X, box.Y + 1, box.Width, box.Height), Radius))
+            using (var sp = UiShapes.RoundedRect(new Rectangle(box.X, box.Y + 1, box.Width, box.Height), Radius))
                 g.FillPath(shadow, sp);
 
             using (var bg = new SolidBrush(UiTheme.BadgeSurface))
-            using (var path = RoundRect(box, Radius))
+            using (var path = UiShapes.RoundedRect(box, Radius))
             {
                 g.FillPath(bg, path);
                 using var border = new Pen(Color.FromArgb(150, UiTheme.Accent), 1f);
@@ -141,18 +141,5 @@ internal static class SnipSizeBadge
             TextRenderer.DrawText(g, text, font, new Point(x, y), color, TextFlags);
             x += TextRenderer.MeasureText(text, font, new Size(int.MaxValue, int.MaxValue), TextFlags).Width;
         }
-    }
-
-    /// <summary>圆角矩形路径 (半径自动收缩到短边以内, 避免小面板上 AddArc 画出自交路径)</summary>
-    private static GraphicsPath RoundRect(Rectangle r, int radius)
-    {
-        int d = Math.Min(radius * 2, Math.Min(r.Width, r.Height));
-        var path = new GraphicsPath();
-        path.AddArc(r.Left, r.Top, d, d, 180, 90);
-        path.AddArc(r.Right - d, r.Top, d, d, 270, 90);
-        path.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
-        path.AddArc(r.Left, r.Bottom - d, d, d, 90, 90);
-        path.CloseFigure();
-        return path;
     }
 }

@@ -14,7 +14,7 @@ public sealed class TextEditorOverlay : Control
     /// <summary>文字颜色</summary>
     [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     [Browsable(false)]
-    public Color TextColor { get; set; } = Color.FromArgb(255, 235, 59, 36);
+    public Color TextColor { get; set; } = AnnotationPalette.Colors[0];
 
     /// <summary>编辑完成 (回车且非空 / 失焦); 参数为最终文本</summary>
     public event Action<string>? Committed;

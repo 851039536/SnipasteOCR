@@ -139,14 +139,7 @@ internal sealed class TranslateForm : Form
     private void BuildToolStrip()
     {
         _toolStrip.Dock = DockStyle.Fill;
-        _toolStrip.GripStyle = ToolStripGripStyle.Hidden;
-        _toolStrip.RenderMode = ToolStripRenderMode.Professional;
-        _toolStrip.Renderer = new DarkToolStripRenderer();
-        _toolStrip.BackColor = UiTheme.Surface;
-        _toolStrip.ForeColor = TextColor;
-        _toolStrip.Font = UiFont.Create(UiFontSize);
-        _toolStrip.Padding = new Padding(4, 1, 4, 1);
-        _toolStrip.CanOverflow = false;
+        DarkToolStrip.Apply(_toolStrip, UiFontSize, new Padding(4, 1, 4, 1));
 
         _copy.Text = "复制译文";
         _copy.ToolTipText = "复制译文到剪贴板";

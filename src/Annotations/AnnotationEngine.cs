@@ -584,7 +584,5 @@ public static class AnnotationEngine
     private static int Luminance(Color c) => (c.R * 299 + c.G * 587 + c.B * 114) / 1000;
 
     /// <summary>把起止点归一化为正矩形</summary>
-    private static RectangleF Normalize(Annotation a) => RectangleF.FromLTRB(
-        Math.Min(a.Start.X, a.End.X), Math.Min(a.Start.Y, a.End.Y),
-        Math.Max(a.Start.X, a.End.X), Math.Max(a.Start.Y, a.End.Y));
+    private static RectangleF Normalize(Annotation a) => a.NormalizedRect();
 }

@@ -27,7 +27,9 @@ internal sealed record TranslateResult(
 /// </summary>
 internal static class TranslateClient
 {
-    public const string Endpoint = "https://api.deepseek.com/chat/completions";
+    /// <summary>API 主机 (请求地址与界面提示共用, 换域名只改这一处)</summary>
+    public const string Host = "api.deepseek.com";
+    public const string Endpoint = "https://" + Host + "/chat/completions";
     public const string DefaultModel = AppSettings.DefaultTranslateModel;
 
     /// <summary>单次请求的最大输入字符数; 超出时截断并在界面提示, 避免一次截图产生意外费用</summary>

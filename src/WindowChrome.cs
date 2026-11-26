@@ -39,12 +39,11 @@ internal static class WindowChrome
         {
             Attached.Add(form, new object());
             form.HandleCreated += (_, _) => Apply(form);
-            form.SizeChanged += (_, _) =>
+            if (!NativeRoundedCorners)
             {
-                // Win11 由 DWM 维护, 尺寸变化不需要我们插手
-                if (!NativeRoundedCorners)
-                    Apply(form);
-            };
+                // Win11 的圆角由 DWM 跟随尺寸维护, 只有 Win10 的 Region 兜底需要重建
+                form.SizeChanged += (_, _) => Apply(form);
+            }
             form.DpiChanged += (_, _) => Apply(form);
         }
 
@@ -72,22 +71,10 @@ internal static class WindowChrome
         }
 
         int radius = (int)Math.Round(Radius * form.DeviceDpi / 96f);
-        using var path = RoundedPath(new Rectangle(0, 0, form.Width, form.Height), radius);
+        using var path = UiShapes.RoundedRect(new Rectangle(0, 0, form.Width, form.Height), radius);
         var region = new Region(path);
         var previous = form.Region;
         form.Region = region;
         previous?.Dispose();
-    }
-
-    private static System.Drawing.Drawing2D.GraphicsPath RoundedPath(Rectangle r, int radius)
-    {
-        int d = Math.Max(1, Math.Min(radius * 2, Math.Min(r.Width, r.Height)));
-        var path = new System.Drawing.Drawing2D.GraphicsPath();
-        path.AddArc(r.Left, r.Top, d, d, 180, 90);
-        path.AddArc(r.Right - d, r.Top, d, d, 270, 90);
-        path.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
-        path.AddArc(r.Left, r.Bottom - d, d, d, 90, 90);
-        path.CloseFigure();
-        return path;
     }
 }

@@ -42,7 +42,7 @@ public sealed class TranslateSettingsForm : Form
 
         var tip = new Label
         {
-            Text = "翻译需要联网: 只把识别出的文字发送到 DeepSeek（api.deepseek.com），" +
+            Text = $"翻译需要联网: 只把识别出的文字发送到 DeepSeek（{TranslateClient.Host}），" +
                    "不会上传截图；识别本身仍全程离线。",
             Location = new Point(18, 14),
             Size = new Size(484, 48),

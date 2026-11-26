@@ -99,8 +99,8 @@ public sealed class HotKeyForm : Form
         };
         reset.Click += (_, _) =>
         {
-            _ocrBox.SetKey(0x70, 0);    // F1
-            _imageBox.SetKey(0x72, 0);  // F3 (=0x72; 0x73 是 F4)
+            _ocrBox.SetKey(AppSettings.DefaultHotKeyOcr, 0);    // F1
+            _imageBox.SetKey(AppSettings.DefaultHotKeyImage, 0); // F3 (=0x72; 0x73 是 F4)
         };
         DialogTheme.StyleButton(reset);
         DialogTheme.StyleButton(ok, primary: true);

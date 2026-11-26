@@ -64,14 +64,8 @@ public sealed class PinnedColorForm : PinnedWindowBase
         if (e.Button != MouseButtons.Left)
             return;
 
-        try
-        {
-            Clipboard.SetText(_hex);
-        }
-        catch
-        {
-            // 剪贴板被占用: 贴图本身仍然可用, 不弹窗打断
-        }
+        // 剪贴板被占用: 贴图本身仍然可用, 不弹窗打断 (TrySet 内部已吞异常)
+        ClipboardText.TrySet(_hex);
     }
 
     protected override void OnFormClosed(FormClosedEventArgs e)

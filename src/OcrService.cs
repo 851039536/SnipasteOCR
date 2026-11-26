@@ -62,7 +62,7 @@ public sealed class OcrService : IDisposable
     public PaddleOcrResult Recognize(Bitmap image, CancellationToken cancellationToken)
     {
         // 瞬时锁定: 仅复制像素, 微秒级; 推理期间不持有位图锁
-        byte[] pixels = Snapshot(image, out int width, out int height, out int stride);
+        var (pixels, width, height, stride) = Snapshot(image);
 
         // 整个「取引擎 + 推理」过程都持有 _gate:
         // 否则切换档位时 Dispose() 可能正好在另一线程 Run() 的中途释放掉引擎内存。
@@ -79,22 +79,22 @@ public sealed class OcrService : IDisposable
     }
 
     /// <summary>LockBits 只读锁定 + Marshal.Copy 像素快照, 立即解锁 (微秒级)</summary>
-    private static byte[] Snapshot(Bitmap image, out int width, out int height, out int stride)
+    private static (byte[] Pixels, int Width, int Height, int Stride) Snapshot(Bitmap image)
     {
-        width = image.Width;
-        height = image.Height;
+        int width = image.Width;
+        int height = image.Height;
         BitmapData data = image.LockBits(
             new Rectangle(0, 0, width, height),
             ImageLockMode.ReadOnly,
             PixelFormat.Format32bppArgb);
         try
         {
-            stride = data.Stride;
+            int stride = data.Stride;
             byte[] pixels = new byte[stride * height];
             // 瞬时拷贝: Marshal.Copy 直接 Scan0 -> 托管数组, 无需 unsafe
             System.Runtime.InteropServices.Marshal.Copy(
                 data.Scan0, pixels, 0, stride * height);
-            return pixels;
+            return (pixels, width, height, stride);
         }
         finally
         {

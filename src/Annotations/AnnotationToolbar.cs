@@ -284,7 +284,7 @@ public sealed class AnnotationToolbar : Control
         // 同一条边框四边粗细与亮度不一致, 看起来"有些地方正常, 有些地方怪"。
         // 深色底本身与截图已有足够对比, 直接去掉边框最干净。
         // 圆角 8: 与 Windows 11 的浮层规范一致 (控件 4 / 浮层 8), 与样式弹层同一档。
-        using (var path = RoundedRect(ClientRectangle, 8))
+        using (var path = UiShapes.RoundedRect(ClientRectangle, 8))
         using (var bg = new SolidBrush(BackColor))
             g.FillPath(bg, path);
 
@@ -471,7 +471,7 @@ public sealed class AnnotationToolbar : Control
     {
         Color fill = hover ? Lighten(back, 0.15f) : back;
         using (var b = new SolidBrush(fill))
-        using (var p = RoundedRect(rect, 4))
+        using (var p = UiShapes.RoundedRect(rect, 4))
             g.FillPath(b, p);
 
         using var font = UiFont.Create(TextButtonFontSize);
@@ -866,23 +866,7 @@ public sealed class AnnotationToolbar : Control
             return;
 
         using var brush = new SolidBrush(color);
-        using var path = RoundedRect(rect, 4);
+        using var path = UiShapes.RoundedRect(rect, 4);
         g.FillPath(brush, path);
-    }
-
-    /// <summary>圆角矩形路径</summary>
-    private static GraphicsPath RoundedRect(Rectangle r, int radius)
-    {
-        var path = new GraphicsPath();
-        int d = radius * 2;
-        if (d > r.Width) d = r.Width;
-        if (d > r.Height) d = r.Height;
-
-        path.AddArc(r.X, r.Y, d, d, 180, 90);
-        path.AddArc(r.Right - d, r.Y, d, d, 270, 90);
-        path.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
-        path.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
-        path.CloseFigure();
-        return path;
     }
 }

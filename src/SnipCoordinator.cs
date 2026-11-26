@@ -137,9 +137,7 @@ public static class SnipCoordinator
             // 上一次结果窗口通常正盖在目标区域上; 不藏起来就会把结果窗口自己截进去,
             // 得到一个层层递归的 OCR。只短暂隐藏, 抓完立即恢复且不抢焦点。
             hidden = HideOpenForms();
-            bmp = new Bitmap(rect.Width, rect.Height);
-            using var g = Graphics.FromImage(bmp);
-            g.CopyFromScreen(rect.Left, rect.Top, 0, 0, rect.Size, CopyPixelOperation.SourceCopy);
+            bmp = ScreenGrab.Copy(rect);
         }
         catch
         {
