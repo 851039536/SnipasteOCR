@@ -14,7 +14,7 @@ namespace SnipasteOcr;
 /// 坐标系约定 (关键):
 /// - <b>物理像素</b>: <see cref="_screen"/> 底图与所有 <see cref="Annotation"/> 几何数据。
 /// - <b>逻辑像素</b>: WinForms 控件/鼠标事件坐标, 与物理像素相差 <see cref="ScaleFactor"/> 倍。
-/// 两者在鼠标事件入口 (<see cref="ToPhysical"/>) 与绘制出口 (<see cref="ToLogical"/>) 各转换一次。
+/// 两者在鼠标事件入口 (<see cref="ToPhysical"/>) 与绘制出口 (<see cref="ToLogical(PointF)"/>) 各转换一次。
 /// </summary>
 public sealed class SnipOverlayForm : Form
 {

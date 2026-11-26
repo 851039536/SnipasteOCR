@@ -33,12 +33,13 @@ internal static class TranslationBarLayout
     /// <summary>「复制译文」与关闭图标之间的间距</summary>
     public const int CloseGap = 10;
 
-    /// <summary>「复制译文」与关闭图标之间的间距</summary>
+    /// <summary>标题与「复制译文」按钮之间的间距</summary>
     public const int CopyGap = 12;
 
     /// <summary>「复制译文」按钮左右内边距 (文字宽度由调用方量好传入)</summary>
     public const int CopyPadX = 8;
 
+    /// <summary>译文面板各区域的矩形 (绘制、鼠标命中与状态栏避让共用同一份几何)</summary>
     public readonly record struct Layout(
         Rectangle Box,
         Rectangle Title,

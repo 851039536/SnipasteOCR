@@ -1,3 +1,5 @@
+using SnipasteOcr.Annotations;
+
 namespace SnipasteOcr;
 
 /// <summary>

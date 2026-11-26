@@ -1624,6 +1624,9 @@ internal static class InteractiveCheck
         catch { }
     }
 
+    // 测试辅助: 一次性读取菜单文本, StringBuilder 足够; 返回值只表示拷贝长度, 不影响断言。
+#pragma warning disable CA1838 // P/Invoke 不应使用 StringBuilder
+#pragma warning disable CA1806 // 不应忽略方法返回值
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern int GetMenuStringW(IntPtr hMenu, uint uIDItem, StringBuilder lpString, int cchMax, uint flags);
 
@@ -1634,6 +1637,8 @@ internal static class InteractiveCheck
         GetMenuStringW(menu, cmd, sb, sb.Capacity, 0);   // 0 = MF_BYCOMMAND
         return sb.ToString();
     }
+#pragma warning restore CA1806
+#pragma warning restore CA1838
 
     [DllImport("user32.dll")]
     private static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, IntPtr dwExtraInfo);

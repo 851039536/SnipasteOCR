@@ -59,6 +59,7 @@ internal sealed class DarkToolStripRenderer : ToolStripProfessionalRenderer
     }
 }
 
+/// <summary>深色 ToolStrip 的调色板 (底色/悬停/按下/分隔线; 相近色保持原值不合并)</summary>
 internal sealed class DarkColorTable : ProfessionalColorTable
 {
     private static readonly Color Bg = UiTheme.Surface;

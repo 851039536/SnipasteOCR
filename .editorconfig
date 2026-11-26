@@ -1,0 +1,44 @@
+# 代码风格的可机械执行部分; 规范文字说明见 AGENTS.md「代码风格」。
+# 刻意不设 end_of_line: 仓库里 CRLF/LF 并存, .gitattributes 用 * text=auto
+# 做入库规范化, 这里再指定行尾会让一次格式化改写全仓。
+root = true
+
+[*]
+indent_style = space
+indent_size = 4
+insert_final_newline = true
+trim_trailing_whitespace = true
+charset = utf-8
+
+[*.{cs,csproj,props,targets}]
+indent_size = 4
+
+[*.cs]
+# 本项目全程 Nullable + ImplicitUsings, 类型明显的局部变量用 var 更接近现有风格
+csharp_style_var_when_type_is_apparent = true:suggestion
+csharp_style_namespace_declarations = file_scoped:suggestion
+dotnet_style_qualification_for_field = false:suggestion
+dotnet_style_qualification_for_property = false:suggestion
+dotnet_style_qualification_for_method = false:suggestion
+
+# 私有字段 _camelCase (AGENTS.md 明确要求; 常量仍用 PascalCase)
+dotnet_naming_rule.private_fields_underscore.severity = suggestion
+dotnet_naming_rule.private_fields_underscore.symbols = private_fields
+dotnet_naming_rule.private_fields_underscore.style = underscore_camel
+dotnet_naming_symbols.private_fields.applicable_kinds = field
+dotnet_naming_symbols.private_fields.applicable_accessibilities = private
+dotnet_naming_style.underscore_camel.required_prefix = _
+dotnet_naming_style.underscore_camel.capitalization = camel_case
+
+dotnet_naming_rule.constants_pascal.severity = suggestion
+dotnet_naming_rule.constants_pascal.symbols = const_fields
+dotnet_naming_rule.constants_pascal.style = pascal
+dotnet_naming_symbols.const_fields.applicable_kinds = field
+dotnet_naming_symbols.const_fields.required_modifiers = const
+dotnet_naming_style.pascal.capitalization = pascal_case
+
+# 精确豁免, 不做大范围 NoWarn:
+# CA1062 公开 API 空检查 —— 产品是内部单进程工具, 逐项加会改一批方法签名。
+# CA1303 本地化字符串 —— 全中文单市场, 不引入资源文件。
+dotnet_diagnostic.CA1062.severity = none
+dotnet_diagnostic.CA1303.severity = none

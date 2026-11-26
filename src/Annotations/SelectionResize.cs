@@ -97,7 +97,7 @@ public static class SelectionResize
     /// 2. 边长夹到 <paramref name="minSide"/>, 且<b>钉住不动的那条边</b> ——
     ///    从左上角往右下拖过头时, 右/下边界应保持原位, 而不是整块选区被推着跑。
     /// </summary>
-    public static Rectangle Apply(Rectangle start, SelectionHandle handle, Point pointer, int minSide)
+    public static Rectangle Apply(Rectangle start, SelectionHandle handle, Point point, int minSide)
     {
         if (handle == SelectionHandle.None)
             return start;
@@ -111,10 +111,10 @@ public static class SelectionResize
         bool movesTop = handle is SelectionHandle.TopLeft or SelectionHandle.Top or SelectionHandle.TopRight;
         bool movesBottom = handle is SelectionHandle.BottomLeft or SelectionHandle.Bottom or SelectionHandle.BottomRight;
 
-        if (movesLeft) l = pointer.X;
-        if (movesRight) r = pointer.X;
-        if (movesTop) t = pointer.Y;
-        if (movesBottom) b = pointer.Y;
+        if (movesLeft) l = point.X;
+        if (movesRight) r = point.X;
+        if (movesTop) t = point.Y;
+        if (movesBottom) b = point.Y;
 
         int left = Math.Min(l, r), right = Math.Max(l, r);
         int top = Math.Min(t, b), bottom = Math.Max(t, b);

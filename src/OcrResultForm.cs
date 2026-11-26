@@ -1128,7 +1128,7 @@ public sealed class OcrResultForm : Form
     }
 
     /// <summary>
-    /// 译文面板命中: 关闭图标与「复制译文」优先于整块拖动。
+    /// 译文面板命中: 关闭图标与「复制译文」优先于整块拖动; 未命中返回 <see cref="TranslationBarHit.None"/>。
     /// 复制按钮在不可复制时退化为普通面板区域 (拖动窗口), 不会静默复制错误内容。
     /// </summary>
     private TranslationBarHit HitTranslationBar(Point clientPoint)
@@ -1201,7 +1201,7 @@ public sealed class OcrResultForm : Form
 
     // ===== 鼠标交互 =====
 
-    /// <summary>鼠标命中检测: 客户区坐标换算到原图坐标后, 从上层到下层的四边形逐个测试</summary>
+    /// <summary>鼠标命中检测: 客户区坐标换算到原图坐标后, 从上层到下层的四边形逐个测试; 未命中返回 -1</summary>
     private int HitTest(Point clientPt)
     {
         if (!_ocrDone)
@@ -1501,8 +1501,7 @@ public sealed class OcrResultForm : Form
 
         if ((Control.ModifierKeys & Keys.Shift) != 0)
         {
-            if (_selected.Contains(hit)) _selected.Remove(hit);
-            else _selected.Add(hit);
+            if (!_selected.Remove(hit)) _selected.Add(hit);
             // Shift 取消最后一行时, 行内部分选区可能仍指向它: 不清掉就会变成看不见的选区
             if (_partial is { } stale && !_selected.Contains(stale.Line))
                 _partial = null;
@@ -1927,7 +1926,7 @@ public sealed class OcrResultForm : Form
     private bool _wordOrder = true;
 
     /// <summary>当前结果转成可排序的行集合; 按设置决定是否重排</summary>
-    private IReadOnlyList<OcrText.Line> CurrentLines()
+    private List<OcrText.Line> CurrentLines()
     {
         var rows = _lines.Where(l => !string.IsNullOrEmpty(l.Text)).Select(OcrText.ToLine).ToList();
         return _wordOrder ? OcrText.SortReadingOrder(rows) : rows;
@@ -2374,7 +2373,10 @@ public sealed class OcrResultForm : Form
                     ApplyOcrSuccess(result.Lines);
                 });
             }
-            catch (OperationCanceledException) { }
+            catch (OperationCanceledException)
+            {
+                // 重试/关窗会取消上一轮: 取消是正常路径, 不进失败态
+            }
             catch (Exception ex)
             {
                 this.TryBeginInvoke(() => ApplyOcrFailure(ex.Message));

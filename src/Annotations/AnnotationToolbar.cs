@@ -774,7 +774,7 @@ public sealed class AnnotationToolbar : Control
         return -1;
     }
 
-    /// <summary>命中哪个操作按钮</summary>
+    /// <summary>命中哪个操作按钮 (返回操作名; 未命中返回空串)</summary>
     private string HitAction(Point p)
     {
         if (_styleRect.Contains(p)) return "style";
@@ -856,7 +856,10 @@ public sealed class AnnotationToolbar : Control
     /// 绘制按钮底衬: 选中 = 蓝色圆角块, 悬停 = 半透明白圆角块, 其余不画。
     /// 工具按钮/线宽按钮/图标按钮共用, 保证三类按钮的高亮观感一致。
     /// </summary>
+    /// <param name="g">目标画布</param>
+    /// <param name="rect">按钮矩形</param>
     /// <param name="active">是否为当前选中项 (优先于悬停)</param>
+    /// <param name="hover">指针是否悬停</param>
     private static void DrawButtonBackdrop(Graphics g, Rectangle rect, bool active, bool hover)
     {
         Color? fill = active

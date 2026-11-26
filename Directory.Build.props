@@ -1,0 +1,17 @@
+<Project>
+
+  <!--
+    全仓统一的静态分析级别。
+    放在根目录是为了让 src / 两个自检工程 / DriveTest 用同一套规则 ——
+    只给产品工程开会变成"AOT 工程干净、测试工程一堆警告", 规范形同虚设。
+    分析器只报 warning, 不阻断构建 (现有代码在 latest-recommended 下尚有存量告警)。
+  -->
+  <PropertyGroup>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <RunAnalyzersDuringBuild>true</RunAnalyzersDuringBuild>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <CodeAnalysisTreatWarningsAsErrors>false</CodeAnalysisTreatWarningsAsErrors>
+  </PropertyGroup>
+
+</Project>

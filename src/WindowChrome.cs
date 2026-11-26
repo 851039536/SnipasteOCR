@@ -7,7 +7,7 @@ namespace SnipasteOcr;
 /// 需要显式声明 <c>DWMWA_WINDOW_CORNER_PREFERENCE</c>; 该属性带抗锯齿, 观感最好。
 ///
 /// Win10 没有这个能力 (DwmSetWindowAttribute 直接失败, 窗口仍是直角)。为了让
-/// "圆角"这条视觉语言在 Win10 上也成立, 这里退回 <see cref="Form.Region"/> 硬裁剪:
+/// "圆角"这条视觉语言在 Win10 上也成立, 这里退回 <c>Form.Region</c> 硬裁剪:
 /// 边缘是 1px 台阶而不是抗锯齿曲线, 但在 8px 半径下几乎看不出来;
 /// Region 只在窗口尺寸/DPI 变化时重建, 不参与每次重绘。
 ///

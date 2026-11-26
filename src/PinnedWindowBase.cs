@@ -10,7 +10,7 @@ namespace SnipasteOcr;
 /// 抽基类是为了让 DPI 与拖拽这两块踩过坑的逻辑只存在一份。
 ///
 /// DPI 的关键约束 (来自 PinnedImageForm 的实测):
-/// - <see cref="ClientSize"/> 只能在 <c>OnLoad</c> / <c>OnDpiChanged</c> 落,
+/// - <c>ClientSize</c> 只能在 <c>OnLoad</c> / <c>OnDpiChanged</c> 落,
 ///   不能在 <c>OnHandleCreated</c> 设 —— CreateHandle 之后 WinForms 还会按旧的非客户区
 ///   再改一次尺寸 (300x200 会被改回 300x239)。
 /// - DPI 因子必须取窗口自身的 <see cref="Control.DeviceDpi"/>, 不能用
@@ -141,7 +141,7 @@ public abstract class PinnedWindowBase : Form
         else
             style &= ~(long)User32.WS_EX_TRANSPARENT;
 
-        User32.SetWindowLongPtr(Handle, User32.GWL_EXSTYLE, (IntPtr)style);
+        User32.SetWindowLongPtr(Handle, User32.GWL_EXSTYLE, new IntPtr(style));
 
         // 改扩展样式后必须走一次 SetWindowPos, 否则系统不会重新计算命中测试
         User32.SetWindowPos(Handle, IntPtr.Zero, 0, 0, 0, 0,

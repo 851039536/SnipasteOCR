@@ -20,6 +20,10 @@
     <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
     <IsAotCompatible>true</IsAotCompatible>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- 生成 XML 文档, 让 cref 断链 (CS1574) 与游离 doc (CS1587) 在构建期暴露 -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- CS1591: 公开成员缺注释。类型级注释已在第三轮补齐, 成员级不强制 -->
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
     <!-- SimdPaddleOCR 官方要求: x64 AOT 必须指定 avx2, 否则 SIMD 内核被裁掉 -->
     <IlcInstructionSet>avx2</IlcInstructionSet>
     <!-- .NET 10: 显式允许 WinForms 参与裁剪 (官方支持, 本应用不使用设计器/反射加载控件) -->

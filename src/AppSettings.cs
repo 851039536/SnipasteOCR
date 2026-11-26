@@ -39,7 +39,7 @@ public sealed class AppSettings
     public int HotKeyImage { get; set; } = DefaultHotKeyImage;
 
     /// <summary>截图识别热键的修饰符 (0 = 无; MOD_ALT=1, MOD_CONTROL=2, MOD_SHIFT=4, MOD_WIN=8)</summary>
-    public int HotKeyModifiers { get; set; } = 0;
+    public int HotKeyModifiers { get; set; }
 
     /// <summary>
     /// 截图标注热键的修饰符。
@@ -113,7 +113,7 @@ public sealed class AppSettings
     WriteIndented = true,
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(AppSettings))]
-internal partial class SettingsJsonContext : JsonSerializerContext
+internal sealed partial class SettingsJsonContext : JsonSerializerContext
 {
 }
 

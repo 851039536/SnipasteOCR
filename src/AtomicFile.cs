@@ -16,6 +16,7 @@ public static class AtomicFile
 {
     /// <summary>原子写入字节数组</summary>
     /// <param name="path">目标路径 (目录不存在会自动创建)</param>
+    /// <param name="bytes">完整文件内容</param>
     public static void WriteAllBytes(string path, byte[] bytes)
     {
         string full = Path.GetFullPath(path);

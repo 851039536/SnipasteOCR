@@ -4,22 +4,37 @@ using SnipasteOcr.Native;
 namespace SnipasteOcr;
 
 /// <summary>
-/// 应用入口: 托盘 + 全局热键 + 手动消息循环 (NativeAOT 下 MessageLoop.Run 不可用)
+/// 应用入口: 托盘 + 全局热键 + 手动消息循环 (NativeAOT 下 MessageLoop.Run 不可用)。
+/// 未处理异常与启动失败写入 <see cref="AppLog"/> (last-error.log), 正常路径不写盘。
 /// </summary>
 internal static class Program
 {
     private static Mutex? _singleInstanceMutex;
 
-    [STAThread]
     /// <summary>
     /// 程序入口: 单实例检查 -> 托盘/热键初始化 -> 手动消息循环
     /// </summary>
+    [STAThread]
     private static int Main(string[] args)
     {
         try
         {
             ApplicationConfiguration.Initialize();
             // WinForms 全局初始化 (DPI 感知/默认控件行为)
+
+            // 崩溃兜底: 未处理异常至少留下一条现场, 而不是"托盘图标突然消失"。
+            // CatchException 下记录后继续运行 (托盘工具静默退出比弹窗更糟);
+            // AppDomain.UnhandledException 只能记录, 无法阻止进程终止, 因此不弹窗。
+            Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+            Application.ThreadException += (_, e) =>
+            {
+                AppLog.Write("UI 线程未处理异常", e.Exception);
+                MessageBox.Show(
+                    "程序遇到未处理的错误，已记录到日志：\n" + AppLog.FilePath,
+                    "SnipasteOCR", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            };
+            AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+                AppLog.Write("后台线程未处理异常", e.ExceptionObject as Exception);
 
             _singleInstanceMutex = new Mutex(true, @"Local\SnipasteOcr.SingleInstance", out bool createdNew);
             // 命名 Mutex 防多开: 已存在则提示后退出
@@ -231,6 +246,7 @@ internal static class Program
         }
         catch (Exception ex)
         {
+            AppLog.Write("启动失败", ex);
             MessageBox.Show("启动失败：\n" + ex, "SnipasteOCR", MessageBoxButtons.OK, MessageBoxIcon.Error);
             return 1;
         }

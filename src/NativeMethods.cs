@@ -1,19 +1,25 @@
 using System.Runtime.InteropServices;
 using System.Text;
 
-/// <summary>
-/// Win32 P/Invoke 声明集: 消息循环 / 热键 / 窗口 / 菜单 / 托盘 / 输入模拟。
-/// 用于 NativeAOT 手动消息循环与纯 Win32 托盘实现
-/// </summary>
+// Win32 常量/入口名必须与 Windows SDK 逐字一致 (WM_*/TPM_*/RegisterClassEx...),
+// P/Invoke 也必须是 public 才能被同程序集的调用方使用 —— 这三条分析器规则在此文件不适用。
+#pragma warning disable CA1707 // 标识符不应包含下划线
+#pragma warning disable CA1401 // P/Invoke 不应可见
+#pragma warning disable CA1711 // 标识符不应以 Ex/Delegate 结尾
+
+// Win32 P/Invoke 声明集: 消息循环 / 热键 / 窗口 / 菜单 / 托盘 / 输入模拟。
+// 用于 NativeAOT 手动消息循环与纯 Win32 托盘实现。
+// (文件级注释不写 XML doc: 它不挂在任何类型上, 开了文档生成会报 CS1587)
 namespace SnipasteOcr.Native;
 
-    /// <summary>热键 ID (传给 RegisterHotKey, WM_HOTKEY 消息 wParam 返回)</summary>
+/// <summary>热键 ID (传给 RegisterHotKey, WM_HOTKEY 消息 wParam 返回)</summary>
 public enum HotKeyId
 {
     SnipOcr = 0xB001,
     SnipImage = 0xB002,
 }
 
+/// <summary>user32.dll 的窗口、消息、热键、菜单与托盘宿主 P/Invoke 集合</summary>
 public static class User32
 {
     // ===== 消息常量 =====
@@ -64,6 +70,7 @@ public static class User32
 
     // ===== 结构体 =====
 
+    /// <summary>Win32 消息结构 (字段顺序必须与 SDK 一致, 否则 PeekMessage 读错)</summary>
     [StructLayout(LayoutKind.Sequential)]
     public struct MSG
     {
@@ -75,6 +82,7 @@ public static class User32
         public System.Drawing.Point pt;
     }
 
+    /// <summary>窗口类注册结构; CharSet=Unicode 让字符串字段走 W 入口</summary>
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     public struct WNDCLASSEX
     {
@@ -124,119 +132,119 @@ public static class User32
     /// <summary>阻止按键继续传递给下层窗口 (避免触发目标程序自身的快捷键)</summary>
     public const uint MOD_NOREPEAT = 0x4000;
 
+    /// <summary>注册全局热键 (fsModifiers 用 MOD_* 组合, vk 为虚拟键码)</summary>
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    /// <summary>注册全局热键 (fsModifiers 用 MOD_* 组合, vk 为虚拟键码)</summary>
     public static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
 
+    /// <summary>注销热键</summary>
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    /// <summary>注销热键</summary>
     public static extern bool UnregisterHotKey(IntPtr hWnd, int id);
 
-    [DllImport("user32.dll")]
     /// <summary>释放鼠标捕获 (贴图窗口靠它把拖动交给系统的标题栏拖拽逻辑)</summary>
+    [DllImport("user32.dll")]
     public static extern bool ReleaseCapture();
 
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     /// <summary>发送窗口消息 (与 ReleaseCapture 配合发起 WM_NCLBUTTONDOWN 拖动)</summary>
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     public static extern IntPtr SendMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
 
     // ===== 窗口类 / 窗口 =====
 
-    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     /// <summary>注册窗口类; 成功返回类原子号, 失败 0</summary>
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     public static extern ushort RegisterClassEx(ref WNDCLASSEX lpwcx);
 
-    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     /// <summary>创建窗口 (含扩展样式), 返回窗口句柄</summary>
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     public static extern IntPtr CreateWindowEx(
         uint dwExStyle, string lpClassName, string lpWindowName, uint dwStyle,
         int x, int y, int nWidth, int nHeight,
         IntPtr hWndParent, IntPtr hMenu, IntPtr hInstance, IntPtr lpParam);
 
-    [DllImport("user32.dll")]
     /// <summary>默认窗口过程: 未处理的系统消息交给系统 (默认光标/边框/销毁等)</summary>
+    [DllImport("user32.dll")]
     public static extern IntPtr DefWindowProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
 
+    /// <summary>销毁窗口 (异步, 会发 WM_DESTROY)</summary>
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
-    /// <summary>销毁窗口 (异步, 会发 WM_DESTROY)</summary>
     public static extern bool DestroyWindow(IntPtr hWnd);
 
+    /// <summary>显示/隐藏窗口; SW_HIDE 隐藏, SW_SHOWNA 显示但不抢焦点</summary>
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
-    /// <summary>显示/隐藏窗口; SW_HIDE 隐藏, SW_SHOWNA 显示但不抢焦点</summary>
     public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 
     public const int SW_HIDE = 0;
     public const int SW_SHOWNA = 8;
 
-    [DllImport("user32.dll")]
     /// <summary>把窗口设为前台 (弹菜单前必须, 否则菜单立即消失)</summary>
+    [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool SetForegroundWindow(IntPtr hWnd);
 
     // 本项目仅发布 win-x64, 因此直接绑 *PtrW 版本 (32 位下这两个入口不存在)
-    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW", SetLastError = true)]
     /// <summary>读取窗口属性 (扩展样式用 <see cref="GWL_EXSTYLE"/>)</summary>
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW", SetLastError = true)]
     public static extern IntPtr GetWindowLongPtr(IntPtr hWnd, int nIndex);
 
-    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW", SetLastError = true)]
     /// <summary>写入窗口属性; 改样式后必须再 SetWindowPos(SWP_FRAMECHANGED) 才会生效</summary>
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW", SetLastError = true)]
     public static extern IntPtr SetWindowLongPtr(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
 
+    /// <summary>改变窗口位置/尺寸/Z 序/样式生效; 鼠标穿透切换后必须调一次</summary>
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    /// <summary>改变窗口位置/尺寸/Z 序/样式生效; 鼠标穿透切换后必须调一次</summary>
     public static extern bool SetWindowPos(
         IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint uFlags);
 
     // ===== 菜单 =====
 
-    [DllImport("user32.dll", SetLastError = true)]
     /// <summary>创建弹出菜单</summary>
+    [DllImport("user32.dll", SetLastError = true)]
     public static extern IntPtr CreatePopupMenu();
 
+    /// <summary>追加菜单项 (文本项传 ID, 分隔线传 MF_SEPARATOR + 空文本)</summary>
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    /// <summary>追加菜单项 (文本项传 ID, 分隔线传 MF_SEPARATOR + 空文本)</summary>
     public static extern bool AppendMenu(IntPtr hMenu, uint uFlags, IntPtr uIdNewItem, string? lpNewItem);
 
+    /// <summary>销毁菜单</summary>
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
-    /// <summary>销毁菜单</summary>
     public static extern bool DestroyMenu(IntPtr hMenu);
 
-    [DllImport("user32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
     /// <summary>
     /// 在 [first..last] 位置区间内做单选互斥: 把 check 项标为圆点选中, 其余清空。
     /// 用于托盘菜单的模型档位切换 (Medium / Tiny 二选一)。
     /// </summary>
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool CheckMenuRadioItem(
         IntPtr hMenu, uint idFirst, uint idLast, uint idCheck, uint uFlags);
 
-    [DllImport("user32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
     /// <summary>
     /// 设置/清除单个菜单项的勾选 (复选项用, 配合 MF_BYCOMMAND + MF_CHECKED/MF_UNCHECKED)。
     /// 与 <see cref="CheckMenuRadioItem"/> 的区别: 前者是区间内单选, 本方法是单项独立复选。
     /// </summary>
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool CheckMenuItem(IntPtr hMenu, uint uIDCheckItem, uint uCheck);
 
-    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-    [return: MarshalAs(UnmanagedType.Bool)]
     /// <summary>
     /// 修改已存在菜单项的文本 (档位切换后用新名称刷新, 如追加当前档位)。
     /// 必须显式 CharSet.Unicode: 否则默认按 ANSI 绑定 ModifyMenuA, 中文文本会乱码
     /// (AppendMenu 同理, 已在上面指定)。
     /// </summary>
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool ModifyMenu(
         IntPtr hMenu, uint uPosition, uint uFlags, IntPtr uIDNewItem, string? lpNewItem);
 
+    /// <summary>在指定屏幕坐标弹出菜单并阻塞等待选择; TPM_RETURNCMD 时返回选中项的命令 ID (0 = 取消)</summary>
     [DllImport("user32.dll", SetLastError = true)]
-    /// <summary>在指定屏幕坐标弹出菜单并阻塞等待选择; TPM_RETURNCMD 时返回可见项位置(0基)</summary>
     public static extern int TrackPopupMenuEx(
     IntPtr hMenu,
     uint uFlags,
@@ -248,18 +256,24 @@ public static class User32
     // ===== 图标 =====
 
 
+    /// <summary>向窗口异步投递消息 (弹菜单后补一个 WM_NULL, 让主循环知道菜单已处理完毕)</summary>
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    /// <summary>向窗口异步投递消息 (弹菜单后补一个 WM_NULL, 让主循环知道菜单已处理完毕)</summary>
     public static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+    /// <summary>销毁图标句柄</summary>
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
-    /// <summary>销毁图标句柄</summary>
     public static extern bool DestroyIcon(IntPtr handle);
 }
 
+/// <summary>shell32.dll 的托盘图标 API</summary>
 public static class Shell32
 {
+    /// <summary>
+    /// 托盘图标数据结构。
+    /// 字段顺序与 <c>SizeConst</c> 必须与 SDK 完全一致, 否则 Shell_NotifyIcon 会静默失败
+    /// (图标不出现且没有任何错误提示)。新增字段只能追加在末尾。
+    /// </summary>
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     public struct NOTIFYICONDATA
     {
@@ -302,6 +316,7 @@ public static class Shell32
 /// <summary>Win32 窗口过程委托 (必须静态持有引用, 防止被 GC 回收)</summary>
 public delegate IntPtr WndProcDelegate(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
 
+/// <summary>kernel32.dll: 模块句柄、线程 ID 与防休眠状态</summary>
 public static class Kernel32
 {
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
@@ -332,6 +347,7 @@ public static class Kernel32
     public static extern uint SetThreadExecutionState(uint esFlags);
 }
 
+/// <summary>前台窗口与焦点挂接 (覆盖层必须在 OnShown 里抢前台, 否则打字没反应)</summary>
 public static class Foreground
 {
     public const uint WM_NULL = 0x0000;
@@ -346,13 +362,15 @@ public static class Foreground
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
 
-    [DllImport("user32.dll", SetLastError = true)]
     /// <summary>把键盘焦点设到指定窗口 (须与 SetForegroundWindow 配合; 只对同线程窗口或已挂接线程有效)</summary>
+    [DllImport("user32.dll", SetLastError = true)]
     public static extern IntPtr SetFocus(IntPtr hWnd);
 }
 
+/// <summary>光标屏幕坐标</summary>
 public static class CursorPos
 {
+    /// <summary>Win32 POINT 结构</summary>
     [StructLayout(LayoutKind.Sequential)]
     public struct POINT { public int x, y; }
 
@@ -387,8 +405,8 @@ public static class Dwmapi
         {
             _ = DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, ref preference, sizeof(int));
         }
-        catch (DllNotFoundException) { }
-        catch (EntryPointNotFoundException) { }
+        catch (DllNotFoundException) { /* Win7 无 dwmapi: 保持直角 */ }
+        catch (EntryPointNotFoundException) { /* Win10 无该属性: 保持直角 */ }
     }
 
     /// <summary>
@@ -405,7 +423,7 @@ public static class Dwmapi
         {
             _ = DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, ref enabled, sizeof(int));
         }
-        catch (DllNotFoundException) { }
-        catch (EntryPointNotFoundException) { }
+        catch (DllNotFoundException) { /* Win7 无 dwmapi: 保持直角 */ }
+        catch (EntryPointNotFoundException) { /* Win10 无该属性: 保持直角 */ }
     }
 }

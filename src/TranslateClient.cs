@@ -8,7 +8,7 @@ using System.Text.Json.Serialization;
 namespace SnipasteOcr;
 
 /// <summary>一次翻译的结果; 失败时 <see cref="Error"/> 是可直接展示给用户的中文提示</summary>
-/// <param name="Echo">译文与原文语言相同 (模型没翻), 界面要如实标注而不是当成好译文</param>
+/// <remarks>Echo: 译文与原文语言相同 (模型没翻), 界面要如实标注而不是当成好译文。</remarks>
 internal sealed record TranslateResult(
     bool Ok, string Text, string? Error, int PromptTokens, int CompletionTokens,
     bool Truncated = false, bool Echo = false)
@@ -368,6 +368,7 @@ internal static class TranslateClient
 
 // ===== 请求/响应 DTO (全部由源生成上下文处理) =====
 
+/// <summary>chat/completions 请求体</summary>
 internal sealed class TranslateRequest
 {
     public string Model { get; set; } = "";
@@ -377,17 +378,20 @@ internal sealed class TranslateRequest
     public ThinkingOption Thinking { get; set; } = new();
 }
 
+/// <summary>一条对话消息 (system / user)</summary>
 internal sealed class ChatMessage
 {
     public string Role { get; set; } = "";
     public string? Content { get; set; }
 }
 
+/// <summary>思考模式开关; 固定 disabled, 否则费用与延迟放大 3~10 倍</summary>
 internal sealed class ThinkingOption
 {
     public string Type { get; set; } = "disabled";
 }
 
+/// <summary>chat/completions 响应体 (成功取 choices, 失败取 error)</summary>
 internal sealed class TranslateResponse
 {
     public Choice[]? Choices { get; set; }
@@ -395,12 +399,14 @@ internal sealed class TranslateResponse
     public Usage? Usage { get; set; }
 }
 
+/// <summary>一个候选回复; FinishReason=length 表示被 MaxTokens 截断</summary>
 internal sealed class Choice
 {
     public ChatMessage? Message { get; set; }
     public string? FinishReason { get; set; }
 }
 
+/// <summary>API 错误体; 只把中文可操作提示给用户, 原始 JSON 不进界面</summary>
 internal sealed class ApiError
 {
     public string? Message { get; set; }
@@ -408,6 +414,7 @@ internal sealed class ApiError
     public string? Code { get; set; }
 }
 
+/// <summary>本次请求的 token 用量 (仅诊断展示, 不参与计费逻辑)</summary>
 internal sealed class Usage
 {
     public int PromptTokens { get; set; }
@@ -423,6 +430,6 @@ internal sealed class Usage
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.SnakeCaseLower)]
 [JsonSerializable(typeof(TranslateRequest))]
 [JsonSerializable(typeof(TranslateResponse))]
-internal partial class TranslateJsonContext : JsonSerializerContext
+internal sealed partial class TranslateJsonContext : JsonSerializerContext
 {
 }

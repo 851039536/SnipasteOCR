@@ -1,6 +1,7 @@
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.Drawing.Text;
+using System.Globalization;
 using System.Runtime.InteropServices;
 
 namespace SnipasteOcr.Annotations;
@@ -44,7 +45,7 @@ public static class AnnotationEngine
     /// </summary>
     public static float StepBadgeRadius(int number, float fontSize)
     {
-        int digits = Math.Max(1, number).ToString().Length;
+        int digits = Math.Max(1, number).ToString(CultureInfo.InvariantCulture).Length;
         return fontSize * (0.95f + 0.35f * (digits - 1));
     }
 
@@ -538,7 +539,7 @@ public static class AnnotationEngine
             g.DrawEllipse(ring, bounds);
 
         DrawCenteredText(
-            g, a.Number.ToString(), bounds, MathF.Max(8f, a.FontSize * 0.9f), contrast);
+            g, a.Number.ToString(CultureInfo.InvariantCulture), bounds, MathF.Max(8f, a.FontSize * 0.9f), contrast);
     }
 
     /// <summary>把单行文字按字形轮廓居中绘制到指定矩形 (不走 TextRenderer, 理由见 DrawText)</summary>

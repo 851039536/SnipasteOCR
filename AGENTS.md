@@ -21,7 +21,7 @@ src/                       产品代码 (唯一的出货工程, 也是唯一的 
   OcrModelProfile.cs       模型档位枚举 (单独成文件, 便于设置自检不链接 OCR 引擎)
   OcrResultForm.cs         结果窗口: 框叠加、字符级拖选、缩放联动
   OcrText.cs               结果后处理: 阅读顺序排序、段落/CSV/Markdown 导出 (纯函数)
-  OcrTable.cs              表格网格中间模型 (CSV/XLSX/Markdown 表格的唯一来源)
+  OcrTable.cs              表格网格中间模型 (CSV/Markdown 表格的唯一来源)
   AtomicFile.cs            原子写入 (同目录临时文件 + Move; 图片与字节)
   OcrBox.cs                检测框四角几何辅助 (5 处调用点共用)
   OcrSelection.cs          选词几何纯函数 (字符索引反解 / 多选阅读顺序名次)
@@ -170,7 +170,7 @@ dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
 | 唯一来源 | 覆盖的调用点 |
 | --- | --- |
 | `OcrTableBuilder.ClusterRows`(内部共用) | 阅读顺序排序 **和** 表格网格 **和** 段落/Markdown 导出的分行 |
-| `OcrTableBuilder.Build` | 表格网格 → CSV **和** Markdown 表格 **和** XLSX 导出 (三种格式不得各自重算分行分列) |
+| `OcrTableBuilder.Build` | 表格网格 → CSV **和** Markdown 表格 (两种格式不得各自重算分行分列) |
 | `AnnotationHit.Tolerance` | 点选 **和** 拖动 **和** 悬停光标命中判定 (容差不得各取常数) |
 | `SelectionResize` | 选区 8 手柄的命中 **和** 拖拽几何 (纯逻辑像素; 导出换算仍只走 `SnipGeometry.ExportRect`) |
 | `PinnedImageLayout` | 贴图初始尺寸 **和** 滚轮缩放 **和** DPI 变化 **和** 缩放锚点 (同一套换算) |

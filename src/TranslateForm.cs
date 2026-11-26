@@ -162,6 +162,10 @@ internal sealed class TranslateForm : Form
     /// <summary>
     /// 后台发起翻译; 结果回到 UI 线程。窗口在等待期间仍可拖动/关闭,
     /// 关闭时 <see cref="_cts"/> 取消请求, 不会在已销毁的控件上更新文本。
+    /// <para>
+    /// 允许 <c>async void</c>: 它是 Shown 事件的实际处理器, 且方法体全程在
+    /// try/catch/finally 内 (取消与失败都在内部落地), 不会产生未观察异常。
+    /// </para>
     /// </summary>
     private async void StartTranslation()
     {

@@ -216,7 +216,7 @@ public sealed class Annotation
         return best;
     }
 
-    /// <summary>点到线段距离 <= tol 判定命中</summary>
+    /// <summary>点到线段距离不超过 tol 判定命中</summary>
     private static bool HitSegment(PointF pt, PointF a, PointF b, float tol)
         => DistanceToSegment(pt, a, b) <= tol;
 
