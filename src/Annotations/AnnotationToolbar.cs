@@ -140,7 +140,7 @@ public sealed class AnnotationToolbar : Control
     private bool StylePopupOpen => _stylePopup is { Visible: true };
 
     /// <summary>
-    /// 悬停提示。工具栏只有图标, 快捷键 (1-6 / Ctrl+Z / 回车 / Esc) 只写在 README 里,
+    /// 悬停提示。工具栏只有图标, 快捷键 (1-8 / Ctrl+Z / 回车 / Esc) 只写在 README 里,
     /// 不悬停说明一遍用户无从发现。整个控件共用一个 ToolTip, 悬停项变化时更新文本。
     /// </summary>
     private readonly ToolTip _toolTip = new()

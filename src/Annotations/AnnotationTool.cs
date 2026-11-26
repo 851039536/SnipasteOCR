@@ -67,11 +67,6 @@ public static class AnnotationToolInfo
         _ => AnnotationTool.None,
     };
 
-    /// <summary>该工具是否为「按住拖拽出形状」的类型</summary>
-    public static bool IsDragShape(AnnotationTool tool) =>
-        tool is AnnotationTool.Rectangle or AnnotationTool.Ellipse
-             or AnnotationTool.Arrow or AnnotationTool.Mosaic;
-
     /// <summary>拖拽时的 Ctrl 约束说明 (无约束返回空串); 与 <see cref="AnnotationDrag"/> 的能力对应</summary>
     public static string ConstraintHint(AnnotationTool tool) => tool switch
     {

@@ -229,13 +229,7 @@ internal static class TranslateClient
     internal readonly record struct TranslationDirection(string Target, string Label, bool Auto);
 
     /// <summary>
-    /// 解析目标语言。配置为「自动」时按原文判断方向:
-    /// 中文原文 → English, 英文原文 → 简体中文。
-    /// 显式配置的目标语言原样返回, 不做任何猜测。
-    /// </summary>
-    /// <summary>
     /// 翻译是否已配置可用: 已同意联网且 Key 能解密。
-    /// 设置对话框与结果窗口的单击路径共用这一条判据, 避免"设置允许开启、点击才发现不可用"。
     /// 只读检查, 不弹任何对话框。
     /// </summary>
     internal static bool IsReady(string protectedKey, bool consentGiven)
@@ -243,6 +237,11 @@ internal static class TranslateClient
            ProtectedKey.TryUnprotect(protectedKey, out string key) &&
            !string.IsNullOrWhiteSpace(key);
 
+    /// <summary>
+    /// 解析目标语言。配置为「自动」时按原文判断方向:
+    /// 中文原文 → English, 英文原文 → 简体中文。
+    /// 显式配置的目标语言原样返回, 不做任何猜测。
+    /// </summary>
     internal static TranslationDirection ResolveDirection(string text, string configuredTarget)
     {
         string configured = configuredTarget?.Trim() ?? "";

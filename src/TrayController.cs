@@ -11,8 +11,8 @@ namespace SnipasteOcr;
 /// </summary>
 public sealed class TrayController : IDisposable
 {
-    // 注意: TPM_RETURNCMD 时 TrackPopupMenu 返回的是菜单项"位置"而不是命令ID,
-    // 所以这里按可见项位置赋值 (截图识别=0 位置会撞"取消", 用 +0x1000 偏移规避)
+    // TrackPopupMenuEx 配 TPM_RETURNCMD 时返回的是选中项的"命令 ID", 0 表示取消/点空白。
+    // 因此菜单项 ID 从 0x1000 起编, 避免任何一项与"取消"的 0 撞上。
     private const int CMD_SNIP_OCR = 0x1000;
     private const int CMD_SNIP_IMAGE = 0x1001;
     private const int CMD_EXIT = 0x1002;
@@ -262,7 +262,7 @@ public sealed class TrayController : IDisposable
         if (attached)
             Foreground.AttachThreadInput(curThread, fgThread, false);
 
-        // TPM_RETURNCMD 返回的是可见项位置(0基), 0=取消; 用 QueryMenuItemInfo 还原命令ID
+        // cmd 已经是菜单项的命令 ID (0 = 取消/点空白), 可直接与 CMD_* 比较
 
         switch (cmd)
         {

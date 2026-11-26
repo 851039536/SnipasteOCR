@@ -19,7 +19,6 @@ public static class User32
     // ===== 消息常量 =====
     public const uint WM_HOTKEY = 0x0312;
     public const uint WM_APP = 0x8000;
-    public const int WM_DESTROY = 0x0002;
     public const int WM_NCLBUTTONDOWN = 0x00A1;
     public const int WM_COMMAND = 0x0111;
     public const int HTCAPTION = 2;
@@ -31,8 +30,6 @@ public static class User32
     /// 等于从未设置过 (贴图用字面量躲开了, 托盘宿主窗口则一直是"可激活"状态)。
     /// </summary>
     public const uint WS_EX_NOACTIVATE = 0x08000000;
-    /// <summary>分层窗口; 设置透明度或鼠标穿透的前提</summary>
-    public const uint WS_EX_LAYERED = 0x00080000;
     /// <summary>鼠标穿透: 命中测试直接落到下层窗口, 本窗口收不到任何鼠标消息</summary>
     public const uint WS_EX_TRANSPARENT = 0x00000020;
     /// <summary>扩展样式索引 (GetWindowLongPtr / SetWindowLongPtr)</summary>
@@ -42,23 +39,14 @@ public static class User32
     public const uint SWP_NOSIZE = 0x0001;
     public const uint SWP_NOMOVE = 0x0002;
     public const uint SWP_NOZORDER = 0x0004;
-    public const uint SWP_NOACTIVATE = 0x0010;
     public const uint SWP_FRAMECHANGED = 0x0020;
     public const uint WM_LBUTTONDBLCLK = 0x0203;
     public const uint TPM_LEFTALIGN = 0;
-    public const uint TPM_TOPMOST = 0x0200;
     public const uint TPM_RETURNCMD = 0x0100;
-    public const uint TPM_CENTERALIGN = 0x0004;
-    public const uint TPM_RIGHTALIGN = 0x0008;
 
     public const uint TPM_TOPALIGN = 0x0000;
-    public const uint TPM_VCENTERALIGN = 0x0010;
-    public const uint TPM_BOTTOMALIGN = 0x0020;
 
-    public const uint TPM_LEFTBUTTON = 0x0000;
     public const uint TPM_RIGHTBUTTON = 0x0002;
-
-
 
     // ===== 菜单常量 =====
     public const uint MF_STRING = 0;
@@ -71,10 +59,6 @@ public static class User32
     public const uint MF_RADIOCHECK = 0x00000200;
     /// <summary>该项是子菜单: uIdNewItem 位置传子菜单句柄</summary>
     public const uint MF_POPUP = 0x00000010;
-    /// <summary>禁用菜单项 (变灰不可点)</summary>
-    public const uint MF_GRAYED = 0x00000001;
-    /// <summary>按位置查找菜单项</summary>
-    public const uint MF_BYPOSITION = 0x00000400;
     /// <summary>按命令 ID 查找菜单项</summary>
     public const uint MF_BYCOMMAND = 0x00000000;
 
@@ -108,18 +92,10 @@ public static class User32
         public IntPtr hIconSm;
     }
 
-    [StructLayout(LayoutKind.Sequential)]
-    public struct RECT
-    {
-        public int Left, Top, Right, Bottom;
-    }
-
     // ===== 消息循环 =====
 
-    // winuser.h: PM_NOREMOVE 0x0000 / PM_REMOVE 0x0001 / PM_NOYIELD 0x0002
-    public const uint PM_NOREMOVE = 0x0000;
+    // winuser.h: PM_REMOVE 0x0001
     public const uint PM_REMOVE = 0x0001;
-    public const uint PM_NOYIELD = 0x0002;
 
     /// <summary>从消息队列取消息; hWnd=0 取当前线程全部消息, PM_REMOVE 表示取出</summary>
     [DllImport("user32.dll", SetLastError = true)]
@@ -356,37 +332,6 @@ public static class Kernel32
     public static extern uint SetThreadExecutionState(uint esFlags);
 }
 
-public static class Input
-{
-    [StructLayout(LayoutKind.Sequential)]
-    public struct KEYBDINPUT
-    {
-        public ushort wVk;
-        public ushort wScan;
-        public uint dwFlags;
-        public uint dwTime;
-        public IntPtr dwExtraInfo;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    public struct INPUT
-    {
-        public uint type;
-        public KEYBDINPUT ki;
-    }
-
-    [DllImport("user32.dll", SetLastError = true)]
-    public static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
-
-    /// <summary>模拟一次按下+释放 F1/F3</summary>
-    public static void SendKey(ushort vk)
-    {
-        var down = new INPUT { type = 0 }; down.ki.wVk = vk;
-        var up = new INPUT { type = 0 }; up.ki.wVk = vk; up.ki.dwFlags = 2;
-        SendInput(2, new[] { down, up }, System.Runtime.InteropServices.Marshal.SizeOf<INPUT>());
-    }
-}
-
 public static class Foreground
 {
     public const uint WM_NULL = 0x0000;
@@ -414,37 +359,6 @@ public static class CursorPos
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool GetCursorPos(out POINT lpPoint);
-}
-
-public static class Menu
-{
-    [StructLayout(LayoutKind.Sequential)]
-    public struct MENUITEMINFOW
-    {
-        public uint cbSize;
-        public uint fMask;
-        public uint fType;
-        public uint fState;
-        public uint wID;
-        public IntPtr hSubMenu;
-        public IntPtr hbmpChecked;
-        public IntPtr hbmpUnchecked;
-        public IntPtr dwItemData;
-        [MarshalAs(UnmanagedType.LPWStr)] public string? dwTypeData;
-        public uint cch;
-        public int iBitmap;
-        public IntPtr hbmpItem;
-        public uint dwStateBitsMask;
-        public uint dwStateNid;
-        public IntPtr dwTypeDataExtra;
-    }
-
-    public const uint MIIM_ID = 0x00000002;
-    public const int MFI_UNCHECKED = 0x0000;
-
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool QueryMenuItemInfo(IntPtr hMenu, uint uItemID, bool fByPosition, ref MENUITEMINFOW lpmii);
 }
 
 /// <summary>

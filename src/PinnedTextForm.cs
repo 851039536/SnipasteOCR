@@ -55,11 +55,12 @@ public sealed class PinnedTextForm : PinnedWindowBase
         using (var brush = new SolidBrush(Color.FromArgb(32, 34, 38)))
             g.DrawString(_text, _font, brush, PaddingX, PaddingY);
 
-        // 提示文字放在右下, 让用户知道能拖动/缩放/关闭
+        // 提示文字放在右下, 让用户知道能拖动/关闭 (文字贴图不支持滚轮缩放)
         using (var hint = new SolidBrush(Color.FromArgb(140, 130, 130, 130)))
         {
-            SizeF size = g.MeasureString("拖动移动 · 滚轮缩放 · 右键关闭", _hintFont);
-            g.DrawString("拖动移动 · 滚轮缩放 · 右键关闭", _hintFont, hint,
+            const string hintText = "拖动移动 · 右键关闭";
+            SizeF size = g.MeasureString(hintText, _hintFont);
+            g.DrawString(hintText, _hintFont, hint,
                 ClientSize.Width - size.Width - 6, ClientSize.Height - size.Height - 2);
         }
     }

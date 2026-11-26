@@ -16,11 +16,6 @@ public sealed class TextEditorOverlay : Control
     [Browsable(false)]
     public Color TextColor { get; set; } = Color.FromArgb(255, 235, 59, 36);
 
-    /// <summary>字号 (物理像素 → 由宿主换算为逻辑像素后设置)</summary>
-    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
-    [Browsable(false)]
-    public float FontSize { get; set; } = AnnotationEngine.DefaultFontSize;
-
     /// <summary>编辑完成 (回车且非空 / 失焦); 参数为最终文本</summary>
     public event Action<string>? Committed;
 
@@ -51,9 +46,7 @@ public sealed class TextEditorOverlay : Control
 
     public TextEditorOverlay(float fontSizeLogical)
     {
-        FontSize = fontSizeLogical;
-
-        // 用固定字号创建字体; 缩放通过 FontSize 在构造时确定
+        // 用固定字号创建字体; 缩放由构造参数决定
         _font = UiFont.Create(fontSizeLogical);
 
         SetStyle(

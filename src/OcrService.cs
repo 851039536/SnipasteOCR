@@ -34,19 +34,9 @@ public sealed class OcrService : IDisposable
     /// 用户请求的档位 (托盘菜单勾选状态以此为准)。
     /// 注意: 这是"请求值"而非"已加载值" —— SetProfile 只登记请求,
     /// 真正切换引擎发生在下一次 Recognize。命名刻意区别于 _loadedProfile, 避免调用方
-    /// 误以为返回值代表当前正在运行的引擎。已加载档位见 <see cref="LoadedProfile"/>。
+    /// 误以为返回值代表当前正在运行的引擎。已加载档位记在 _loadedProfile, 不对外暴露。
     /// </summary>
     public OcrModelProfile RequestedProfile => (OcrModelProfile)Volatile.Read(ref _requestedProfile);
-
-    /// <summary>当前真正已加载的档位 (尚未加载时为 null; 仅诊断/测试用)</summary>
-    public OcrModelProfile? LoadedProfile
-    {
-        get
-        {
-            lock (_gate)
-                return _ocr is null ? null : _loadedProfile;
-        }
-    }
 
     /// <summary>
     /// 切换识别模型档位。仅记录请求并置脏, 不立即加载 (加载耗时数百毫秒,

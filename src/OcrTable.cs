@@ -6,15 +6,15 @@ public readonly record struct ColumnExtent(float Left, float Right);
 /// <summary>
 /// 表格结构中间模型: 由坐标重建出的「行 × 列」网格。
 ///
-/// 这是 CSV / XLSX / Markdown 表格导出的<b>唯一来源</b> —— 三种格式若各自重算一遍分组,
-/// 一旦容差或列带推导漂移, 同一张截图用 CSV 导出是三行、用 Excel 导出却是四行。
+/// 这是 CSV / Markdown 表格导出的<b>唯一来源</b> —— 两种格式若各自重算一遍分组,
+/// 一旦容差或列带推导漂移, 同一张截图用 CSV 导出是三行、用 Markdown 导出却是四行。
 /// 各格式只负责"如何渲染这张网格", 不负责"网格长什么样"。
 ///
 /// 空单元格统一以空字符串表达 (不区分 null 与空串), 渲染层无需再做判空。
 /// </summary>
 public sealed class OcrTable
 {
-    /// <summary>空表 (无可用文本行), 三种导出格式都应据此直接返回空内容</summary>
+    /// <summary>空表 (无可用文本行), 两种导出格式都应据此直接返回空内容</summary>
     public static readonly OcrTable Empty = new(new string?[0, 0], []);
 
     private readonly string?[,] _cells;
@@ -33,8 +33,7 @@ public sealed class OcrTable
     public int ColumnCount => _cells.GetLength(1);
 
     /// <summary>
-    /// 每个列带的横向范围, 顺序即列序。
-    /// XLSX 导出据此估算列宽, 让生成的表格列宽与截图中比例大致对应。
+    /// 每个列带的横向范围, 顺序即列序 (自检断言用; CSV/Markdown 导出不依赖列宽)。
     /// </summary>
     public IReadOnlyList<ColumnExtent> Columns => _columns;
 

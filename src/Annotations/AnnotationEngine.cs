@@ -124,7 +124,6 @@ public static class AnnotationEngine
         var oldInterp = g.InterpolationMode;
         var oldSmoothing = g.SmoothingMode;
         var oldPixelOffset = g.PixelOffsetMode;
-        var oldCompositing = g.CompositingMode;
 
         try
         {
@@ -147,7 +146,6 @@ public static class AnnotationEngine
             g.InterpolationMode = oldInterp;
             g.SmoothingMode = oldSmoothing;
             g.PixelOffsetMode = oldPixelOffset;
-            g.CompositingMode = oldCompositing;
         }
     }
 

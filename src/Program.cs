@@ -5,7 +5,6 @@ namespace SnipasteOcr;
 
 /// <summary>
 /// 应用入口: 托盘 + 全局热键 + 手动消息循环 (NativeAOT 下 MessageLoop.Run 不可用)
-/// 所有关键事件写日志, 便于诊断
 /// </summary>
 internal static class Program
 {
@@ -247,5 +246,4 @@ internal static class Program
         }
     }
 
-   
 }

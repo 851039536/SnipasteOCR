@@ -13,7 +13,6 @@ public static class OcrText
     public readonly record struct Line(string Text, float Left, float Top, float Right, float Bottom)
     {
         public float CenterY => (Top + Bottom) / 2f;
-        public float CenterX => (Left + Right) / 2f;
         public float Height => Bottom - Top;
     }
 
@@ -45,8 +44,8 @@ public static class OcrText
 
     /// <summary>
     /// 按坐标重建为 CSV (制表符分隔的表格文本)。
-    /// 网格本身由 <see cref="OcrTableBuilder.Build"/> 构建 —— 与 XLSX / Markdown 表格同源,
-    /// 三种导出格式不得各自重算分行分列。这里只负责按分隔符渲染, 并去掉行尾多余空列。
+    /// 网格本身由 <see cref="OcrTableBuilder.Build"/> 构建 —— 与 Markdown 表格同源,
+    /// 两种导出格式不得各自重算分行分列。这里只负责按分隔符渲染, 并去掉行尾多余空列。
     /// </summary>
     public static string ToCsv(IReadOnlyList<Line> lines, char delimiter = '\t')
     {
@@ -71,7 +70,7 @@ public static class OcrText
     }
 
     // 列带推导 (原 BuildColumnBands / SpanOf) 已迁至 OcrTableBuilder —— 与纵向分行一起
-    // 构成表格网格的唯一来源, 供 CSV / XLSX / Markdown 三种导出共用。
+    // 构成表格网格的唯一来源, 供 CSV / Markdown 两种导出共用。
 
     /// <summary>CSV 字段转义 (含分隔符/引号/换行时加引号)</summary>
     private static string Escape(string value, char delimiter)

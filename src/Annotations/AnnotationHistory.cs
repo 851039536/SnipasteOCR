@@ -67,13 +67,6 @@ public sealed class AnnotationHistory
         return true;
     }
 
-    /// <summary>清空历史 (重新框选后调用: 旧历史对新选区无意义)</summary>
-    public void Clear()
-    {
-        _undo.Clear();
-        _redo.Clear();
-    }
-
     /// <summary>深拷贝一份列表 (标注本身也要克隆, 否则后续修改会污染历史)</summary>
     private static List<Annotation> Snapshot(IReadOnlyList<Annotation> source)
     {

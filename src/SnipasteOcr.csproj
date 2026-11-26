@@ -48,7 +48,10 @@
     <TrimmerRootAssembly Include="Sdcb.SimdPaddleOCR.Models.ChineseV6Medium" />
     <TrimmerRootAssembly Include="Sdcb.SimdPaddleOCR.Models.ChineseV6Tiny" />
     <TrimmerRootAssembly Include="Sdcb.SimdPaddleOCR.Models.TextLineOrientation" />
-    <!--<TrimmerRootAssembly Include="Sdcb.SimdPaddleOCR.ModelProvider" />-->
+    <!--
+      可选: Sdcb.SimdPaddleOCR.ModelProvider 在 2.0.0 的传递依赖中存在, 当前三个 Models.* 已各自 root。
+      取消注释前必须真跑一次 Medium↔Tiny 切换的 AOT 冒烟, 否则可能白增体积。
+    -->
   </ItemGroup>
 
 </Project>
