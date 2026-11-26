@@ -43,7 +43,7 @@ src/                       产品代码 (唯一的出货工程, 也是唯一的 
   SnipMagnifierControl.cs  放大镜子控件 (显示层; 不参与 RenderResult)
   UiTheme.cs               界面配色唯一来源 (强调蓝/深色底; 改主题只改这里)
   DialogTheme.cs           设置对话框的深色外观 (与主界面同一套 token; 含深色标题栏)
-  WindowChrome.cs          无边框窗口圆角 (Win11 原生 / Win10 Region 兜底; 贴图窗口不用)
+  WindowChrome.cs          无边框窗口圆角 (Win11 原生 / Win10 Region 兜底; 贴图窗口不用, 走显式 DONOTROUND)
   OcrPan.cs                结果窗口高倍缩放的平移夹紧 (纯函数; 图片覆盖视口, 小图居中)
   OcrConfidence.cs         置信度展示规则 (低分阈值/百分比格式; 只提示不过滤)
   TranslateClient.cs       DeepSeek 翻译客户端 (请求/解析/错误映射; JSON 源生成)
@@ -53,9 +53,11 @@ src/                       产品代码 (唯一的出货工程, 也是唯一的 
   TranslateHoverButton.cs  悬停「译」按钮布局 (贴块/让开工具栏与译文面板/粘滞区的唯一来源; 纯函数)
   ProtectedKey.cs          API Key 的 DPAPI 加密/解密 (CryptProtectData)
   ClipboardText.cs         剪贴板文本写入唯一入口 (统一 CRLF)
+  ClipboardImage.cs        剪贴板图片读取 + 异常分类 (Ok/NoImage/Busy/Failed; CLIPBRD_E_CANT_OPEN)
+  AppLog.cs                最小崩溃日志 (last-error.log, 64KB 上限, 仅在未处理异常/启动失败时写)
   NativeMethods.cs         Win32 P/Invoke (消息/热键/窗口/菜单/托盘/输入模拟)
-tests/AnnotationTests/     离线自检, 610 项 (几何/标注拖拽约束/标注选中与手柄/马克笔与序号/命中/历史/渲染/工具栏/尺寸徽标/放大镜取色/贴图布局/多屏定位/缩放平移/置信度展示/设置迁移/编辑框/OCR 后处理/表格中间模型/选词几何/双击选词/CTC 字符框/翻译客户端/译文面板布局/悬停译按钮布局)
-tests/InteractiveTests/    交互自检, 215 项 (真实窗口 + 真实按键 + Ctrl 约束绘制 + 马克笔/序号 + 标注选中/拖动/层级/选区手柄 + 贴图缩放/穿透 + 重复上次识别 + 拖拽实时尺寸 + 多屏定位 + 工具栏 tooltip + 提示文案 + 状态栏省略号 + 托盘菜单文案 + 结果窗口单击复制 + 悬停「译」翻译 + 图片下方译文面板 + 双击选词/三击选行 + 放大镜/取色 + DPI 基准 + CTC 选词 + 拖出收尾 + 缩放平移 + 置信度可视化 + 绘制缓存失效 + IME + 翻译窗口与居中 + Ctrl+回车直接识别 + 延时截图 + 贴图 DPI, 需要桌面会话)
+tests/AnnotationTests/     离线自检, 619 项 (几何/标注拖拽约束/标注选中与手柄/马克笔与序号/命中/历史/渲染/工具栏/尺寸徽标/放大镜取色/贴图布局/多屏定位/缩放平移/置信度展示/设置迁移/编辑框/OCR 后处理/表格中间模型/选词几何/双击选词/CTC 字符框/翻译客户端/译文面板布局/悬停译按钮布局/剪贴板异常分类)
+tests/InteractiveTests/    交互自检, 219 项 (真实窗口 + 真实按键 + Ctrl 约束绘制 + 马克笔/序号 + 标注选中/拖动/层级/选区手柄 + 贴图缩放/穿透 + 重复上次识别 + 拖拽实时尺寸 + 多屏定位 + 工具栏 tooltip + 提示文案 + 状态栏省略号 + 托盘菜单文案 + 结果窗口单击复制 + 悬停「译」翻译 + 图片下方译文面板 + 双击选词/三击选行 + 放大镜/取色 + DPI 基准 + CTC 选词 + 拖出收尾 + 缩放平移 + 置信度可视化 + 绘制缓存失效 + IME + 翻译窗口与居中 + Ctrl+回车直接识别 + 延时截图 + 贴图 DPI + 资源释放, 需要桌面会话)
 tools/DriveTest/           端到端驱动实际 exe (真实鼠标键盘事件 + 抓屏取证 + 校验导出图)
 ```
 
@@ -96,10 +98,10 @@ dotnet publish src/SnipasteOcr.csproj -c Release -r win-x64 --self-contained -p:
 ```
 
 ```powershell
-# 离线自检 (610 项), 无需桌面会话 —— 改完必跑
+# 离线自检 (619 项), 无需桌面会话 —— 改完必跑
 dotnet run --project tests/AnnotationTests              # 期望输出「全部通过」, 退出码 0
 dotnet run --project tests/AnnotationTests -- sample    # 额外输出八种标注样例图
-# 交互自检 (215 项) —— 需要可用的桌面会话
+# 交互自检 (219 项) —— 需要可用的桌面会话
 dotnet run --project tests/InteractiveTests
 # 端到端驱动实际 exe (可选)
 dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
@@ -261,7 +263,9 @@ dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
 - **无边框窗口的圆角只有 `WindowChrome` 一处**: Win11 走 DWM (`DWMWA_WINDOW_CORNER_PREFERENCE`),
   Win10 没有该能力, 退回 `Form.Region` 硬裁剪 (8px, 边缘是 1px 台阶)。Region 必须在
   **尺寸/DPI 变化时重建并释放旧对象**; 只对 `FormBorderStyle.None` 生效 (带边框窗口硬裁会把边框线切掉)。
-  **贴图窗口不要用**: 它展示的是截图原像素, 圆角会把图片四角裁掉。
+  **贴图窗口不要用**: 它展示的是截图原像素, 圆角会把图片四角裁掉。`PinnedWindowBase`
+  必须显式调 `Dwmapi.TrySquareCorners` (`DWMWCP_DONOTROUND`), 不要改成 `TryRoundCorners`
+  或 `WindowChrome.Attach` (Win11 会因此裁掉四角像素与 1px 边框)。
 - **样式弹层的关闭必须成套**: 绘制选中态看 `StylePopupOpen`; Esc 由覆盖层先关它
   (否则一次 Esc 会把整个截图关掉); 点到别处由覆盖层 `OnMouseDown` 关; 工具栏其它动作
   与 `SetTool` 也要关。弹层是 `WS_EX_NOACTIVATE` 的顶层窗口, **`Deactivate` 不会触发**,
@@ -344,7 +348,13 @@ dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
 - **抓屏失败不能让进程崩溃**: 副屏休眠/刚断开、锁屏、远程会话切换时, 对整个虚拟屏
   `CopyFromScreen` 会抛 Win32Exception "句柄无效" (实测发生)。`SnipCoordinator.StartCore`
   必须捕获并弹可操作的提示, 保住托盘进程; `RepeatLastOcr` 已有同样的兜底
-  (失败返回 false 由调用方提示)。新增"加载屏幕画面"的入口要照此处理。
+  (返回 `RepeatOcrStatus.CaptureFailed` 并写日志, 由调用方提示)。
+  新增"加载屏幕画面"的入口要照此处理。
+- **消息泵不得裸 catch**: 手动消息循环的异常必须写 `AppLog`; 单次异常降速继续,
+  连续 5 次失败弹窗说明后退出 (成功完成一轮即清零), 否则进程会半死还占着热键。
+- **窗体资源只有 `Dispose(bool)` 一个释放点**: `OnFormClosed` 只做取消/退订并调用同一个
+  幂等的 `ReleaseResources()`; 构造函数失败必须 `Dispose()` 后原样 `throw`
+  (`Close()` 不触发 `FormClosed` 的路径因此不会漏掉全屏位图)。
 - **覆盖层必须自己抢前台**:`Form.Show()` 只显示、**不激活**。必须在 `OnShown` 里用
   `AttachThreadInput` 挂到当前前台线程再 `SetForegroundWindow`(后台进程直接调用会被前台锁定拒绝),
   否则表现为"能框选、能点工具栏,但打字没反应"。
@@ -528,8 +538,10 @@ dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
 因此"识别剪贴板图片"这类扩展**不需要改 `OcrService`**,只需新增取图路径并复用 `OcrResultForm`
 (见 `SnipCoordinator.StartFromClipboard`) —— 这样结果窗口的选词/复制/导出行为与截图路径天然一致。
 
-- `Clipboard.GetImage()` 可能因剪贴板被其它进程独占而抛异常,必须兜住并返回 false,
-  由调用方给出提示(否则用户点了菜单没反应,不知道原因)。
+- `Clipboard.GetImage()` 可能因剪贴板被其它进程独占而抛异常。统一走
+  `ClipboardImage.TryGet`, 返回 `ClipboardImageStatus` (`Ok/NoImage/Busy/Failed`);
+  **只有 HResult = 0x800401D0 (`CLIPBRD_E_CANT_OPEN`) 才是"被占用"**,
+  其它失败要写日志并给出"查看日志"的提示, 不能一律说被占用。
 
 ---
 
