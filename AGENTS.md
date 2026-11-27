@@ -88,6 +88,14 @@ tools/DriveTest/           端到端驱动实际 exe (真实鼠标键盘事件 +
 
 需要 .NET 10 SDK。所有命令用 PowerShell 执行。
 
+> **SDK 环境 (2026-11-27 实测)**: 仓库根的 `global.json` 钉在 SDK **11.0.100-rc.3** ——
+> 本机已装的 10.0.100-rc.1 安装不完整 (缺 `Microsoft.Extensions.Logging.*` 系列,
+> 钉到它时任何 dotnet 命令都崩 TypeInitializationException)。
+> SDK 11 RC 下 AOT publish 会把文档 xml 列进发布清单 (publish.targets 的 `@(FinalDocFile)`),
+> 而 AOT 构建不在 bin 下产出该 xml → 必现 **MSB3030**; 对策是 csproj 里的
+> `PublishDocumentationFile=false` (CS1574/CS1587 构建期检查不受影响)。
+> 装上 .NET 10 GA SDK 后把 global.json 版本改回 10.0.1xx 即可。
+
 ```powershell
 # 调试运行
 dotnet build src/SnipasteOcr.csproj -c Debug

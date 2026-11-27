@@ -1,0 +1,14 @@
+{
+  // SDK 钉子 —— 本机 SDK 环境实测 (2026-11-27):
+  //  * 10.0.100-rc.1 安装不完整 (缺 Microsoft.Extensions.Logging.* 系列 dll,
+  //    钉到它时任何 dotnet 命令都崩 TypeInitializationException), 不可用;
+  //  * 不写 global.json 时 dotnet 取最高版本 SDK, 机器装新 SDK 后行为可能漂移;
+  //  * SDK 11.0.100-rc.3 下 AOT publish 需要配套在 csproj 里关闭
+  //    PublishDocumentationFile, 否则 MSB3030 (见 SnipasteOcr.csproj 注释);
+  //  * 建议日后安装 .NET 10 GA SDK, 再把 version 改回 10.0.1xx 并验证发布.
+  "sdk": {
+    "version": "11.0.100-rc.3",
+    "rollForward": "latestFeature",
+    "allowPrerelease": true
+  }
+}
