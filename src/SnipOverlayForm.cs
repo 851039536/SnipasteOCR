@@ -64,6 +64,24 @@ public sealed class SnipOverlayForm : Form
     /// <summary>开始调整时的原选区 (拖拽期间始终以它为基准重算, 不累加)</summary>
     private Rectangle _resizeStart;
 
+    /// <summary>正在整体平移选区 (框内拖动)</summary>
+    private bool _movingSelection;
+
+    /// <summary>平移起点的指针位置 (逻辑像素)</summary>
+    private Point _selectionMoveAnchor;
+
+    /// <summary>按下时的原选区; 每帧用"原选区 + 总位移"重算, 与手柄调整同一思路</summary>
+    private Rectangle _selectionMoveStart;
+
+    /// <summary>本次拖动是否已越过点击阈值 (越过前不动, 避免双击确认时把选区带偏)</summary>
+    private bool _selectionMoveApplied;
+
+    /// <summary>
+    /// 按下后的位移小于该值 (逻辑像素) 视为单击。
+    /// 鼠标按下常带 1~3px 抖动; 若一抖就挪, 双击确认会先让选区悄悄偏移几像素。
+    /// </summary>
+    private const int SelectionMoveThreshold = 3;
+
     /// <summary>选区手柄边长 (逻辑像素)</summary>
     private const int SelectionHandleSize = 9;
 
@@ -293,6 +311,7 @@ public sealed class SnipOverlayForm : Form
         // 拖动/调整期间也不显示: 放大镜会盖住正在移动的内容, 且这些操作不需要像素级参照
         bool visible = _editingText is null
             && !_movingSelected
+            && !_movingSelection
             && _resizeHandle == SelectionHandle.None
             && (!_hasSelection || (_dragging && _pending is null));
         if (!visible)
@@ -522,6 +541,7 @@ public sealed class SnipOverlayForm : Form
 
         if (TryStartResize(e.Location)) return;
         if (TrySelectAnnotation(pointerPhysical)) return;
+        if (TryStartSelectionMove(e.Location)) return;
         if (TryBeginAnnotateInSelection(e.Location, pointerPhysical)) return;
 
         // 否则走框选
@@ -600,6 +620,30 @@ public sealed class SnipOverlayForm : Form
             Invalidate();
         }
         return false;
+    }
+
+    /// <summary>
+    /// 选区内部按下 (没选工具、也没点中标注) → 整块平移。
+    ///
+    /// 优先级必须排在"重新框选"之前: 否则选区一旦建立, 在内部按下就会被当成新框选,
+    /// 用户永远挪不动已经框好的区域 (Snipaste 也是框内拖动移动、框外拖动重画)。
+    ///
+    /// 只在图片模式启用: 识别模式松手即识别, 根本没有"选区停留"阶段可调。
+    /// 拖动本身在 <see cref="HandleSelectionMoveMove"/> 里做, 这里只建立会话。
+    /// </summary>
+    private bool TryStartSelectionMove(Point logical)
+    {
+        if (_mode != SnipMode.Image || _toolbar.Tool != AnnotationTool.None)
+            return false;
+        if (!_hasSelection || _selection is not { } selection || !selection.Contains(logical))
+            return false;
+
+        _movingSelection = true;
+        _selectionMoveStart = selection;
+        _selectionMoveAnchor = logical;
+        _selectionMoveApplied = false;
+        _dragging = true;
+        return true;
     }
 
     /// <summary>
@@ -698,6 +742,7 @@ public sealed class SnipOverlayForm : Form
         if (HandleSelectionResizeMove(e)) return;
         if (HandleMoveSelectedMove(e)) return;
         if (HandlePendingShapeMove(e)) return;
+        if (HandleSelectionMoveMove(e)) return;
         HandleSelectionDragMove(e);
     }
 
@@ -782,6 +827,35 @@ public sealed class SnipOverlayForm : Form
         return true;
     }
 
+    /// <summary>
+    /// 拖动平移选区。越过点击阈值前不动; 越过之后用"原选区 + 总位移"重算 ——
+    /// 与手柄调整同理, 若每帧在夹紧结果上累加, 拖到屏幕边再往回拖会先卡住一段。
+    /// </summary>
+    private bool HandleSelectionMoveMove(MouseEventArgs e)
+    {
+        if (!_movingSelection)
+            return false;
+
+        int dx = e.X - _selectionMoveAnchor.X;
+        int dy = e.Y - _selectionMoveAnchor.Y;
+
+        if (!_selectionMoveApplied)
+        {
+            if (Math.Abs(dx) + Math.Abs(dy) < SelectionMoveThreshold)
+                return true;   // 还在点击抖动范围内, 不移动
+            _selectionMoveApplied = true;
+        }
+
+        var moved = SnipGeometry.MoveSelection(_selectionMoveStart, dx, dy, ClientRectangle);
+        if (_selection != moved)
+        {
+            _selection = moved;
+            PositionToolbar();   // 选区移动后工具栏必须跟着走
+            Invalidate();
+        }
+        return true;
+    }
+
     /// <summary>框选矩形更新 (未命中任何手柄/标注时)</summary>
     private void HandleSelectionDragMove(MouseEventArgs e)
     {
@@ -806,8 +880,25 @@ public sealed class SnipOverlayForm : Form
 
         if (FinishResize()) return;
         if (FinishMoveSelected()) return;
+        if (FinishSelectionMove()) return;
         if (CommitPendingShape(e)) return;
         FinishSelection(e);
+    }
+
+    /// <summary>
+    /// 结束平移。即使只是点了一下 (未越过阈值) 也要走完会话:
+    /// 再调一次 OnSelectionChanged 让工具栏重新贴边, 并复位放大镜的显隐条件。
+    /// </summary>
+    private bool FinishSelectionMove()
+    {
+        if (!_movingSelection)
+            return false;
+
+        _movingSelection = false;
+        _selectionMoveApplied = false;
+        OnSelectionChanged();
+        Invalidate();
+        return true;
     }
 
     /// <summary>结束选区调整: 走一次 OnSelectionChanged, 让工具栏重新贴边</summary>
@@ -945,14 +1036,19 @@ public sealed class SnipOverlayForm : Form
     {
         if (_editor is not null)
             return false;   // 交给聚焦的编辑框
+        // 方向键在 WinForms 里默认被当成对话框导航键; 必须在这里先截住, 才能微调选区
+        if (TryNudgeSelection(keyData))
+            return true;
         return base.ProcessCmdKey(ref msg, keyData);
     }
 
-    /// <summary>同上: 对话框按键 (Tab/方向键等) 也让给编辑框</summary>
+    /// <summary>同上: 对话框按键 (Tab/方向键等) 也让给编辑框; 焦点在工具栏时仍能微调选区</summary>
     protected override bool ProcessDialogKey(Keys keyData)
     {
         if (_editor is not null)
             return false;
+        if (TryNudgeSelection(keyData))
+            return true;
         return base.ProcessDialogKey(keyData);
     }
 
@@ -975,6 +1071,16 @@ public sealed class SnipOverlayForm : Form
 
         switch (e.KeyCode)
         {
+            // 方向键微调选区 (1px, Shift 10px)。ProcessCmdKey 已优先处理;
+            // 这里兜底: 某些焦点路径下按键会直接落到 OnKeyDown。
+            case Keys.Left or Keys.Right or Keys.Up or Keys.Down:
+                if (TryNudgeSelection(e.KeyData))
+                {
+                    e.Handled = true;
+                    e.SuppressKeyPress = true;
+                }
+                return;
+
             case Keys.Escape:
                 HandleEscapeKey(e);
                 return;
@@ -1024,14 +1130,18 @@ public sealed class SnipOverlayForm : Form
         HandleToolDigit(e);
     }
 
-    /// <summary>样式弹层打开时, 第一次 Esc 只收起面板; 其它按键也先收起面板再继续</summary>
+    /// <summary>
+    /// 样式弹层打开时, 第一次 Esc 只收起面板; 方向键也只收起 (否则会顺手把选区挪 1px);
+    /// 其它按键先收起面板再继续。
+    /// </summary>
     private bool HandleStylePopupKey(KeyEventArgs e)
     {
         if (!_toolbar.IsStylePopupOpen)
             return false;
 
         _toolbar.CloseStylePopup();
-        if (e.KeyCode != Keys.Escape)
+        if (e.KeyCode != Keys.Escape &&
+            e.KeyCode is not (Keys.Left or Keys.Right or Keys.Up or Keys.Down))
             return false;
 
         e.Handled = true;
@@ -1080,6 +1190,49 @@ public sealed class SnipOverlayForm : Form
         _selected = -1;
         SyncToolbarState();
         Invalidate();
+    }
+
+    /// <summary>
+    /// 方向键微调选区: 1px, 按住 Shift 10px。
+    ///
+    /// 与框内拖动共用 <see cref="SnipGeometry.MoveSelection"/>: 夹紧规则只能有一份,
+    /// 否则贴边时会出现"拖动能停住、方向键却能挪出去"。
+    ///
+    /// 生效条件故意收窄 (图片模式 + 无工具 + 未选中标注 + 未编辑/拖动/开弹层):
+    /// 方向键还是 WinForms 的焦点导航键, 不该在别的状态下被无条件吞掉。
+    /// </summary>
+    private bool TryNudgeSelection(Keys keyData)
+    {
+        Keys key = keyData & Keys.KeyCode;
+        if (key is not (Keys.Left or Keys.Right or Keys.Up or Keys.Down))
+            return false;
+        if ((keyData & (Keys.Control | Keys.Alt)) != 0)
+            return false;
+
+        if (_mode != SnipMode.Image || !_hasSelection || _selection is not { } selection)
+            return false;
+        if (_editor is not null || _dragging || _resizeHandle != SelectionHandle.None)
+            return false;
+        if (_toolbar.Tool != AnnotationTool.None || _selected >= 0 || _toolbar.IsStylePopupOpen)
+            return false;
+
+        int step = (keyData & Keys.Shift) != 0 ? 10 : 1;
+        var (dx, dy) = key switch
+        {
+            Keys.Left => (-step, 0),
+            Keys.Right => (step, 0),
+            Keys.Up => (0, -step),
+            _ => (0, step),
+        };
+
+        var moved = SnipGeometry.MoveSelection(selection, dx, dy, ClientRectangle);
+        if (moved == selection)
+            return true;   // 已贴边: 仍然吞掉按键, 避免光标焦点被方向键带走
+
+        _selection = moved;
+        OnSelectionChanged();
+        Invalidate();
+        return true;
     }
 
     /// <summary>数字键 1..8 切换工具, 0 退回框选; 识别模式不劫持数字键</summary>
@@ -1282,6 +1435,14 @@ public sealed class SnipOverlayForm : Form
         // 选区手柄优先于标注命中: 手柄贴着选区边, 若先判标注就永远拖不到边
         if (ReferenceEquals(target, Cursors.Cross) && _annotations.Count > 0 &&
             AnnotationHit.Topmost(_annotations, ToPhysical(logical)) >= 0)
+        {
+            target = Cursors.SizeAll;
+        }
+
+        // 无工具时选区内部可整体拖动; 用 SizeAll 告诉用户"这里能挪",
+        // 否则他只会想到重新框一次 (框内拖动的入口就白加了)
+        if (ReferenceEquals(target, Cursors.Cross) && _hasSelection
+            && _selection is { } movable && movable.Contains(logical))
         {
             target = Cursors.SizeAll;
         }

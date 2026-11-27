@@ -1,4 +1,4 @@
-// 校验标注选中 / 层级 / 选区手柄的几何。
+// 校验标注选中 / 层级 / 选区手柄与整体平移的几何。
 //
 // 这三块都是纯函数, 可以完全离线断言 —— 这正是把它们从 SnipOverlayForm 里抽出来的原因。
 // 窗体里的状态机 (谁抢鼠标、撤销栈压几次) 归 InteractiveTests, 这里只管"算得对不对"。
@@ -7,8 +7,10 @@
 //   - 最上层命中 (倒序遍历), 否则用户点不到刚画的那个;
 //   - 层级操作只重排、不增删元素;
 //   - 手柄角优先于边, 否则四个角永远拖不到;
-//   - 选区被拖过对边时归一化为正矩形, 且最小边长夹紧时锚定边不动。
+//   - 选区被拖过对边时归一化为正矩形, 且最小边长夹紧时锚定边不动;
+//   - 整体平移夹紧四边, 贴边后反向立刻响应 (拖动与方向键共用同一份几何)。
 using System.Drawing;
+using SnipasteOcr;
 using SnipasteOcr.Annotations;
 
 namespace SnipasteOcr.Tests;
@@ -142,6 +144,35 @@ internal static class SelectionChecks
                 Check(NearCenter(handles[1], 60, 20), "手柄 1 在上边中点");
                 Check(Math.Abs(handles[0].Width - 8f) < 0.01f, "手柄边长等于传入尺寸");
             }
+        }
+
+        // ===== 8. 选区整体平移: 夹紧四边, 尺寸不变 =====
+        {
+            var bounds = new Rectangle(0, 0, 1000, 800);
+            var selection = new Rectangle(100, 120, 300, 200);
+
+            var moved = SnipGeometry.MoveSelection(selection, 40, -20, bounds);
+            Check(moved == new Rectangle(140, 100, 300, 200), $"平移按位移量移动 (实得 {moved})");
+            Check(moved.Size == selection.Size, $"平移不改变选区尺寸 (实得 {moved.Size})");
+
+            var atRight = SnipGeometry.MoveSelection(selection, 9999, 0, bounds);
+            Check(atRight.Right == bounds.Right, $"右移在客户区右边界前停住 (实得右边界 {atRight.Right})");
+
+            // 贴边后反向必须立刻响应: 若以夹紧结果为基准累加, 要先把多拖出去的 9999px 还完
+            var backedOff = SnipGeometry.MoveSelection(atRight, -1, 0, bounds);
+            Check(backedOff.X == atRight.X - 1, $"贴边后反向拖动立刻生效 (实得 X={backedOff.X})");
+
+            var atLeft = SnipGeometry.MoveSelection(selection, -9999, 0, bounds);
+            Check(atLeft.Left == bounds.Left, $"左移在客户区左边界停住 (实得左边界 {atLeft.Left})");
+
+            var atBottom = SnipGeometry.MoveSelection(selection, 0, 9999, bounds);
+            Check(atBottom.Bottom == bounds.Bottom, $"下移在客户区下边界停住 (实得下边界 {atBottom.Bottom})");
+
+            // 客户区比选区还小: 贴左上且不缩尺寸 (多屏切换后的瞬时状态, 不能改用户框好的宽高)
+            var tinyBounds = new Rectangle(10, 10, 50, 40);
+            var oversized = SnipGeometry.MoveSelection(new Rectangle(100, 100, 200, 150), 5, 7, tinyBounds);
+            Check(oversized.Location == tinyBounds.Location && oversized.Size == new Size(200, 150),
+                $"客户区过小时贴左上且保持尺寸 (实得 {oversized})");
         }
 
         return runner.ToResult();

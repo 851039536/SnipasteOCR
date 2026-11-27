@@ -43,6 +43,30 @@ internal static class SnipGeometry
     }
 
     /// <summary>
+    /// 整体平移选区 (逻辑像素), 并夹紧到 <paramref name="bounds"/> 内。
+    ///
+    /// 拖动平移与方向键微调共用这一份: 两边若各写一套夹紧, 贴边时会出现
+    /// "拖动能被截停、方向键却挪出去"的分叉。位移量按"按下时的原选区 + 累计偏移"计算,
+    /// 不在每次夹紧后的结果上继续累加 —— 否则拖到边界再往回拖会先卡住一段, 手感是黏的。
+    ///
+    /// <paramref name="bounds"/> 比选区还小时贴左上角且不缩尺寸: 这种情况只可能来自
+    /// 窗口尺寸突变 (多屏切换), 宁可短暂越界, 也不能把用户框好的宽高改掉。
+    /// </summary>
+    public static Rectangle MoveSelection(Rectangle selection, int dx, int dy, Rectangle bounds)
+    {
+        int minX = bounds.Left;
+        int maxX = Math.Max(minX, bounds.Right - selection.Width);
+        int minY = bounds.Top;
+        int maxY = Math.Max(minY, bounds.Bottom - selection.Height);
+
+        return new Rectangle(
+            Math.Clamp(selection.X + dx, minX, maxX),
+            Math.Clamp(selection.Y + dy, minY, maxY),
+            selection.Width,
+            selection.Height);
+    }
+
+    /// <summary>
     /// 目标矩形所在屏: 取重叠面积最大的一块, 完全不相交时取中心距离最近的一块。
     ///
     /// 覆盖层横跨整个虚拟屏, 工具栏/提示条若按虚拟屏夹紧, 贴着接缝框选时会整条跑到另一块屏上。

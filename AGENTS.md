@@ -56,8 +56,8 @@ src/                       产品代码 (唯一的出货工程, 也是唯一的 
   ClipboardImage.cs        剪贴板图片读取 + 异常分类 (Ok/NoImage/Busy/Failed; CLIPBRD_E_CANT_OPEN)
   AppLog.cs                最小崩溃日志 (last-error.log, 64KB 上限, 仅在未处理异常/启动失败时写)
   NativeMethods.cs         Win32 P/Invoke (消息/热键/窗口/菜单/托盘/输入模拟)
-tests/AnnotationTests/     离线自检, 619 项 (几何/标注拖拽约束/标注选中与手柄/马克笔与序号/命中/历史/渲染/工具栏/尺寸徽标/放大镜取色/贴图布局/多屏定位/缩放平移/置信度展示/设置迁移/编辑框/OCR 后处理/表格中间模型/选词几何/双击选词/CTC 字符框/翻译客户端/译文面板布局/悬停译按钮布局/剪贴板异常分类)
-tests/InteractiveTests/    交互自检, 219 项 (真实窗口 + 真实按键 + Ctrl 约束绘制 + 马克笔/序号 + 标注选中/拖动/层级/选区手柄 + 贴图缩放/穿透 + 重复上次识别 + 拖拽实时尺寸 + 多屏定位 + 工具栏 tooltip + 提示文案 + 状态栏省略号 + 托盘菜单文案 + 结果窗口单击复制 + 悬停「译」翻译 + 图片下方译文面板 + 双击选词/三击选行 + 放大镜/取色 + DPI 基准 + CTC 选词 + 拖出收尾 + 缩放平移 + 置信度可视化 + 绘制缓存失效 + IME + 翻译窗口与居中 + Ctrl+回车直接识别 + 延时截图 + 贴图 DPI + 资源释放, 需要桌面会话)
+tests/AnnotationTests/     离线自检, 626 项 (几何/标注拖拽约束/标注选中与手柄/选区整体平移/马克笔与序号/命中/历史/渲染/工具栏/尺寸徽标/放大镜取色/贴图布局/多屏定位/缩放平移/置信度展示/设置迁移/编辑框/OCR 后处理/表格中间模型/选词几何/双击选词/CTC 字符框/翻译客户端/译文面板布局/悬停译按钮布局/剪贴板异常分类)
+tests/InteractiveTests/    交互自检, 226 项 (真实窗口 + 真实按键 + Ctrl 约束绘制 + 马克笔/序号 + 标注选中/拖动/层级/选区手柄/整体平移 + 贴图缩放/穿透 + 重复上次识别 + 拖拽实时尺寸 + 多屏定位 + 工具栏 tooltip + 提示文案 + 状态栏省略号 + 托盘菜单文案 + 结果窗口单击复制 + 悬停「译」翻译 + 图片下方译文面板 + 双击选词/三击选行 + 放大镜/取色 + DPI 基准 + CTC 选词 + 拖出收尾 + 缩放平移 + 置信度可视化 + 绘制缓存失效 + IME + 翻译窗口与居中 + Ctrl+回车直接识别 + 延时截图 + 贴图 DPI + 资源释放, 需要桌面会话)
 tools/DriveTest/           端到端驱动实际 exe (真实鼠标键盘事件 + 抓屏取证 + 校验导出图)
 ```
 
@@ -108,10 +108,10 @@ dotnet publish src/SnipasteOcr.csproj -c Release -r win-x64 --self-contained -p:
 ```
 
 ```powershell
-# 离线自检 (619 项), 无需桌面会话 —— 改完必跑
+# 离线自检 (626 项), 无需桌面会话 —— 改完必跑
 dotnet run --project tests/AnnotationTests              # 期望输出「全部通过」, 退出码 0
 dotnet run --project tests/AnnotationTests -- sample    # 额外输出八种标注样例图
-# 交互自检 (219 项) —— 需要可用的桌面会话
+# 交互自检 (226 项) —— 需要可用的桌面会话
 dotnet run --project tests/InteractiveTests
 # 端到端驱动实际 exe (可选)
 dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
@@ -185,6 +185,7 @@ dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
 | `OcrTableBuilder.Build` | 表格网格 → CSV **和** Markdown 表格 (两种格式不得各自重算分行分列) |
 | `AnnotationHit.Tolerance` | 点选 **和** 拖动 **和** 悬停光标命中判定 (容差不得各取常数) |
 | `SelectionResize` | 选区 8 手柄的命中 **和** 拖拽几何 (纯逻辑像素; 导出换算仍只走 `SnipGeometry.ExportRect`) |
+| `SnipGeometry.MoveSelection` | 框内拖动整体平移 **和** 方向键微调 **和** 离线断言 (四边夹紧/尺寸不变) |
 | `PinnedImageLayout` | 贴图初始尺寸 **和** 滚轮缩放 **和** DPI 变化 **和** 缩放锚点 (同一套换算) |
 | `OcrText.BuildParagraphs`(私有,内部共用) | `ToPlainText` **和** `ToMarkdown` 的段落构造与行内接续 |
 | `OcrBox`(`Corners`/`TopEdge`/`BottomEdge`/`AxisAligned`/`Contains`) | 画框、命中测试、字符范围高亮、包围盒、轴对齐 |
@@ -302,6 +303,12 @@ dotnet run --project tools/DriveTest -- <SnipasteOcr.exe 完整路径>
   Ctrl+Z 只回退一个像素。已在层级端点时也不压, 避免出现"什么都没变"的空撤销步。
 - **选区手柄只产出 Rectangle**: `SelectionResize` 工作在逻辑像素, 不自行换算物理像素 ——
   导出尺寸始终只由 `SnipGeometry.ExportRect` 决定, 否则尺寸徽标与实裁结果会分叉。
+- **选区整体平移(框内拖动 / 方向键)只有一份几何**: 两条入口都走 `SnipGeometry.MoveSelection`
+  (逻辑像素, 夹紧四边, 尺寸不变)。每帧必须用"按下时原选区 + 总位移"重算, 不能在夹紧结果上累加,
+  否则贴边后反向拖动会先卡一段。`TryStartSelectionMove` 必须排在"重新框选"之前;
+  3px 内视为单击, 否则双击确认会先把选区挪偏。识别模式(F1)不启用 —— 松手即识别, 没有选区停留阶段。
+  方向键在 `ProcessCmdKey` / `ProcessDialogKey` / `OnKeyDown` 三处都接 (焦点路径不同),
+  但成功即返回 true, 不会重复移动; 样式弹层打开时方向键只负责收起。
 - **延时截图必须用 WinForms Timer**: 覆盖层是 WinForms 窗体, 必须在创建托盘/热键的 UI 线程构造;
   `Task.Delay` + 后台线程会跨线程建窗体。延时入口只放托盘菜单, 不改变 F1/F3 的即时性;
   直接按热键会取消尚未到期的延时, 避免稍后突然弹出第二个覆盖层。
