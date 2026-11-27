@@ -15,6 +15,9 @@
          这是 SimdPaddleOCR 在 NativeAOT 下启用 SIMD 内核的硬性要求, 去掉会慢一个数量级。
       4. 绝不使用 -p:PublishSingleFile=true —— 单文件是 AOT 本身产出的,
          模型靠嵌入资源加载, 另加该开关会破坏模型加载。
+      5. SDK 环境守门 —— 前置检查把「SDK 安装不完整导致 CLI 崩溃」翻译成人话,
+         警告 global.json 缺失/漂移, 并守护 csproj 的 PublishDocumentationFile=false
+         (SDK 11 RC 下没有它, AOT publish 必现 MSB3030 无法复制 SnipasteOcr.xml)。
 
     脚本不做任何"聪明"的隐式操作: 只发布、校验产物、按需自检与打包。
 
@@ -109,9 +112,42 @@ if (-not (Test-Path $ProjectPath)) {
 }
 Write-Ok "工程: $ProjectPath"
 
+# dotnet CLI 自身可能因 SDK 安装不完整而崩: 本机 10.0.100-rc.1 缺
+# Microsoft.Extensions.Logging.*, 表现为任何 dotnet 命令抛 TypeInitializationException。
+# 这里把崩溃翻译成人话, 避免误判成"没装 SDK"。
 $sdkVersion = (& dotnet --version 2>&1)
-if ($LASTEXITCODE -ne 0) { throw "dotnet 不可用, 请先安装 .NET 10 SDK。" }
-Write-Ok "dotnet SDK: $sdkVersion"
+$sdkVersionText = "$sdkVersion".Trim()
+if ($LASTEXITCODE -ne 0 -or $sdkVersionText -match 'Exception|Error') {
+    Write-Host $sdkVersionText -ForegroundColor DarkGray
+    throw "dotnet CLI 无法运行 (exit $LASTEXITCODE) —— global.json 指向的 SDK 可能安装不完整。`n" +
+          "  现象对照: TypeInitializationException 缺 Microsoft.Extensions.Logging.* (本机 10.0.100-rc.1 即如此)。`n" +
+          "  处理: 检查 C:\Program Files\dotnet\sdk\<版本>\ 是否缺 dll; 重装该 SDK 或把 global.json 改指可用版本。"
+}
+Write-Ok "dotnet SDK: $sdkVersionText"
+
+# SDK 漂移防护: 不钉版本时 dotnet 取最高已装 SDK, 机器装新 SDK 后发布行为可能静默变化
+# (2026-11-27 的 MSB3030 正是 SDK 11 RC 的发布目标行为变化所致)。
+$globalJson = Join-Path $RepoRoot 'global.json'
+if (Test-Path $globalJson) {
+    $gjText = Get-Content $globalJson -Raw
+    # global.json 允许注释, PS 5.1 的 ConvertFrom-Json 不容忍, 这里用正则取 version。
+    $pinned = if ($gjText -match '"version"\s*:\s*"([^"]+)"') { $Matches[1] } else { $null }
+    if ($pinned -and -not $sdkVersionText.StartsWith($pinned)) {
+        Write-Warn "global.json 钉的是 $pinned, 实际解析到 $sdkVersionText —— 请确认这是预期改动。"
+    }
+} else {
+    Write-Warn "仓库根没有 global.json: dotnet 会取最高版本 SDK, 换机器/装新 SDK 后行为可能漂移。"
+}
+
+# MSB3030 守门: 开了文档生成却不关发布拷贝时, SDK 11 RC 的 AOT publish 必现
+# 「无法复制 SnipasteOcr.xml」。文档 xml 只用于构建期 CS1574/CS1587 检查, 不需进发布产物。
+$csprojText = Get-Content $ProjectPath -Raw
+if ($csprojText -match '<GenerateDocumentationFile>\s*true\s*</GenerateDocumentationFile>' -and
+    $csprojText -notmatch '<PublishDocumentationFile>\s*false\s*</PublishDocumentationFile>') {
+    throw "SnipasteOcr.csproj 开了 GenerateDocumentationFile 但缺 PublishDocumentationFile=false:`n" +
+          "  该组合在 SDK 11 RC 下 AOT publish 必现 MSB3030 (无法复制 SnipasteOcr.xml)。`n" +
+          "  恢复或移除该配置前, 请先在 SDK 11 下真跑一次发布验证 (见 csproj / AGENTS.md 注释)。"
+}
 
 # link.exe 由 MSVC 提供; AOT 最后一步依赖它。缺失时的报错较晦涩, 这里提前提示。
 $linkFound = Get-Command link.exe -ErrorAction SilentlyContinue
@@ -184,6 +220,9 @@ if ($LASTEXITCODE -ne 0) {
   1) 确认没有 SnipasteOcr 进程在跑;
   2) 删除 src\bin\$Configuration 后重试 (去掉 -SkipClean 即可自动完成);
   3) 不要改用 -p:PublishSingleFile=true —— 会破坏模型加载。
+若上面出现 MSB3030「无法复制 …SnipasteOcr.xml」:
+  文档 xml 被列进了发布清单但 AOT 不产出它 —— 已由 csproj 的
+  PublishDocumentationFile=false 修复; 复发即说明该行被移除, 恢复它即可。
 "@
 }
 Write-Ok '发布成功'

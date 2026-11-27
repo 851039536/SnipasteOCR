@@ -95,6 +95,8 @@ tools/DriveTest/           端到端驱动实际 exe (真实鼠标键盘事件 +
 > 而 AOT 构建不在 bin 下产出该 xml → 必现 **MSB3030**; 对策是 csproj 里的
 > `PublishDocumentationFile=false` (CS1574/CS1587 构建期检查不受影响)。
 > 装上 .NET 10 GA SDK 后把 global.json 版本改回 10.0.1xx 即可。
+> `scripts/publish.ps1` 的前置检查已内置守门: dotnet CLI 崩溃的人话提示、
+> global.json 缺失/漂移警告、以及 MSB3030 配置 (缺 `PublishDocumentationFile=false`) 的硬校验。
 
 ```powershell
 # 调试运行

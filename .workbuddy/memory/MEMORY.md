@@ -11,3 +11,5 @@
   而发布清单 (`@(FinalDocFile)`, Microsoft.NET.Publish.targets L656) 仍引用它。
   文档 xml 仅用于构建期 CS1574/CS1587 检查, 无需进发布产物。
 - 待办: 安装 .NET 10 GA SDK 后, 把 global.json 版本改回 10.0.1xx 并复跑发布验证。
+- publish.ps1 前置检查已守门 (2026-11-27): dotnet CLI 崩溃→人话提示;
+  global.json 缺失/漂移→警告; csproj 缺 PublishDocumentationFile=false → 硬拦 (MSB3030 防复发)。
